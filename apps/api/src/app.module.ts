@@ -4,11 +4,23 @@ import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { EmailModule } from './email/email.module';
 import { AuthModule } from './auth/auth.module';
+import { AuthzModule } from './authz/authz.module';
+import { WorkspacesModule } from './workspaces/workspaces.module';
+import { ChannelsModule } from './channels/channels.module';
+import { ConversationsModule } from './conversations/conversations.module';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 
 @Module({
-  imports: [PrismaModule, EmailModule, AuthModule],
+  imports: [
+    PrismaModule,
+    EmailModule,
+    AuthModule,
+    AuthzModule,
+    WorkspacesModule,
+    ChannelsModule,
+    ConversationsModule,
+  ],
   controllers: [HealthController],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
