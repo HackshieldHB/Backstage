@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Portable local toolchain (Node/pnpm/Postgres/Redis for machines without Docker)
+.toolchain/
+
+# Builds
+dist/
+.next/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Uploaded files (local disk storage)
+apps/api/uploads/
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+.DS_Store

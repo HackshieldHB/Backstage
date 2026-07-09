@@ -1,0 +1,20 @@
+{
+  "name": "backstages",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "verify": "pnpm -r build && pnpm -r test",
+    "dev:api": "pnpm --filter @backstages/api dev",
+    "dev:web": "pnpm --filter @backstages/web dev",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
