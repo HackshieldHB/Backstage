@@ -211,6 +211,8 @@ model Message {
   contentJson    Json
   contentText    String
   parentId       String?
+  /// Thread replies flagged "also send to channel" appear in the main channel view too.
+  showInChannel  Boolean     @default(false)
   isEdited       Boolean     @default(false)
   editedAt       DateTime?
   /// Soft delete: tombstone rendered client-side, row retained.

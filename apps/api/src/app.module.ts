@@ -8,6 +8,8 @@ import { AuthzModule } from './authz/authz.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
 import { ChannelsModule } from './channels/channels.module';
 import { ConversationsModule } from './conversations/conversations.module';
+import { RealtimeModule } from './realtime/realtime.module';
+import { MessagesModule } from './messages/messages.module';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 
@@ -20,6 +22,8 @@ import { GlobalExceptionFilter } from './common/http-exception.filter';
     WorkspacesModule,
     ChannelsModule,
     ConversationsModule,
+    RealtimeModule,
+    MessagesModule,
   ],
   controllers: [HealthController],
   providers: [
