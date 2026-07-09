@@ -1,0 +1,387 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  GUEST
+}
+
+enum NotificationPref {
+  ALL
+  MENTIONS
+  MUTED
+}
+
+enum MessageKind {
+  USER
+  SYSTEM
+  INTEGRATION
+}
+
+enum MentionType {
+  USER
+  CHANNEL
+  HERE
+}
+
+enum NotificationType {
+  MENTION
+  THREAD_REPLY
+  REACTION
+  DM
+  CHANNEL_MESSAGE
+  SYSTEM
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  /// Null for provisional members created from an Atlassian directory sync (no password until activation).
+  passwordHash    String?
+  displayName     String
+  avatarUrl       String?
+  isProvisional   Boolean   @default(false)
+  statusEmoji     String?
+  statusText      String?
+  statusExpiresAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  ownedWorkspaces         Workspace[]           @relation("WorkspaceOwner")
+  workspaceMemberships    WorkspaceMember[]
+  invitesCreated          WorkspaceInvite[]     @relation("InviteCreator")
+  invitesUsed             WorkspaceInvite[]     @relation("InviteUser")
+  channelsCreated         Channel[]             @relation("ChannelCreator")
+  channelMemberships      ChannelMember[]
+  conversationMemberships ConversationMember[]
+  messages                Message[]
+  reactions               Reaction[]
+  attachments             Attachment[]
+  pinnedMessages          PinnedMessage[]
+  savedItems              SavedItem[]
+  mentions                Mention[]
+  notifications           Notification[]        @relation("NotificationRecipient")
+  notificationsActed      Notification[]        @relation("NotificationActor")
+  refreshTokens           RefreshToken[]
+  passwordResetTokens     PasswordResetToken[]
+  atlassianLink           AtlassianAccountLink?
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner         User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members       WorkspaceMember[]
+  invites       WorkspaceInvite[]
+  channels      Channel[]
+  conversations Conversation[]
+  messages      Message[]
+}
+
+model WorkspaceMember {
+  id            String        @id @default(cuid())
+  workspaceId   String
+  userId        String
+  role          WorkspaceRole @default(MEMBER)
+  /// Set when the linked Atlassian account is deactivated on the connected site.
+  deactivatedAt DateTime?
+  createdAt     DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model WorkspaceInvite {
+  id          String        @id @default(cuid())
+  workspaceId String
+  /// Targeted email invite when set; shareable link invite when null.
+  email       String?
+  role        WorkspaceRole @default(MEMBER)
+  /// SHA-256 hash of the invite token; the raw token only appears in the email/link.
+  tokenHash   String        @unique
+  createdById String
+  expiresAt   DateTime
+  usedCount   Int           @default(0)
+  usedAt      DateTime?
+  usedById    String?
+  revokedAt   DateTime?
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("InviteCreator", fields: [createdById], references: [id])
+  usedBy    User?     @relation("InviteUser", fields: [usedById], references: [id])
+
+  @@index([workspaceId])
+}
+
+model Channel {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  topic       String?
+  description String?
+  isPrivate   Boolean   @default(false)
+  isArchived  Boolean   @default(false)
+  /// The non-leavable, non-deletable #general channel created with the workspace.
+  isDefault   Boolean   @default(false)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy     User?           @relation("ChannelCreator", fields: [createdById], references: [id])
+  members       ChannelMember[]
+  messages      Message[]
+  notifications Notification[]
+
+  @@unique([workspaceId, name])
+}
+
+model ChannelMember {
+  id                String           @id @default(cuid())
+  channelId         String
+  userId            String
+  notificationPref  NotificationPref @default(ALL)
+  lastReadMessageId String?
+  joinedAt          DateTime         @default(now())
+
+  channel         Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadMessage Message? @relation("ChannelLastRead", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
+
+  @@unique([channelId, userId])
+  @@index([userId])
+}
+
+model Conversation {
+  id          String   @id @default(cuid())
+  workspaceId String
+  isGroup     Boolean  @default(false)
+  /// Canonical sorted member user ids joined with ':' — dedupes DMs per member set.
+  memberKey   String
+  createdAt   DateTime @default(now())
+
+  workspace     Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members       ConversationMember[]
+  messages      Message[]
+  notifications Notification[]
+
+  @@unique([workspaceId, memberKey])
+}
+
+model ConversationMember {
+  id                String   @id @default(cuid())
+  conversationId    String
+  userId            String
+  lastReadMessageId String?
+  joinedAt          DateTime @default(now())
+
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadMessage Message?     @relation("ConversationLastRead", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  workspaceId    String
+  channelId      String?
+  conversationId String?
+  /// Author; null for SYSTEM/INTEGRATION messages (e.g. Jira event cards).
+  userId         String?
+  kind           MessageKind @default(USER)
+  contentJson    Json
+  contentText    String
+  parentId       String?
+  isEdited       Boolean     @default(false)
+  editedAt       DateTime?
+  /// Soft delete: tombstone rendered client-side, row retained.
+  deletedAt      DateTime?
+  /// Client-generated uuid for idempotent sends; unique per author.
+  clientMsgId    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  /// Postgres GENERATED column maintained by the hand-written FTS migration; GIN-indexed.
+  searchVector   Unsupported("tsvector")?
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel      Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  parent       Message?      @relation("Thread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies      Message[]     @relation("Thread")
+
+  reactions                   Reaction[]
+  attachments                 Attachment[]
+  mentions                    Mention[]
+  pins                        PinnedMessage[]
+  savedBy                     SavedItem[]
+  notifications               Notification[]
+  channelLastReadMarkers      ChannelMember[]      @relation("ChannelLastRead")
+  conversationLastReadMarkers ConversationMember[] @relation("ConversationLastRead")
+
+  @@unique([userId, clientMsgId])
+  @@index([channelId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([parentId])
+  @@index([searchVector], type: Gin)
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  /// Emoji shortcode, e.g. "thumbsup".
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([userId])
+}
+
+model Attachment {
+  id         String   @id @default(cuid())
+  /// Null between upload and message send; linked when the message is created.
+  messageId  String?
+  uploaderId String
+  filename   String
+  mimeType   String
+  sizeBytes  Int
+  storageKey String   @unique
+  width      Int?
+  height     Int?
+  createdAt  DateTime @default(now())
+
+  message  Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  uploader User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([uploaderId])
+}
+
+model PinnedMessage {
+  id         String   @id @default(cuid())
+  messageId  String   @unique
+  pinnedById String
+  createdAt  DateTime @default(now())
+
+  message  Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  pinnedBy User    @relation(fields: [pinnedById], references: [id], onDelete: Cascade)
+}
+
+model SavedItem {
+  id        String   @id @default(cuid())
+  userId    String
+  messageId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+}
+
+model Mention {
+  id        String      @id @default(cuid())
+  messageId String
+  /// The resolved mentioned user (for CHANNEL/HERE one row per affected member).
+  userId    String
+  type      MentionType @default(USER)
+  createdAt DateTime    @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, type])
+  @@index([userId])
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  userId         String
+  type           NotificationType
+  actorId        String?
+  messageId      String?
+  channelId      String?
+  conversationId String?
+  /// Type-specific extras (e.g. emoji for REACTION, Jira issue key later).
+  payload        Json?
+  readAt         DateTime?
+  createdAt      DateTime         @default(now())
+
+  user         User          @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor        User?         @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  message      Message?      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  channel      Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  /// SHA-256 hash of the raw token; raw value never stored.
+  tokenHash String    @unique
+  /// Rotation family — reuse of a revoked token revokes the whole family.
+  familyId  String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AtlassianAccountLink {
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  atlassianAccountId String    @unique
+  siteUrl            String
+  /// AES-256-GCM encrypted at rest with TOKEN_ENCRYPTION_KEY.
+  accessTokenEnc     String
+  refreshTokenEnc    String
+  scopes             String
+  tokenExpiresAt     DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
