@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { HealthController } from './health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { EmailModule } from './email/email.module';
@@ -18,6 +18,7 @@ import { UsersModule } from './users/users.module';
 import { AtlassianModule } from './atlassian/atlassian.module';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
+import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
   imports: [
@@ -41,6 +42,8 @@ import { GlobalExceptionFilter } from './common/http-exception.filter';
   providers: [
     { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+    // Runs after the (earlier-registered) JwtAuthGuard, so request.user is set.
+    { provide: APP_GUARD, useClass: RateLimitGuard },
   ],
 })
 export class AppModule {}

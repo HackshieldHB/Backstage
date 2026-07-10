@@ -12,6 +12,10 @@ import {
   ToggleReactionSchema,
 } from '@backstages/shared';
 import { channelContainer, conversationContainer, MessagesService } from './messages.service';
+import { RateLimit } from '../common/rate-limit.guard';
+
+/** Spec: at most 10 messages per 10 seconds per user. */
+const SEND_RATE_LIMIT = { limit: 10, windowSeconds: 10, bucket: 'messages' };
 import { UnreadService } from './unread.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -25,6 +29,7 @@ export class MessagesController {
 
   // ----- channels -----
 
+  @RateLimit(SEND_RATE_LIMIT)
   @Post('channels/:id/messages')
   sendToChannel(
     @CurrentUser() user: AuthUser,
@@ -55,6 +60,7 @@ export class MessagesController {
 
   // ----- conversations -----
 
+  @RateLimit(SEND_RATE_LIMIT)
   @Post('conversations/:id/messages')
   sendToConversation(
     @CurrentUser() user: AuthUser,

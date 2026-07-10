@@ -4,6 +4,8 @@ import * as path from 'path';
 
 // Tests must not register BullMQ repeatable jobs.
 process.env.DISABLE_SYNC_QUEUE = '1';
+// Rate limiting is off for functional suites; the rate-limit spec re-enables it.
+process.env.DISABLE_RATE_LIMIT = '1';
 
 const envPath = path.resolve(__dirname, '..', '.env');
 if (fs.existsSync(envPath)) {

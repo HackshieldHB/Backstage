@@ -15,20 +15,25 @@ import {
 } from '@backstages/shared';
 import { AuthService } from './auth.service';
 import { Public } from '../common/public.decorator';
+import { RateLimit } from '../common/rate-limit.guard';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+
+const AUTH_RATE_LIMIT = { limit: 10, windowSeconds: 60, bucket: 'auth' };
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @RateLimit(AUTH_RATE_LIMIT)
   @Post('signup')
   signup(@Body(new ZodValidationPipe(SignupSchema)) body: SignupInput) {
     return this.authService.signup(body);
   }
 
   @Public()
+  @RateLimit(AUTH_RATE_LIMIT)
   @HttpCode(200)
   @Post('login')
   login(@Body(new ZodValidationPipe(LoginSchema)) body: LoginInput) {
@@ -36,6 +41,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit({ limit: 30, windowSeconds: 60, bucket: 'refresh' })
   @HttpCode(200)
   @Post('refresh')
   refresh(@Body(new ZodValidationPipe(RefreshSchema)) body: RefreshInput) {
@@ -51,6 +57,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit(AUTH_RATE_LIMIT)
   @HttpCode(200)
   @Post('forgot-password')
   async forgotPassword(@Body(new ZodValidationPipe(ForgotPasswordSchema)) body: ForgotPasswordInput) {
@@ -59,6 +66,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit(AUTH_RATE_LIMIT)
   @HttpCode(200)
   @Post('reset-password')
   async resetPassword(@Body(new ZodValidationPipe(ResetPasswordSchema)) body: ResetPasswordInput) {
