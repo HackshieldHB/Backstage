@@ -118,10 +118,11 @@ describe('realtime (two-socket e2e)', () => {
   });
 
   it('accepts valid tokens and connects both clients', async () => {
+    // Wait for the server's 'ready' (rooms joined), not the transport-level 'connect'.
     const connectSocket = (a: Actor) =>
       new Promise<Socket>((resolve, reject) => {
         const s = io(baseUrl, { auth: { token: a.token }, transports: ['websocket'] });
-        s.once('connect', () => resolve(s));
+        s.once(SOCKET_EVENTS.READY, () => resolve(s));
         s.once('connect_error', reject);
       });
     alice.socket = await connectSocket(alice);

@@ -4,4 +4,6 @@ export * from './schemas/workspace';
 export * from './schemas/channel';
 export * from './schemas/conversation';
 export * from './schemas/message';
+export * from './schemas/search';
+export * from './schemas/user-status';
 export * from './socket';

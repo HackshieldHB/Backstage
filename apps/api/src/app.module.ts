@@ -10,6 +10,11 @@ import { ChannelsModule } from './channels/channels.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { MessagesModule } from './messages/messages.module';
+import { RedisModule } from './redis/redis.module';
+import { PresenceModule } from './presence/presence.module';
+import { AttachmentsModule } from './attachments/attachments.module';
+import { SearchModule } from './search/search.module';
+import { UsersModule } from './users/users.module';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 
@@ -24,6 +29,11 @@ import { GlobalExceptionFilter } from './common/http-exception.filter';
     ConversationsModule,
     RealtimeModule,
     MessagesModule,
+    RedisModule,
+    PresenceModule,
+    AttachmentsModule,
+    SearchModule,
+    UsersModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import type { MessageDto, ReactionGroupDto } from '@backstages/shared';
 import { toUserDto } from '../auth/auth.service';
+import { signAttachmentUrl } from '../attachments/attachment-url';
 
 /** Standard include used everywhere a MessageDto is built. */
 export const messageInclude = {
@@ -65,7 +66,7 @@ export function toMessageDto(message: MessageWithRelations): MessageDto {
           filename: a.filename,
           mimeType: a.mimeType,
           sizeBytes: a.sizeBytes,
-          url: `/attachments/${a.id}`,
+          url: signAttachmentUrl(a.id),
           width: a.width,
           height: a.height,
         })),

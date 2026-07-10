@@ -4,6 +4,7 @@ import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
+  OnGatewayDisconnect,
   OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
@@ -18,7 +19,9 @@ import {
   roomForChannel,
   roomForConversation,
   roomForUser,
+  roomForWorkspace,
 } from './realtime.service';
+import { PresenceService } from '../presence/presence.service';
 import type { AccessTokenPayload } from '../auth/jwt-auth.guard';
 
 interface AuthedSocket extends Socket {
@@ -28,7 +31,9 @@ interface AuthedSocket extends Socket {
 @WebSocketGateway({
   cors: { origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000', credentials: true },
 })
-export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnApplicationShutdown {
+export class RealtimeGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnApplicationShutdown
+{
   private readonly logger = new Logger(RealtimeGateway.name);
   private redisClients: Redis[] = [];
 
@@ -36,6 +41,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnAp
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
+    private readonly presence: PresenceService,
   ) {}
 
   afterInit(server: Server) {
@@ -77,13 +83,32 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnAp
     const userId = socket.data.userId;
     await socket.join(roomForUser(userId));
 
-    // Join every container the user can currently read.
-    const [channels, conversations] = await Promise.all([
+    // Join every container the user can currently read, plus workspace rooms
+    // (used for presence and workspace-level broadcasts).
+    const [channels, conversations, workspaces] = await Promise.all([
       this.prisma.channelMember.findMany({ where: { userId }, select: { channelId: true } }),
       this.prisma.conversationMember.findMany({ where: { userId }, select: { conversationId: true } }),
+      this.prisma.workspaceMember.findMany({ where: { userId }, select: { workspaceId: true } }),
     ]);
     await socket.join(channels.map((c) => roomForChannel(c.channelId)));
     await socket.join(conversations.map((c) => roomForConversation(c.conversationId)));
+    await socket.join(workspaces.map((w) => roomForWorkspace(w.workspaceId)));
+
+    await this.presence.connected(userId);
+
+    // Room setup is complete — only now may the client trust broadcasts.
+    socket.emit(SOCKET_EVENTS.READY);
+  }
+
+  async handleDisconnect(socket: AuthedSocket) {
+    if (socket.data.userId) {
+      await this.presence.disconnected(socket.data.userId);
+    }
+  }
+
+  @SubscribeMessage('presence:heartbeat')
+  async onHeartbeat(@ConnectedSocket() socket: AuthedSocket) {
+    await this.presence.heartbeat(socket.data.userId);
   }
 
   @SubscribeMessage(CLIENT_EVENTS.TYPING_START)

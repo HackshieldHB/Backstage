@@ -88,10 +88,10 @@ async function main() {
   // Bob connects a live socket before the message is sent.
   const bobSocket = io(BASE, { auth: { token: bob.accessToken }, transports: ['websocket'] });
   await new Promise<void>((resolve, reject) => {
-    bobSocket.once('connect', () => resolve());
+    bobSocket.once('ready', () => resolve()); // server signals rooms are joined
     bobSocket.once('connect_error', reject);
   });
-  step('bob connected a live socket (JWT handshake accepted)');
+  step('bob connected a live socket (JWT handshake accepted, rooms ready)');
 
   const messagePromise = waitFor<any>(bobSocket, 'message:new', () => true);
   const unreadPromise = waitFor<any>(

@@ -175,6 +175,15 @@ export class ChannelsService {
     return { ok: true };
   }
 
+  async setNotificationPref(userId: string, channelId: string, pref: 'ALL' | 'MENTIONS' | 'MUTED') {
+    const { channelMember } = await this.policy.requireChannelMember(userId, channelId);
+    const updated = await this.prisma.channelMember.update({
+      where: { id: channelMember.id },
+      data: { notificationPref: pref },
+    });
+    return { channelId, notificationPref: updated.notificationPref };
+  }
+
   async listMembers(userId: string, channelId: string) {
     await this.policy.requireChannelMember(userId, channelId);
     const members = await this.prisma.channelMember.findMany({

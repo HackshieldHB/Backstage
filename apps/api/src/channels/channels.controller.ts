@@ -6,6 +6,8 @@ import {
   CreateChannelSchema,
   UpdateChannelInput,
   UpdateChannelSchema,
+  UpdateNotificationPrefInput,
+  UpdateNotificationPrefSchema,
 } from '@backstages/shared';
 import { ChannelsService } from './channels.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
@@ -75,6 +77,15 @@ export class ChannelsController {
   @Post('channels/:id/leave')
   leave(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.channels.leave(user.id, id);
+  }
+
+  @Patch('channels/:id/notifications')
+  setNotificationPref(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateNotificationPrefSchema)) body: UpdateNotificationPrefInput,
+  ) {
+    return this.channels.setNotificationPref(user.id, id, body.pref);
   }
 
   @Get('channels/:id/members')

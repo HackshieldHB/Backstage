@@ -3,6 +3,9 @@ import type { MessageDto, ReactionGroupDto } from './schemas/message';
 
 /** Every realtime event name — the single source of truth for both apps. */
 export const SOCKET_EVENTS = {
+  /** Emitted once per connection after the server has joined all rooms — clients
+   * must wait for this (not 'connect') before relying on broadcasts. */
+  READY: 'ready',
   MESSAGE_NEW: 'message:new',
   MESSAGE_UPDATED: 'message:updated',
   MESSAGE_DELETED: 'message:deleted',

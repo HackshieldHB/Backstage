@@ -5,6 +5,7 @@ import type { SocketEventName } from '@backstages/shared';
 export const roomForUser = (userId: string) => `user:${userId}`;
 export const roomForChannel = (channelId: string) => `channel:${channelId}`;
 export const roomForConversation = (conversationId: string) => `conversation:${conversationId}`;
+export const roomForWorkspace = (workspaceId: string) => `workspace:${workspaceId}`;
 
 /**
  * The only way feature services emit socket events. The Server reference is
@@ -38,6 +39,10 @@ export class RealtimeService {
 
   emitToConversation(conversationId: string, event: SocketEventName, payload: unknown) {
     this.io().to(roomForConversation(conversationId)).emit(event, payload);
+  }
+
+  emitToWorkspace(workspaceId: string, event: SocketEventName, payload: unknown) {
+    this.io().to(roomForWorkspace(workspaceId)).emit(event, payload);
   }
 
   emitToContainer(
