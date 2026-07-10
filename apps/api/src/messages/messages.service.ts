@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   EditMessageInput,
@@ -21,6 +23,7 @@ import { UnreadService } from './unread.service';
 import { messageInclude, toMessageDto, groupReactions } from './message-serializer';
 import { extractMentions } from './mentions';
 import { toUserDto } from '../auth/auth.service';
+import { UNFURL_SERVICE, type UnfurlProvider } from './integration-messages.service';
 
 export type Container =
   | { channelId: string; conversationId: null }
@@ -49,6 +52,7 @@ export class MessagesService {
     private readonly policy: PolicyService,
     private readonly realtime: RealtimeService,
     private readonly unread: UnreadService,
+    @Optional() @Inject(UNFURL_SERVICE) private readonly unfurler?: UnfurlProvider,
   ) {}
 
   // ---------- access helpers ----------
@@ -259,6 +263,11 @@ export class MessagesService {
       }
     }
 
+    // Fire-and-forget link unfurling (Jira/Confluence status cards).
+    if (this.unfurler) {
+      void this.applyUnfurls(message.id, workspaceId, input.contentText, containerIds);
+    }
+
     // Push fresh unread counts to every other member (and reset for the author).
     const pushTargets = memberIds;
     await Promise.all(
@@ -270,6 +279,28 @@ export class MessagesService {
     );
 
     return dto;
+  }
+
+  private async applyUnfurls(
+    messageId: string,
+    workspaceId: string,
+    contentText: string,
+    containerIds: { channelId: string | null; conversationId: string | null },
+  ) {
+    try {
+      const unfurls = await this.unfurler!.unfurl(workspaceId, contentText);
+      if (!unfurls || unfurls.length === 0) return;
+      const updated = await this.prisma.message.update({
+        where: { id: messageId },
+        data: { unfurls: unfurls as Prisma.InputJsonValue },
+        include: messageInclude,
+      });
+      this.realtime.emitToContainer(containerIds, SOCKET_EVENTS.MESSAGE_UPDATED, {
+        message: toMessageDto(updated),
+      });
+    } catch {
+      // Unfurling is best-effort; never fail or delay the send path.
+    }
   }
 
   // ---------- read ----------

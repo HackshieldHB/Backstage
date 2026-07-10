@@ -24,9 +24,12 @@ export class UnreadService {
     const visibleAfter = {
       channelId,
       deletedAt: null,
-      OR: [{ parentId: null }, { showInChannel: true }],
+      AND: [
+        { OR: [{ parentId: null }, { showInChannel: true }] },
+        // "Not authored by me" must still match integration messages (author null).
+        { OR: [{ userId: null }, { NOT: { userId } }] },
+      ],
       ...(after ? { createdAt: { gt: after } } : {}),
-      NOT: { userId },
     };
     const [unread, mentions] = await Promise.all([
       this.prisma.message.count({ where: visibleAfter }),
@@ -55,8 +58,8 @@ export class UnreadService {
         conversationId,
         deletedAt: null,
         parentId: null,
+        OR: [{ userId: null }, { NOT: { userId } }],
         ...(after ? { createdAt: { gt: after } } : {}),
-        NOT: { userId },
       },
     });
     return { channelId: null, conversationId, unread, mentions: unread };

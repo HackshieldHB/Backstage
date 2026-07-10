@@ -283,6 +283,20 @@ export function Composer({
     if (!text && ready.length === 0) return;
     if (uploads.some((u) => !u.attachment && !u.error)) return; // uploads still in flight
 
+    // Slash command: /jira PROJ-123 posts an issue status card instead of a message.
+    const jiraMatch = /^\/jira\s+([A-Za-z][A-Za-z0-9]+-\d+)\s*$/.exec(text);
+    if (jiraMatch && container.kind === 'channel') {
+      editor.commands.clearContent();
+      try {
+        await api('POST', `/channels/${container.id}/jira/command`, {
+          issueKey: jiraMatch[1].toUpperCase(),
+        });
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : 'Jira command failed');
+      }
+      return;
+    }
+
     const input: SendMessageInput = {
       clientMsgId: crypto.randomUUID(),
       contentJson: editor.getJSON(),

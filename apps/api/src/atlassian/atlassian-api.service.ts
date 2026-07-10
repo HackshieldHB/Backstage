@@ -1,0 +1,248 @@
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
+
+export interface AtlassianTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresInSeconds: number;
+  scopes: string;
+}
+
+export interface AtlassianSite {
+  id: string; // cloudId
+  url: string;
+  name: string;
+}
+
+export interface AtlassianProfile {
+  accountId: string;
+  email: string | null;
+  emailVerified: boolean;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+export interface AtlassianDirectoryUser {
+  accountId: string;
+  accountType: 'atlassian' | 'app' | 'customer';
+  active: boolean;
+  displayName: string;
+  email: string | null;
+  avatarUrl: string | null;
+}
+
+export interface JiraIssueSummary {
+  key: string;
+  summary: string;
+  status: string;
+  issueType: string | null;
+  priority: string | null;
+  assigneeAccountId: string | null;
+}
+
+/**
+ * Thin HTTP client for the Atlassian cloud APIs. Kept behind one injectable so
+ * integration tests can substitute a mock without touching business logic.
+ */
+@Injectable()
+export class AtlassianApiService {
+  private readonly logger = new Logger(AtlassianApiService.name);
+
+  private get clientId() {
+    return process.env.ATLASSIAN_CLIENT_ID ?? '';
+  }
+  private get clientSecret() {
+    return process.env.ATLASSIAN_CLIENT_SECRET ?? '';
+  }
+  private get redirectUri() {
+    return process.env.ATLASSIAN_REDIRECT_URI ?? 'http://localhost:3001/atlassian/callback';
+  }
+
+  authorizeUrl(state: string, scopes: string[]): string {
+    const params = new URLSearchParams({
+      audience: 'api.atlassian.com',
+      client_id: this.clientId,
+      scope: scopes.join(' '),
+      redirect_uri: this.redirectUri,
+      state,
+      response_type: 'code',
+      prompt: 'consent',
+    });
+    return `https://auth.atlassian.com/authorize?${params.toString()}`;
+  }
+
+  private async post<T>(url: string, body: unknown): Promise<T> {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      this.logger.warn(`Atlassian POST ${url} -> ${res.status}`);
+      throw new BadGatewayException('Atlassian API request failed');
+    }
+    return res.json() as Promise<T>;
+  }
+
+  private async get<T>(url: string, accessToken: string): Promise<T | null> {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      this.logger.warn(`Atlassian GET ${url} -> ${res.status}`);
+      throw new BadGatewayException('Atlassian API request failed');
+    }
+    return res.json() as Promise<T>;
+  }
+
+  async exchangeCode(code: string): Promise<AtlassianTokens> {
+    const json = await this.post<{
+      access_token: string;
+      refresh_token: string;
+      expires_in: number;
+      scope: string;
+    }>('https://auth.atlassian.com/oauth/token', {
+      grant_type: 'authorization_code',
+      client_id: this.clientId,
+      client_secret: this.clientSecret,
+      code,
+      redirect_uri: this.redirectUri,
+    });
+    return {
+      accessToken: json.access_token,
+      refreshToken: json.refresh_token,
+      expiresInSeconds: json.expires_in,
+      scopes: json.scope,
+    };
+  }
+
+  async refreshTokens(refreshToken: string): Promise<AtlassianTokens> {
+    const json = await this.post<{
+      access_token: string;
+      refresh_token: string;
+      expires_in: number;
+      scope: string;
+    }>('https://auth.atlassian.com/oauth/token', {
+      grant_type: 'refresh_token',
+      client_id: this.clientId,
+      client_secret: this.clientSecret,
+      refresh_token: refreshToken,
+    });
+    return {
+      accessToken: json.access_token,
+      refreshToken: json.refresh_token,
+      expiresInSeconds: json.expires_in,
+      scopes: json.scope,
+    };
+  }
+
+  async accessibleResources(accessToken: string): Promise<AtlassianSite[]> {
+    const sites =
+      (await this.get<Array<{ id: string; url: string; name: string }>>(
+        'https://api.atlassian.com/oauth/token/accessible-resources',
+        accessToken,
+      )) ?? [];
+    return sites.map((s) => ({ id: s.id, url: s.url, name: s.name }));
+  }
+
+  async me(accessToken: string): Promise<AtlassianProfile> {
+    const json = await this.get<{
+      account_id: string;
+      email?: string;
+      email_verified?: boolean;
+      name: string;
+      picture?: string;
+    }>('https://api.atlassian.com/me', accessToken);
+    if (!json) throw new BadGatewayException('Atlassian profile unavailable');
+    return {
+      accountId: json.account_id,
+      email: json.email ?? null,
+      emailVerified: json.email_verified ?? false,
+      displayName: json.name,
+      avatarUrl: json.picture ?? null,
+    };
+  }
+
+  /** Pages through the site's whole user directory. */
+  async listUsers(accessToken: string, cloudId: string): Promise<AtlassianDirectoryUser[]> {
+    const users: AtlassianDirectoryUser[] = [];
+    const pageSize = 50;
+    for (let startAt = 0; ; startAt += pageSize) {
+      const page = await this.get<
+        Array<{
+          accountId: string;
+          accountType: string;
+          active: boolean;
+          displayName: string;
+          emailAddress?: string;
+          avatarUrls?: Record<string, string>;
+        }>
+      >(
+        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/users/search?startAt=${startAt}&maxResults=${pageSize}`,
+        accessToken,
+      );
+      if (!page || page.length === 0) break;
+      for (const u of page) {
+        users.push({
+          accountId: u.accountId,
+          accountType: (u.accountType as AtlassianDirectoryUser['accountType']) ?? 'atlassian',
+          active: u.active,
+          displayName: u.displayName,
+          email: u.emailAddress ?? null,
+          avatarUrl: u.avatarUrls?.['48x48'] ?? null,
+        });
+      }
+      if (page.length < pageSize) break;
+    }
+    return users;
+  }
+
+  async getIssue(accessToken: string, cloudId: string, issueKey: string): Promise<JiraIssueSummary | null> {
+    const json = await this.get<{
+      key: string;
+      fields: {
+        summary: string;
+        status?: { name: string };
+        issuetype?: { name: string };
+        priority?: { name: string };
+        assignee?: { accountId: string };
+      };
+    }>(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=summary,status,issuetype,priority,assignee`,
+      accessToken,
+    );
+    if (!json) return null;
+    return {
+      key: json.key,
+      summary: json.fields.summary,
+      status: json.fields.status?.name ?? 'Unknown',
+      issueType: json.fields.issuetype?.name ?? null,
+      priority: json.fields.priority?.name ?? null,
+      assigneeAccountId: json.fields.assignee?.accountId ?? null,
+    };
+  }
+
+  async createIssue(
+    accessToken: string,
+    cloudId: string,
+    input: { projectKey: string; summary: string; description: string },
+  ): Promise<{ key: string }> {
+    const res = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          project: { key: input.projectKey },
+          summary: input.summary,
+          issuetype: { name: 'Task' },
+          description: {
+            type: 'doc',
+            version: 1,
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: input.description }] }],
+          },
+        },
+      }),
+    });
+    if (!res.ok) throw new BadGatewayException('Failed to create Jira issue');
+    const json = (await res.json()) as { key: string };
+    return { key: json.key };
+  }
+}

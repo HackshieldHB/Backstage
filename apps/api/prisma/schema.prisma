@@ -73,6 +73,7 @@ model User {
   refreshTokens           RefreshToken[]
   passwordResetTokens     PasswordResetToken[]
   atlassianLink           AtlassianAccountLink?
+  atlassianConnections    AtlassianConnection[] @relation("AtlassianConnector")
 }
 
 model Workspace {
@@ -83,12 +84,13 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  owner         User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
-  members       WorkspaceMember[]
-  invites       WorkspaceInvite[]
-  channels      Channel[]
-  conversations Conversation[]
-  messages      Message[]
+  owner               User                 @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members             WorkspaceMember[]
+  invites             WorkspaceInvite[]
+  channels            Channel[]
+  conversations       Conversation[]
+  messages            Message[]
+  atlassianConnection AtlassianConnection?
 }
 
 model WorkspaceMember {
@@ -144,11 +146,13 @@ model Channel {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy     User?           @relation("ChannelCreator", fields: [createdById], references: [id])
-  members       ChannelMember[]
-  messages      Message[]
-  notifications Notification[]
+  workspace         Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy         User?                     @relation("ChannelCreator", fields: [createdById], references: [id])
+  members           ChannelMember[]
+  messages          Message[]
+  notifications     Notification[]
+  jiraSubscriptions ChannelJiraSubscription[]
+  jiraIssueCards    JiraIssueCard[]
 
   @@unique([workspaceId, name])
 }
@@ -174,7 +178,10 @@ model Conversation {
   workspaceId String
   isGroup     Boolean  @default(false)
   /// Canonical sorted member user ids joined with ':' — dedupes DMs per member set.
+  /// Integration inboxes use a synthetic key (e.g. "jira:<userId>").
   memberKey   String
+  /// Display title for integration conversations (e.g. "Jira"); null for normal DMs.
+  title       String?
   createdAt   DateTime @default(now())
 
   workspace     Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -219,6 +226,8 @@ model Message {
   deletedAt      DateTime?
   /// Client-generated uuid for idempotent sends; unique per author.
   clientMsgId    String?
+  /// Rendered link previews (e.g. Jira issue status cards for pasted URLs).
+  unfurls        Json?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   /// Postgres GENERATED column maintained by the hand-written FTS migration; GIN-indexed.
@@ -239,6 +248,7 @@ model Message {
   notifications               Notification[]
   channelLastReadMarkers      ChannelMember[]      @relation("ChannelLastRead")
   conversationLastReadMarkers ConversationMember[] @relation("ConversationLastRead")
+  jiraIssueCard               JiraIssueCard?
 
   @@unique([userId, clientMsgId])
   @@index([channelId, createdAt])
@@ -378,12 +388,70 @@ model AtlassianAccountLink {
   atlassianAccountId String    @unique
   siteUrl            String
   /// AES-256-GCM encrypted at rest with TOKEN_ENCRYPTION_KEY.
-  accessTokenEnc     String
-  refreshTokenEnc    String
-  scopes             String
+  /// Null for links created by directory sync (no OAuth grant from this user yet).
+  accessTokenEnc     String?
+  refreshTokenEnc    String?
+  scopes             String?
   tokenExpiresAt     DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Workspace-level connection to an Atlassian site (created by OWNER/ADMIN via 3LO).
+model AtlassianConnection {
+  id              String    @id @default(cuid())
+  workspaceId     String    @unique
+  /// Atlassian cloudId from accessible-resources.
+  siteId          String
+  siteUrl         String
+  siteName        String
+  connectedById   String
+  accessTokenEnc  String
+  refreshTokenEnc String
+  scopes          String
+  tokenExpiresAt  DateTime?
+  /// Shared secret the Jira webhook must present.
+  webhookSecret   String
+  lastSyncAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace     Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectedBy   User                      @relation("AtlassianConnector", fields: [connectedById], references: [id])
+  subscriptions ChannelJiraSubscription[]
+  issueCards    JiraIssueCard[]
+}
+
+/// Per-channel Jira project subscription with event filters.
+model ChannelJiraSubscription {
+  id           String   @id @default(cuid())
+  channelId    String
+  connectionId String
+  projectKey   String
+  /// Subset of: comment_created, status_changed, issue_created, issue_assigned.
+  events       String[]
+  createdAt    DateTime @default(now())
+
+  channel    Channel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  connection AtlassianConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, projectKey])
+}
+
+/// First card posted for an issue in a channel — follow-up events thread under it.
+model JiraIssueCard {
+  id           String   @id @default(cuid())
+  connectionId String
+  channelId    String
+  issueKey     String
+  messageId    String   @unique
+  createdAt    DateTime @default(now())
+
+  connection AtlassianConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  channel    Channel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message    Message             @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, issueKey])
 }

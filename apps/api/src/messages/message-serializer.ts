@@ -73,5 +73,6 @@ export function toMessageDto(message: MessageWithRelations): MessageDto {
     replyCount: message._count.replies,
     threadParticipants: [...participantsById.values()].slice(0, 5),
     lastReplyAt: message.replies[0]?.createdAt.toISOString() ?? null,
+    unfurls: isDeleted ? null : (message.unfurls ?? null),
   };
 }

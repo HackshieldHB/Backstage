@@ -72,12 +72,14 @@ export class ConversationsService {
     id: string;
     workspaceId: string;
     isGroup: boolean;
+    title?: string | null;
     members: Array<{ user: Parameters<typeof toUserDto>[0] }>;
   }) {
     return {
       id: conversation.id,
       workspaceId: conversation.workspaceId,
       isGroup: conversation.isGroup,
+      title: conversation.title ?? null,
       members: conversation.members.map((m) => toUserDto(m.user)),
     };
   }

@@ -97,8 +97,21 @@ export const MessageDtoSchema = z.object({
   replyCount: z.number(),
   threadParticipants: z.array(UserDtoSchema),
   lastReplyAt: z.string().nullable(),
+  /** Link previews, e.g. Jira issue status cards. */
+  unfurls: z.unknown().nullable(),
 });
 export type MessageDto = z.infer<typeof MessageDtoSchema>;
+
+/** Shape of a single unfurl entry produced by the Atlassian integration. */
+export interface JiraUnfurl {
+  type: 'jira' | 'confluence';
+  url: string;
+  key?: string;
+  title: string;
+  status?: string;
+  issueType?: string | null;
+  priority?: string | null;
+}
 
 export interface MessagePage {
   messages: MessageDto[];

@@ -34,6 +34,7 @@ import {
 } from '@/hooks/queries';
 import { Avatar } from './avatar';
 import { Dialog } from './dialog';
+import { AtlassianDialog } from './atlassian-dialog';
 
 export function Sidebar({
   workspaceId,
@@ -57,7 +58,9 @@ export function Sidebar({
   const workspaces = useWorkspaces();
   const workspace = workspaces.data?.find((w) => w.id === workspaceId);
 
-  const [dialog, setDialog] = useState<'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status'>('none');
+  const [dialog, setDialog] = useState<
+    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'atlassian'
+  >('none');
 
   const unreadFor = (id: string) =>
     unreads.data?.find((u) => (u.channelId ?? u.conversationId) === id) ?? { unread: 0, mentions: 0 };
@@ -68,7 +71,12 @@ export function Sidebar({
     <aside className="flex h-full w-64 shrink-0 flex-col bg-sidebar text-gray-200">
       {/* Workspace header */}
       <div className="flex items-center justify-between px-4 py-3">
-        <button className="flex items-center gap-1 text-[15px] font-bold text-white">
+        <button
+          className="flex items-center gap-1 text-[15px] font-bold text-white"
+          onClick={() => setDialog('atlassian')}
+          title="Workspace settings (Atlassian)"
+          data-testid="workspace-menu"
+        >
           {workspace?.name ?? 'Workspace'} <ChevronDown size={14} className="opacity-70" />
         </button>
         {(workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN') && (
@@ -166,7 +174,8 @@ export function Sidebar({
         <ul>
           {conversations.map((dm) => {
             const others = dm.members.filter((m) => m.id !== me?.id);
-            const label = others.length > 0 ? others.map((o) => o.displayName).join(', ') : 'You';
+            const label =
+              dm.title ?? (others.length > 0 ? others.map((o) => o.displayName).join(', ') : 'You');
             const u = unreadFor(dm.id);
             const active = container?.kind === 'conversation' && container.id === dm.id;
             const first = others[0] ?? me;
@@ -243,6 +252,13 @@ export function Sidebar({
         <DmPickerDialog workspaceId={workspaceId} onClose={() => setDialog('none')} onOpen={(id) => { setDialog('none'); onNavigate({ kind: 'conversation', id }); }} />
       )}
       {dialog === 'status' && <StatusDialog onClose={() => setDialog('none')} />}
+      {dialog === 'atlassian' && (
+        <AtlassianDialog
+          workspaceId={workspaceId}
+          isAdmin={workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN'}
+          onClose={() => setDialog('none')}
+        />
+      )}
     </aside>
   );
 }

@@ -12,6 +12,8 @@ export const ConversationDtoSchema = z.object({
   id: z.string(),
   workspaceId: z.string(),
   isGroup: z.boolean(),
+  /** Set for integration inboxes (e.g. "Jira"); null for normal DMs. */
+  title: z.string().nullable(),
   members: z.array(UserDtoSchema),
 });
 export type ConversationDto = z.infer<typeof ConversationDtoSchema>;

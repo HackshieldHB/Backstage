@@ -9,6 +9,7 @@ import {
   Pencil,
   Pin,
   SmilePlus,
+  SquareKanban,
   Trash2,
 } from 'lucide-react';
 import type { MessageDto } from '@backstages/shared';
@@ -22,6 +23,7 @@ import { MessageBody } from './message-body';
 import { AttachmentView } from './attachment-view';
 import { EmojiPickerPopover } from './emoji-picker';
 import { EditMessageEditor } from './composer';
+import { useAtlassianStatus } from './atlassian-dialog';
 
 const QUICK_EMOJI = ['thumbsup', 'heart', 'joy', 'eyes', 'tada'];
 
@@ -82,6 +84,22 @@ export function MessageItem({
   const save = async () => {
     await api('POST', `/messages/${message.id}/save`);
     await qc.invalidateQueries({ queryKey: keys.saved(message.workspaceId) });
+  };
+
+  const atlassian = useAtlassianStatus(message.workspaceId);
+  const createJiraIssue = async () => {
+    const projectKey = window.prompt('Jira project key (e.g. PROJ):')?.trim().toUpperCase();
+    if (!projectKey) return;
+    try {
+      const res = await api<{ key: string; url: string }>(
+        'POST',
+        `/messages/${message.id}/create-jira-issue`,
+        { projectKey },
+      );
+      window.open(res.url, '_blank', 'noopener');
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Failed to create issue');
+    }
   };
 
   if (message.isDeleted) {
@@ -148,6 +166,7 @@ export function MessageItem({
         )}
 
         <AttachmentView attachments={message.attachments} />
+        <UnfurlCards unfurls={message.unfurls} />
 
         {/* Reactions */}
         {message.reactions.length > 0 && (
@@ -224,6 +243,15 @@ export function MessageItem({
           <ToolbarButton title="Save for later" onClick={() => void save()} testId="save-message">
             <Bookmark size={15} />
           </ToolbarButton>
+          {message.channelId && atlassian.data?.connected && (
+            <ToolbarButton
+              title="Create Jira issue from message"
+              onClick={() => void createJiraIssue()}
+              testId="create-jira-issue"
+            >
+              <SquareKanban size={15} className="text-[#2684FF]" />
+            </ToolbarButton>
+          )}
           {mine && (
             <>
               <ToolbarButton title="Edit message" onClick={() => setEditing(true)} testId="edit-message">
@@ -240,6 +268,50 @@ export function MessageItem({
       {emojiOpen && (
         <EmojiPickerPopover onPick={(code) => void toggleReaction(code)} onClose={() => setEmojiOpen(false)} />
       )}
+    </div>
+  );
+}
+
+function UnfurlCards({ unfurls }: { unfurls: unknown }) {
+  if (!Array.isArray(unfurls) || unfurls.length === 0) return null;
+  const cards = unfurls as Array<{
+    type: string;
+    url: string;
+    key?: string;
+    title: string;
+    status?: string;
+    issueType?: string | null;
+    priority?: string | null;
+  }>;
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {cards.map((card) => (
+        <a
+          key={card.url}
+          href={card.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          data-testid="unfurl-card"
+          className="flex max-w-md items-center gap-2.5 rounded-lg border-l-4 border border-gray-200 border-l-[#2684FF] bg-gray-50 px-3 py-2 hover:bg-gray-100 dark:border-gray-700 dark:border-l-[#2684FF] dark:bg-gray-800 dark:hover:bg-gray-700"
+        >
+          <span className="min-w-0">
+            <span className="block truncate text-[13px] font-semibold">
+              {card.key ? `${card.key} · ` : ''}
+              {card.title}
+            </span>
+            <span className="block text-[11px] text-gray-500">
+              {card.type === 'jira'
+                ? [card.status, card.issueType, card.priority].filter(Boolean).join(' · ')
+                : 'Confluence'}
+            </span>
+          </span>
+          {card.status && (
+            <span className="ml-auto shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+              {card.status}
+            </span>
+          )}
+        </a>
+      ))}
     </div>
   );
 }

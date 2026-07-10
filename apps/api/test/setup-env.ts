@@ -2,6 +2,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Tests must not register BullMQ repeatable jobs.
+process.env.DISABLE_SYNC_QUEUE = '1';
+
 const envPath = path.resolve(__dirname, '..', '.env');
 if (fs.existsSync(envPath)) {
   for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {

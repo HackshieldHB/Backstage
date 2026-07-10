@@ -4,10 +4,11 @@ import { MessagesService } from './messages.service';
 import { UnreadService } from './unread.service';
 import { SavedItemsController } from './saved-items.controller';
 import { SavedItemsService } from './saved-items.service';
+import { IntegrationMessagesService } from './integration-messages.service';
 
 @Module({
   controllers: [MessagesController, SavedItemsController],
-  providers: [MessagesService, UnreadService, SavedItemsService],
-  exports: [MessagesService, UnreadService],
+  providers: [MessagesService, UnreadService, SavedItemsService, IntegrationMessagesService],
+  exports: [MessagesService, UnreadService, IntegrationMessagesService],
 })
 export class MessagesModule {}
