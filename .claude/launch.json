@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "D:\\Projects\\Backstages\\.toolchain\\api-start.cmd",
+      "runtimeArgs": [],
+      "port": 3001,
+      "autoPort": false
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "D:\\Projects\\Backstages\\.toolchain\\web-dev.cmd",
+      "runtimeArgs": [],
+      "port": 3000,
+      "autoPort": false
+    }
+  ]
+}
