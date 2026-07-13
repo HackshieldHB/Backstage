@@ -815,5 +815,22 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
         .expect(200);
       expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: plainAcc });
     });
+
+    it('lists assignable members and assigns the issue to another member', async () => {
+      const list = await http()
+        .get(`/messages/${cardId}/jira/assignable?issueKey=PROJ-500`)
+        .set(auth(owner))
+        .expect(200);
+      const accountIds = list.body.data.map((u: { accountId: string }) => u.accountId);
+      // linkedUser was linked by the directory sync -> assignable.
+      expect(accountIds).toContain(ACC.linked);
+
+      await http()
+        .post(`/messages/${cardId}/jira/action`)
+        .set(auth(owner))
+        .send({ issueKey: 'PROJ-500', action: 'assign', assigneeAccountId: ACC.linked })
+        .expect(200);
+      expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: ACC.linked });
+    });
   });
 });

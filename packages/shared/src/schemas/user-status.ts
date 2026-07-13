@@ -8,6 +8,11 @@ export const UpdateStatusSchema = z.object({
 });
 export type UpdateStatusInput = z.infer<typeof UpdateStatusSchema>;
 
+export const UpdateProfileSchema = z.object({
+  displayName: z.string().min(1).max(80),
+});
+export type UpdateProfileInput = z.infer<typeof UpdateProfileSchema>;
+
 export const UpdatePresenceSchema = z.object({
   /** ACTIVE clears any manual override. */
   state: z.enum(['ACTIVE', 'AWAY', 'DND']),

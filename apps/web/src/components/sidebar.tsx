@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ChangeEvent } from 'react';
 import clsx from 'clsx';
 import {
   Bell,
@@ -212,7 +212,7 @@ export function Sidebar({
 
       {/* Footer: current user */}
       <div className="flex items-center gap-2 border-t border-white/10 px-3 py-2.5">
-        <button onClick={() => setDialog('status')} title="Set status" className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 hover:bg-sidebar-hover">
+        <button onClick={() => setDialog('status')} title="Edit profile & status" className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 hover:bg-sidebar-hover">
           <Avatar user={me} size="sm" presence={me ? (presence.data?.[me.id] ?? 'ACTIVE') : undefined} />
           <span className="min-w-0 flex-1 text-left">
             <span className="block truncate text-[13px] font-medium text-white">{me?.displayName}</span>
@@ -251,7 +251,7 @@ export function Sidebar({
       {dialog === 'dm' && (
         <DmPickerDialog workspaceId={workspaceId} onClose={() => setDialog('none')} onOpen={(id) => { setDialog('none'); onNavigate({ kind: 'conversation', id }); }} />
       )}
-      {dialog === 'status' && <StatusDialog onClose={() => setDialog('none')} />}
+      {dialog === 'status' && <ProfileDialog onClose={() => setDialog('none')} />}
       {dialog === 'atlassian' && (
         <AtlassianDialog
           workspaceId={workspaceId}
@@ -582,31 +582,103 @@ function DmPickerDialog({
   );
 }
 
-function StatusDialog({ onClose }: { onClose: () => void }) {
+function ProfileDialog({ onClose }: { onClose: () => void }) {
   const me = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const [name, setName] = useState(me?.displayName ?? '');
   const [emoji, setEmoji] = useState(me?.statusEmoji ?? '');
   const [text, setText] = useState(me?.statusText ?? '');
   const [presenceState, setPresenceState] = useState<'ACTIVE' | 'AWAY' | 'DND'>('ACTIVE');
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onPickPhoto = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const user = await api<typeof me>('POST', '/me/avatar', undefined, { formData: fd });
+      if (user) setUser(user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      if (name.trim() && name.trim() !== me?.displayName) {
+        await api('PATCH', '/me/profile', { displayName: name.trim() });
+      }
+      const user = await api<typeof me>('PATCH', '/me/status', {
+        statusEmoji: emoji || null,
+        statusText: text || null,
+      });
+      await api('PATCH', '/me/presence', { state: presenceState });
+      if (user) setUser(user);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+      setSaving(false);
+    }
+  };
+
+  const inputCls =
+    'w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800';
 
   return (
-    <Dialog title="Set your status" onClose={onClose}>
+    <Dialog title="Edit profile" onClose={onClose}>
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+
+      <div className="mb-4 flex items-center gap-3">
+        <Avatar user={me} size="lg" />
+        <label className="cursor-pointer rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800">
+          {uploading ? 'Uploading…' : 'Change photo'}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => void onPickPhoto(e)}
+            disabled={uploading}
+            data-testid="avatar-input"
+          />
+        </label>
+      </div>
+
+      <label className="mb-1 block text-xs font-medium text-gray-500">Display name</label>
+      <input
+        className={clsx(inputCls, 'mb-3')}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Your name"
+        data-testid="profile-name"
+      />
+
+      <label className="mb-1 block text-xs font-medium text-gray-500">Status</label>
       <div className="mb-3 flex gap-2">
         <input
-          className="w-20 rounded-md border border-gray-300 px-2 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+          className={clsx(inputCls, 'w-20')}
           placeholder=":emoji:"
           value={emoji}
           onChange={(e) => setEmoji(e.target.value.replace(/:/g, ''))}
         />
         <input
-          className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+          className={clsx(inputCls, 'flex-1')}
           placeholder="What's your status?"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          autoFocus
         />
       </div>
-      <div className="mb-3 flex gap-2 text-sm">
+
+      <div className="mb-4 flex gap-3 text-sm">
         {(['ACTIVE', 'AWAY', 'DND'] as const).map((s) => (
           <label key={s} className="flex items-center gap-1">
             <input type="radio" checked={presenceState === s} onChange={() => setPresenceState(s)} />
@@ -614,19 +686,14 @@ function StatusDialog({ onClose }: { onClose: () => void }) {
           </label>
         ))}
       </div>
+
       <button
-        onClick={async () => {
-          const user = await api<typeof me>('PATCH', '/me/status', {
-            statusEmoji: emoji || null,
-            statusText: text || null,
-          });
-          await api('PATCH', '/me/presence', { state: presenceState });
-          if (user) setUser(user);
-          onClose();
-        }}
-        className="w-full rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-hover"
+        onClick={() => void save()}
+        disabled={saving}
+        className="w-full rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+        data-testid="profile-save"
       >
-        Save status
+        {saving ? 'Saving…' : 'Save'}
       </button>
     </Dialog>
   );

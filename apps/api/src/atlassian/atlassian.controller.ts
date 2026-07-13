@@ -183,6 +183,15 @@ export class AtlassianController {
     return this.jiraActions.listTransitions(user.id, messageId, (issueKey ?? '').toUpperCase());
   }
 
+  @Get('messages/:id/jira/assignable')
+  assignable(
+    @CurrentUser() user: AuthUser,
+    @Param('id') messageId: string,
+    @Query('issueKey') issueKey: string,
+  ) {
+    return this.jiraActions.listAssignable(user.id, messageId, (issueKey ?? '').toUpperCase());
+  }
+
   @HttpCode(200)
   @Post('messages/:id/jira/action')
   action(

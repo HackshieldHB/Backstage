@@ -2,6 +2,7 @@
 
 import clsx from 'clsx';
 import type { UserDto } from '@backstages/shared';
+import { fileUrl } from '@/lib/api';
 
 const PALETTE = ['bg-rose-500', 'bg-orange-500', 'bg-amber-500', 'bg-emerald-500', 'bg-cyan-500', 'bg-blue-500', 'bg-violet-500', 'bg-fuchsia-500'];
 
@@ -35,7 +36,7 @@ export function Avatar({
       {user?.avatarUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={user.avatarUrl}
+          src={fileUrl(user.avatarUrl)}
           alt={user.displayName}
           className={clsx('rounded-md object-cover', sizes[size])}
         />

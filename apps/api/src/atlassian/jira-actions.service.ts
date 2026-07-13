@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import type { AtlassianConnection, Message } from '@prisma/client';
-import type { JiraActionInput, JiraTransition, JiraUnfurl } from '@backstages/shared';
+import type { JiraActionInput, JiraAssignableUser, JiraTransition, JiraUnfurl } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { AtlassianApiService } from './atlassian-api.service';
@@ -186,6 +186,28 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
     return this.api.getTransitions(token, connection.siteId, issueKey);
   }
 
+  /** Workspace members that map to a Jira account — candidates for "Assign". */
+  async listAssignable(
+    userId: string,
+    messageId: string,
+    issueKey: string,
+  ): Promise<JiraAssignableUser[]> {
+    const { channel } = await this.loadActionable(userId, messageId, issueKey);
+    const members = await this.prisma.workspaceMember.findMany({
+      where: { workspaceId: channel.workspaceId, deactivatedAt: null },
+      include: { user: { include: { atlassianLink: true } } },
+      orderBy: { user: { displayName: 'asc' } },
+    });
+    return members
+      .filter((m) => m.user.atlassianLink?.atlassianAccountId)
+      .map((m) => ({
+        userId: m.user.id,
+        displayName: m.user.displayName,
+        avatarUrl: m.user.avatarUrl,
+        accountId: m.user.atlassianLink!.atlassianAccountId,
+      }));
+  }
+
   async performAction(userId: string, messageId: string, input: JiraActionInput) {
     const { message, channel, connection } = await this.loadActionable(
       userId,
@@ -207,6 +229,16 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
         }
         await this.api.assignIssue(token, connection.siteId, issueKey, link.atlassianAccountId);
         summary = `assigned ${issueKey} to themselves`;
+        break;
+      }
+      case 'assign': {
+        if (!input.assigneeAccountId) throw new BadRequestException('assigneeAccountId is required');
+        await this.api.assignIssue(token, connection.siteId, issueKey, input.assigneeAccountId);
+        const target = await this.prisma.atlassianAccountLink.findUnique({
+          where: { atlassianAccountId: input.assigneeAccountId },
+          include: { user: true },
+        });
+        summary = `assigned ${issueKey} to ${target?.user.displayName ?? 'a teammate'}`;
         break;
       }
       case 'transition': {

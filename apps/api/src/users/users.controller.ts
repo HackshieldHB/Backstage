@@ -1,7 +1,21 @@
-import { Body, Controller, Get, HttpCode, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   MarkNotificationsReadInput,
   MarkNotificationsReadSchema,
+  MAX_UPLOAD_BYTES,
+  UpdateProfileInput,
+  UpdateProfileSchema,
   UpdateStatusInput,
   UpdateStatusSchema,
 } from '@backstages/shared';
@@ -19,6 +33,20 @@ export class UsersController {
     @Body(new ZodValidationPipe(UpdateStatusSchema)) body: UpdateStatusInput,
   ) {
     return this.users.updateStatus(user.id, body);
+  }
+
+  @Patch('profile')
+  updateProfile(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(UpdateProfileSchema)) body: UpdateProfileInput,
+  ) {
+    return this.users.updateProfile(user.id, body);
+  }
+
+  @Post('avatar')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }))
+  setAvatar(@CurrentUser() user: AuthUser, @UploadedFile() file: Express.Multer.File) {
+    return this.users.setAvatar(user.id, file);
   }
 
   @Get('notifications')
