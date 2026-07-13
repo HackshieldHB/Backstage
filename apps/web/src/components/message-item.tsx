@@ -12,7 +12,12 @@ import {
   SquareKanban,
   Trash2,
 } from 'lucide-react';
-import type { JiraActionInput, JiraTransition, MessageDto } from '@backstages/shared';
+import type {
+  JiraActionInput,
+  JiraAssignableUser,
+  JiraTransition,
+  MessageDto,
+} from '@backstages/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
@@ -127,6 +132,8 @@ export function MessageItem({
         <span className="w-9 shrink-0 pt-0.5 text-right text-[10px] leading-5 text-gray-400 opacity-0 group-hover:opacity-100">
           {time}
         </span>
+      ) : message.kind === 'INTEGRATION' ? (
+        <JiraAvatar className="mt-0.5" />
       ) : (
         <Avatar user={message.user} size="md" className="mt-0.5" />
       )}
@@ -135,7 +142,9 @@ export function MessageItem({
         {!grouped && (
           <div className="flex items-baseline gap-2">
             <span className="text-[14px] font-bold">
-              {message.user?.displayName ?? (message.pending ? me?.displayName : 'Unknown user')}
+              {message.kind === 'INTEGRATION'
+                ? 'Jira'
+                : (message.user?.displayName ?? (message.pending ? me?.displayName : 'Unknown user'))}
             </span>
             <span className="text-[11px] text-gray-400">{time}</span>
             {message.kind === 'INTEGRATION' && (
@@ -272,6 +281,25 @@ export function MessageItem({
   );
 }
 
+/** App identity for INTEGRATION messages — Jira mark instead of a user avatar. */
+function JiraAvatar({ className }: { className?: string }) {
+  return (
+    <span
+      className={clsx(
+        'flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white ring-1 ring-gray-200 dark:ring-gray-700',
+        className,
+      )}
+    >
+      <svg viewBox="0 0 24 24" className="h-5 w-5" role="img" aria-label="Jira">
+        <path
+          fill="#2684FF"
+          d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.215V6.758a1.001 1.001 0 0 0-1-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0z"
+        />
+      </svg>
+    </span>
+  );
+}
+
 function UnfurlCards({ message }: { message: MessageDto }) {
   const atlassian = useAtlassianStatus(message.workspaceId);
   const unfurls = message.unfurls;
@@ -350,12 +378,14 @@ function JiraActionChip({
 function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey: string }) {
   const [busy, setBusy] = useState(false);
   const [transitions, setTransitions] = useState<JiraTransition[] | null>(null);
+  const [assignees, setAssignees] = useState<JiraAssignableUser[] | null>(null);
 
   const act = async (body: JiraActionInput) => {
     setBusy(true);
     try {
       await api('POST', `/messages/${messageId}/jira/action`, body);
       setTransitions(null);
+      setAssignees(null);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : 'Action failed');
     } finally {
@@ -364,6 +394,7 @@ function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey:
   };
 
   const openMove = async () => {
+    setAssignees(null);
     setBusy(true);
     try {
       const list = await api<JiraTransition[]>(
@@ -378,6 +409,22 @@ function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey:
     }
   };
 
+  const openAssign = async () => {
+    setTransitions(null);
+    setBusy(true);
+    try {
+      const list = await api<JiraAssignableUser[]>(
+        'GET',
+        `/messages/${messageId}/jira/assignable?issueKey=${encodeURIComponent(issueKey)}`,
+      );
+      setAssignees(list);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not load members');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const comment = () => {
     const text = window.prompt(`Comment on ${issueKey}:`)?.trim();
     if (text) void act({ issueKey, action: 'comment', text });
@@ -387,6 +434,9 @@ function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey:
     <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-200 px-3 py-1.5 dark:border-gray-700">
       <JiraActionChip disabled={busy} onClick={() => void act({ issueKey, action: 'assign_me' })}>
         Assign to me
+      </JiraActionChip>
+      <JiraActionChip disabled={busy} onClick={() => void openAssign()}>
+        Assign…
       </JiraActionChip>
       <JiraActionChip disabled={busy} onClick={() => void openMove()}>
         Move
@@ -406,6 +456,23 @@ function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey:
                 onClick={() => void act({ issueKey, action: 'transition', transitionId: t.id })}
               >
                 {t.name}
+              </JiraActionChip>
+            ))
+          )}
+        </div>
+      )}
+      {assignees && (
+        <div className="flex basis-full flex-wrap items-center gap-1.5 pt-1">
+          {assignees.length === 0 ? (
+            <span className="text-[11px] text-gray-500">No linked members to assign</span>
+          ) : (
+            assignees.map((u) => (
+              <JiraActionChip
+                key={u.accountId}
+                disabled={busy}
+                onClick={() => void act({ issueKey, action: 'assign', assigneeAccountId: u.accountId })}
+              >
+                {u.displayName}
               </JiraActionChip>
             ))
           )}

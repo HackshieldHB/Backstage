@@ -117,13 +117,23 @@ export interface JiraUnfurl {
 /** Interactive action fired from a Jira card. */
 export const JiraActionSchema = z.object({
   issueKey: z.string().min(3).max(30),
-  action: z.enum(['assign_me', 'transition', 'comment']),
+  action: z.enum(['assign_me', 'assign', 'transition', 'comment']),
   /** Required when action === 'transition'. */
   transitionId: z.string().min(1).max(30).optional(),
+  /** Required when action === 'assign'. */
+  assigneeAccountId: z.string().min(1).max(128).optional(),
   /** Required when action === 'comment'. */
   text: z.string().min(1).max(4000).optional(),
 });
 export type JiraActionInput = z.infer<typeof JiraActionSchema>;
+
+/** A workspace member who can be assigned a Jira issue (has a linked account). */
+export interface JiraAssignableUser {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  accountId: string;
+}
 
 /** One selectable Jira workflow transition for the "Move" picker. */
 export interface JiraTransition {

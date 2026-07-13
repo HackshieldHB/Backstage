@@ -458,4 +458,45 @@ describe('files, search, presence, activity (e2e)', () => {
       expect(after.body.data).toHaveLength(0);
     });
   });
+
+  describe('profile (name + avatar)', () => {
+    it('updates the display name', async () => {
+      const res = await http()
+        .patch('/me/profile')
+        .set(auth(bob))
+        .send({ displayName: 'Bob Renamed' })
+        .expect(200);
+      expect(res.body.data.displayName).toBe('Bob Renamed');
+      const me = await http().get('/auth/me').set(auth(bob)).expect(200);
+      expect(me.body.data.displayName).toBe('Bob Renamed');
+    });
+
+    it('rejects an empty display name', async () => {
+      await http().patch('/me/profile').set(auth(bob)).send({ displayName: '' }).expect(400);
+    });
+
+    it('uploads an avatar and sets a durable url', async () => {
+      const res = await http()
+        .post('/me/avatar')
+        .set(auth(alice))
+        .attach('file', PNG, { filename: 'me.png', contentType: 'image/png' })
+        .expect(201);
+      expect(res.body.data.avatarUrl).toContain('/attachments/');
+      expect(res.body.data.avatarUrl).toContain('sig=');
+      // The signed avatar url is publicly fetchable (used by plain <img> tags).
+      const path = res.body.data.avatarUrl as string;
+      await http().get(path).expect(200);
+    });
+
+    it('rejects a non-image avatar', async () => {
+      await http()
+        .post('/me/avatar')
+        .set(auth(alice))
+        .attach('file', Buffer.from('not an image'), {
+          filename: 'x.txt',
+          contentType: 'text/plain',
+        })
+        .expect(400);
+    });
+  });
 });
