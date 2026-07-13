@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { timingSafeEqual } from 'crypto';
-import { SOCKET_EVENTS } from '@backstages/shared';
+import { SOCKET_EVENTS, type JiraUnfurl } from '@backstages/shared';
 import type { AtlassianConnection } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -133,6 +133,17 @@ export class JiraEventsService {
     const projectKey = body.issue?.fields?.project?.key ?? issueKey?.split('-')[0];
     const text = this.describe(event, body);
     const issueUrl = issueKey ? `${connection.siteUrl}/browse/${issueKey}` : undefined;
+    const unfurl: JiraUnfurl | undefined =
+      issueKey && issueUrl
+        ? {
+            type: 'jira',
+            url: issueUrl,
+            key: issueKey,
+            title: body.issue?.fields?.summary ?? issueKey,
+            status: body.issue?.fields?.status?.name,
+            assigneeAccountId: body.issue?.fields?.assignee?.accountId ?? null,
+          }
+        : undefined;
 
     // 1) Personal DM for assignment events.
     let dmUserId: string | null = null;
@@ -159,7 +170,7 @@ export class JiraEventsService {
         where: { connectionId: connection.id, projectKey, events: { has: event } },
       });
       for (const sub of subscriptions) {
-        await this.postChannelCard(connection, sub.channelId, issueKey, text, issueUrl, dmUserId);
+        await this.postChannelCard(connection, sub.channelId, issueKey, text, issueUrl, dmUserId, unfurl);
         cards++;
       }
     }
@@ -229,6 +240,7 @@ export class JiraEventsService {
     text: string,
     issueUrl: string | undefined,
     dmUserId: string | null,
+    unfurl?: JiraUnfurl,
   ) {
     const existing = await this.prisma.jiraIssueCard.findUnique({
       where: { channelId_issueKey: { channelId, issueKey } },
@@ -239,6 +251,7 @@ export class JiraEventsService {
         workspaceId: connection.workspaceId,
         contentText: text,
         contentJson: doc(text, issueUrl),
+        unfurls: unfurl ? [unfurl] : undefined,
         suppressUnreadFor: dmUserId ? [dmUserId] : [],
       });
       await this.prisma.jiraIssueCard.create({
@@ -252,6 +265,12 @@ export class JiraEventsService {
         parentId: existing.messageId,
         suppressUnreadFor: dmUserId ? [dmUserId] : [],
       });
+      // Keep the top card's status badge/buttons current as the issue evolves.
+      if (unfurl) {
+        await this.integrationMessages
+          .updateUnfurls(existing.messageId, [unfurl])
+          .catch(() => undefined);
+      }
     }
   }
 }

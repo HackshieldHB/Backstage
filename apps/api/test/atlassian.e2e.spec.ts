@@ -18,6 +18,14 @@ class MockAtlassianApi {
   issues = new Map<string, JiraIssueSummary>();
   profile: AtlassianProfile | null = null;
   createdIssues: Array<{ projectKey: string; summary: string }> = [];
+  assigned: Array<{ issueKey: string; accountId: string }> = [];
+  transitioned: Array<{ issueKey: string; transitionId: string }> = [];
+  comments: Array<{ issueKey: string; text: string }> = [];
+  private readonly transitionNames: Record<string, string> = {
+    '11': 'To Do',
+    '21': 'In Progress',
+    '31': 'Done',
+  };
 
   authorizeUrl(state: string, scopes: string[]): string {
     return `https://auth.atlassian.test/authorize?state=${encodeURIComponent(state)}&scope=${encodeURIComponent(scopes.join(' '))}`;
@@ -49,6 +57,22 @@ class MockAtlassianApi {
   async createIssue(_t: string, _c: string, input: { projectKey: string; summary: string }) {
     this.createdIssues.push(input);
     return { key: `${input.projectKey}-999` };
+  }
+  async getTransitions() {
+    return Object.entries(this.transitionNames).map(([id, name]) => ({ id, name }));
+  }
+  async transitionIssue(_t: string, _c: string, issueKey: string, transitionId: string) {
+    this.transitioned.push({ issueKey, transitionId });
+    const issue = this.issues.get(issueKey);
+    if (issue) issue.status = this.transitionNames[transitionId] ?? issue.status;
+  }
+  async assignIssue(_t: string, _c: string, issueKey: string, accountId: string) {
+    this.assigned.push({ issueKey, accountId });
+    const issue = this.issues.get(issueKey);
+    if (issue) issue.assigneeAccountId = accountId;
+  }
+  async addComment(_t: string, _c: string, issueKey: string, text: string) {
+    this.comments.push({ issueKey, text });
   }
 }
 
@@ -455,6 +479,8 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
       );
       expect(card).toBeTruthy();
       expect(card.kind).toBe('INTEGRATION');
+      // Webhook feed cards carry an actionable Jira unfurl (drives the buttons).
+      expect(card.unfurls[0].key).toBe('PROJ-1');
 
       // Dedup: the DM'd assignee gets no channel badge from the card...
       const linkedUnreads = await http()
@@ -655,6 +681,139 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
       expect(list[0].key).toBe('PROJ-77');
       expect(list[0].title).toBe('Unfurl me please');
       expect(list[0].status).toBe('To Do');
+    });
+  });
+
+  describe('jira interactive actions', () => {
+    let cardId: string;
+
+    beforeAll(async () => {
+      mock.issues.set('PROJ-500', {
+        key: 'PROJ-500',
+        summary: 'Actionable issue',
+        status: 'To Do',
+        issueType: 'Task',
+        priority: 'Medium',
+        assigneeAccountId: null,
+      });
+      // Owner posts a Jira card that others can act on.
+      const res = await http()
+        .post(`/channels/${channelId}/jira/command`)
+        .set(auth(owner))
+        .send({ issueKey: 'PROJ-500' })
+        .expect(200);
+      cardId = res.body.data.id;
+    });
+
+    it('transition moves the issue, updates the card in place, and threads a reply', async () => {
+      const res = await http()
+        .post(`/messages/${cardId}/jira/action`)
+        .set(auth(owner))
+        .send({ issueKey: 'PROJ-500', action: 'transition', transitionId: '31' })
+        .expect(200);
+      expect(res.body.data.status).toBe('Done');
+      expect(mock.transitioned.at(-1)).toEqual({ issueKey: 'PROJ-500', transitionId: '31' });
+
+      // Card unfurl reflects the new status.
+      const msgs = await http().get(`/channels/${channelId}/messages`).set(auth(owner)).expect(200);
+      const card = msgs.body.data.messages.find((m: { id: string }) => m.id === cardId);
+      expect(card.unfurls[0].status).toBe('Done');
+
+      // Confirmation lands as a thread reply under the card.
+      const thread = await http().get(`/messages/${cardId}/thread`).set(auth(owner)).expect(200);
+      expect(thread.body.data.replies.at(-1).contentText).toContain('moved PROJ-500');
+      expect(thread.body.data.replies.at(-1).contentText).toContain('Done');
+    });
+
+    it('lists transitions for the move picker', async () => {
+      const res = await http()
+        .get(`/messages/${cardId}/jira/transitions?issueKey=PROJ-500`)
+        .set(auth(owner))
+        .expect(200);
+      expect(res.body.data.map((t: { name: string }) => t.name)).toContain('In Progress');
+    });
+
+    it('assign-to-me assigns the caller\'s linked Atlassian account', async () => {
+      await http()
+        .post(`/messages/${cardId}/jira/action`)
+        .set(auth(linkedUser))
+        .send({ issueKey: 'PROJ-500', action: 'assign_me' })
+        .expect(200);
+      expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: ACC.linked });
+    });
+
+    it('assign-to-me is rejected for a user with no linked Atlassian account', async () => {
+      // owner was never matched to a directory account -> no link.
+      await http()
+        .post(`/messages/${cardId}/jira/action`)
+        .set(auth(owner))
+        .send({ issueKey: 'PROJ-500', action: 'assign_me' })
+        .expect(400);
+    });
+
+    it('rejects an action for an issue not attached to the message', async () => {
+      await http()
+        .post(`/messages/${cardId}/jira/action`)
+        .set(auth(linkedUser))
+        .send({ issueKey: 'PROJ-999', action: 'assign_me' })
+        .expect(400);
+    });
+
+    it('comment posts to Jira prefixed with the actor name', async () => {
+      await http()
+        .post(`/messages/${cardId}/jira/action`)
+        .set(auth(owner))
+        .send({ issueKey: 'PROJ-500', action: 'comment', text: 'looking into this' })
+        .expect(200);
+      expect(mock.comments.at(-1)!.issueKey).toBe('PROJ-500');
+      expect(mock.comments.at(-1)!.text).toContain('looking into this');
+    });
+
+    it('a member can connect their own Jira account for correct attribution', async () => {
+      const plainAcc = `acc-plain-${run}`;
+
+      // Before connecting, the member has no personal write grant.
+      const before = await http()
+        .get(`/workspaces/${workspaceId}/atlassian/status`)
+        .set(auth(plainMember))
+        .expect(200);
+      expect(before.body.data.me.canAct).toBe(false);
+
+      // Start the personal connect — scopes must include write access.
+      const urlRes = await http()
+        .get(`/workspaces/${workspaceId}/atlassian/user-connect-url`)
+        .set(auth(plainMember))
+        .expect(200);
+      const url = new URL(urlRes.body.data.url);
+      expect(url.searchParams.get('scope')).toContain('write:jira-work');
+      const state = url.searchParams.get('state')!;
+
+      // Complete the OAuth callback as this member.
+      mock.profile = {
+        accountId: plainAcc,
+        email: plainMember.email,
+        emailVerified: true,
+        displayName: 'member atl',
+        avatarUrl: null,
+      };
+      const cb = await http().get(`/atlassian/callback?code=user-code&state=${encodeURIComponent(state)}`);
+      expect(cb.status).toBe(302);
+      expect(cb.headers.location).toContain('atlassian=account-connected');
+
+      // canAct now true.
+      const after = await http()
+        .get(`/workspaces/${workspaceId}/atlassian/status`)
+        .set(auth(plainMember))
+        .expect(200);
+      expect(after.body.data.me.canAct).toBe(true);
+
+      // Their assign now uses THEIR account id (attribution proof).
+      await http()
+        .post(`/messages/${cardId}/jira/action`)
+        .set(auth(plainMember))
+        .send({ issueKey: 'PROJ-500', action: 'assign_me' })
+        .expect(200);
+      expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: plainAcc });
     });
   });
 });

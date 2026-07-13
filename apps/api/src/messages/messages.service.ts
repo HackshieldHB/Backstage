@@ -1,11 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Inject,
-  Injectable,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   EditMessageInput,
   ListMessagesQuery,
@@ -23,7 +16,7 @@ import { UnreadService } from './unread.service';
 import { messageInclude, toMessageDto, groupReactions } from './message-serializer';
 import { extractMentions } from './mentions';
 import { toUserDto } from '../auth/auth.service';
-import { UNFURL_SERVICE, type UnfurlProvider } from './integration-messages.service';
+import { AppRegistry } from '../integrations/app-registry';
 
 export type Container =
   | { channelId: string; conversationId: null }
@@ -52,7 +45,7 @@ export class MessagesService {
     private readonly policy: PolicyService,
     private readonly realtime: RealtimeService,
     private readonly unread: UnreadService,
-    @Optional() @Inject(UNFURL_SERVICE) private readonly unfurler?: UnfurlProvider,
+    private readonly apps: AppRegistry,
   ) {}
 
   // ---------- access helpers ----------
@@ -263,10 +256,9 @@ export class MessagesService {
       }
     }
 
-    // Fire-and-forget link unfurling (Jira/Confluence status cards).
-    if (this.unfurler) {
-      void this.applyUnfurls(message.id, workspaceId, input.contentText, containerIds);
-    }
+    // Fire-and-forget link unfurling (Jira/Confluence status cards) via any
+    // registered integration app.
+    void this.applyUnfurls(message.id, workspaceId, input.contentText, containerIds);
 
     // Push fresh unread counts to every other member (and reset for the author).
     const pushTargets = memberIds;
@@ -288,7 +280,7 @@ export class MessagesService {
     containerIds: { channelId: string | null; conversationId: string | null },
   ) {
     try {
-      const unfurls = await this.unfurler!.unfurl(workspaceId, contentText);
+      const unfurls = await this.apps.unfurl(workspaceId, contentText);
       if (!unfurls || unfurls.length === 0) return;
       const updated = await this.prisma.message.update({
         where: { id: messageId },

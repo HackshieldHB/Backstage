@@ -111,6 +111,24 @@ export interface JiraUnfurl {
   status?: string;
   issueType?: string | null;
   priority?: string | null;
+  assigneeAccountId?: string | null;
+}
+
+/** Interactive action fired from a Jira card. */
+export const JiraActionSchema = z.object({
+  issueKey: z.string().min(3).max(30),
+  action: z.enum(['assign_me', 'transition', 'comment']),
+  /** Required when action === 'transition'. */
+  transitionId: z.string().min(1).max(30).optional(),
+  /** Required when action === 'comment'. */
+  text: z.string().min(1).max(4000).optional(),
+});
+export type JiraActionInput = z.infer<typeof JiraActionSchema>;
+
+/** One selectable Jira workflow transition for the "Move" picker. */
+export interface JiraTransition {
+  id: string;
+  name: string;
 }
 
 export interface MessagePage {

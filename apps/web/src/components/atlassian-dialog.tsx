@@ -10,6 +10,7 @@ import { Dialog } from './dialog';
 interface AtlassianStatus {
   connected: boolean;
   connection: { id: string; siteUrl: string; siteName: string; lastSyncAt: string | null } | null;
+  me?: { linked: boolean; canAct: boolean };
 }
 
 export function useAtlassianStatus(workspaceId: string) {
@@ -37,6 +38,14 @@ export function AtlassianDialog({
 
   const connect = async () => {
     const { url } = await api<{ url: string }>('GET', `/workspaces/${workspaceId}/atlassian/connect-url`);
+    window.location.href = url;
+  };
+
+  const connectMyAccount = async () => {
+    const { url } = await api<{ url: string }>(
+      'GET',
+      `/workspaces/${workspaceId}/atlassian/user-connect-url`,
+    );
     window.location.href = url;
   };
 
@@ -94,6 +103,27 @@ export function AtlassianDialog({
             </button>
           )}
           {syncResult && <p className="rounded-md bg-gray-50 p-2 text-xs dark:bg-gray-800">{syncResult}</p>}
+          <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+            {status.data.me?.canAct ? (
+              <p className="text-xs text-green-600 dark:text-green-400">
+                Your Jira account is connected — issue actions are attributed to you.
+              </p>
+            ) : (
+              <>
+                <p className="mb-2 text-xs text-gray-500">
+                  Connect your own Jira account so assigns, transitions, and comments from cards are
+                  attributed to you instead of the workspace connection.
+                </p>
+                <button
+                  onClick={() => void connectMyAccount()}
+                  className="rounded-md border border-[#2684FF] px-3 py-1.5 text-sm font-semibold text-[#2684FF] hover:bg-[#2684FF]/10"
+                  data-testid="connect-my-jira"
+                >
+                  Connect my Jira account
+                </button>
+              </>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-3 text-sm">

@@ -245,4 +245,53 @@ export class AtlassianApiService {
     const json = (await res.json()) as { key: string };
     return { key: json.key };
   }
+
+  private issueBase(cloudId: string, issueKey: string): string {
+    return `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${encodeURIComponent(issueKey)}`;
+  }
+
+  /** Writes that return 204/201 with no useful body — kept as raw fetch. */
+  private async write(accessToken: string, url: string, method: 'POST' | 'PUT', body: unknown) {
+    const res = await fetch(url, {
+      method,
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      this.logger.warn(`Atlassian ${method} ${url} -> ${res.status}`);
+      throw new BadGatewayException('Atlassian API request failed');
+    }
+  }
+
+  async getTransitions(
+    accessToken: string,
+    cloudId: string,
+    issueKey: string,
+  ): Promise<Array<{ id: string; name: string }>> {
+    const json = await this.get<{ transitions?: Array<{ id: string; name: string }> }>(
+      `${this.issueBase(cloudId, issueKey)}/transitions`,
+      accessToken,
+    );
+    return (json?.transitions ?? []).map((t) => ({ id: t.id, name: t.name }));
+  }
+
+  async transitionIssue(accessToken: string, cloudId: string, issueKey: string, transitionId: string) {
+    await this.write(accessToken, `${this.issueBase(cloudId, issueKey)}/transitions`, 'POST', {
+      transition: { id: transitionId },
+    });
+  }
+
+  async assignIssue(accessToken: string, cloudId: string, issueKey: string, accountId: string) {
+    await this.write(accessToken, `${this.issueBase(cloudId, issueKey)}/assignee`, 'PUT', { accountId });
+  }
+
+  async addComment(accessToken: string, cloudId: string, issueKey: string, text: string) {
+    await this.write(accessToken, `${this.issueBase(cloudId, issueKey)}/comment`, 'POST', {
+      body: {
+        type: 'doc',
+        version: 1,
+        content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+      },
+    });
+  }
 }

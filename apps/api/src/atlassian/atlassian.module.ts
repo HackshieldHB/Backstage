@@ -8,7 +8,6 @@ import { JiraActionsService } from './jira-actions.service';
 import { AtlassianController } from './atlassian.controller';
 import { MessagesModule } from '../messages/messages.module';
 import { AuthModule } from '../auth/auth.module';
-import { UNFURL_SERVICE } from '../messages/integration-messages.service';
 
 @Global()
 @Module({
@@ -20,10 +19,9 @@ import { UNFURL_SERVICE } from '../messages/integration-messages.service';
     AtlassianSyncService,
     AtlassianSyncQueue,
     JiraEventsService,
+    // Registers itself as the 'jira' app with the AppRegistry on init.
     JiraActionsService,
-    // Message sends unfurl Jira/Confluence links through this hook.
-    { provide: UNFURL_SERVICE, useExisting: JiraActionsService },
   ],
-  exports: [AtlassianService, AtlassianSyncService, UNFURL_SERVICE],
+  exports: [AtlassianService, AtlassianSyncService],
 })
 export class AtlassianModule {}
