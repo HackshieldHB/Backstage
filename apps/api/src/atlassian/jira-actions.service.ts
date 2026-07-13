@@ -1,11 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import type { JiraUnfurl } from '@backstages/shared';
+import { BadRequestException, Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
+import type { AtlassianConnection, Message } from '@prisma/client';
+import type { JiraActionInput, JiraTransition, JiraUnfurl } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { AtlassianApiService } from './atlassian-api.service';
 import { AtlassianService } from './atlassian.service';
-import { IntegrationMessagesService, type UnfurlProvider } from '../messages/integration-messages.service';
+import { IntegrationMessagesService } from '../messages/integration-messages.service';
 import { channelContainer } from '../messages/messages.service';
+import { AppRegistry, type IntegrationApp } from '../integrations/app-registry';
 
 const ISSUE_KEY_RE = /^[A-Z][A-Z0-9]+-\d+$/;
 
@@ -21,18 +23,25 @@ function cardDoc(text: string, href: string) {
   };
 }
 
-/** Unfurling, `/jira PROJ-123`, and "create Jira issue from message". */
+/** The 'jira' integration app: unfurling, `/jira PROJ-123`, create-issue, and card actions. */
 @Injectable()
-export class JiraActionsService implements UnfurlProvider {
+export class JiraActionsService implements IntegrationApp, OnModuleInit {
+  readonly id = 'jira';
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
     private readonly api: AtlassianApiService,
     private readonly atlassian: AtlassianService,
     private readonly integrationMessages: IntegrationMessagesService,
+    private readonly registry: AppRegistry,
   ) {}
 
-  // ---------- link unfurling (UnfurlProvider) ----------
+  onModuleInit() {
+    this.registry.register(this);
+  }
+
+  // ---------- link unfurling (IntegrationApp) ----------
 
   async unfurl(workspaceId: string, contentText: string): Promise<JiraUnfurl[] | null> {
     const connection = await this.prisma.atlassianConnection.findUnique({ where: { workspaceId } });
@@ -61,6 +70,7 @@ export class JiraActionsService implements UnfurlProvider {
             status: issue.status,
             issueType: issue.issueType,
             priority: issue.priority,
+            assigneeAccountId: issue.assigneeAccountId,
           });
         }
       } catch {
@@ -104,6 +114,7 @@ export class JiraActionsService implements UnfurlProvider {
           status: issue.status,
           issueType: issue.issueType,
           priority: issue.priority,
+          assigneeAccountId: issue.assigneeAccountId,
         } satisfies JiraUnfurl,
       ],
     });
@@ -141,5 +152,124 @@ export class JiraActionsService implements UnfurlProvider {
       parentId: message.parentId ?? message.id,
     });
     return { key: created.key, url };
+  }
+
+  // ---------- interactive actions (Assign / Move / Comment) ----------
+
+  /**
+   * Loads a channel-posted message and asserts the caller may act on it AND
+   * that `issueKey` really belongs to one of the message's own Jira unfurls
+   * (prevents driving arbitrary issues through someone else's card).
+   */
+  private async loadActionable(userId: string, messageId: string, issueKey: string) {
+    if (!ISSUE_KEY_RE.test(issueKey)) throw new BadRequestException('Invalid issue key');
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message || message.deletedAt || !message.channelId) {
+      throw new NotFoundException('Message not found');
+    }
+    const { channel } = await this.policy.requireChannelMember(userId, message.channelId);
+    const unfurls = (message.unfurls as JiraUnfurl[] | null) ?? [];
+    if (!unfurls.some((u) => u.type === 'jira' && u.key === issueKey)) {
+      throw new BadRequestException('Issue is not attached to this message');
+    }
+    const connection = await this.atlassian.connectionForWorkspace(channel.workspaceId);
+    return { message, channel, connection };
+  }
+
+  async listTransitions(
+    userId: string,
+    messageId: string,
+    issueKey: string,
+  ): Promise<JiraTransition[]> {
+    const { connection } = await this.loadActionable(userId, messageId, issueKey);
+    const token = await this.atlassian.accessTokenFor(connection);
+    return this.api.getTransitions(token, connection.siteId, issueKey);
+  }
+
+  async performAction(userId: string, messageId: string, input: JiraActionInput) {
+    const { message, channel, connection } = await this.loadActionable(
+      userId,
+      messageId,
+      input.issueKey,
+    );
+    // Prefer the caller's personal token (correct Jira attribution); fall back
+    // to the shared workspace connection when they haven't connected.
+    const userToken = await this.atlassian.userAccessTokenFor(userId);
+    const token = userToken ?? (await this.atlassian.accessTokenFor(connection));
+    const { issueKey } = input;
+    let summary = `updated ${issueKey}`;
+
+    switch (input.action) {
+      case 'assign_me': {
+        const link = await this.prisma.atlassianAccountLink.findUnique({ where: { userId } });
+        if (!link) {
+          throw new BadRequestException('Hubungkan akun Atlassian kamu dulu untuk assign issue');
+        }
+        await this.api.assignIssue(token, connection.siteId, issueKey, link.atlassianAccountId);
+        summary = `assigned ${issueKey} to themselves`;
+        break;
+      }
+      case 'transition': {
+        if (!input.transitionId) throw new BadRequestException('transitionId is required');
+        await this.api.transitionIssue(token, connection.siteId, issueKey, input.transitionId);
+        summary = `moved ${issueKey}`;
+        break;
+      }
+      case 'comment': {
+        if (!input.text?.trim()) throw new BadRequestException('text is required');
+        const author = await this.prisma.user.findUnique({ where: { id: userId } });
+        const name = author?.displayName ?? 'Someone';
+        await this.api.addComment(
+          token,
+          connection.siteId,
+          issueKey,
+          `${name} (via Backstages): ${input.text.trim()}`,
+        );
+        summary = `commented on ${issueKey}`;
+        break;
+      }
+    }
+
+    const refreshed = await this.refreshCardUnfurl(message, connection, token, issueKey);
+
+    const url = `${connection.siteUrl}/browse/${issueKey}`;
+    const statusSuffix = refreshed ? ` — ${refreshed.status}` : '';
+    const text = `${summary}${statusSuffix}`;
+    await this.integrationMessages.post(channelContainer(message.channelId!), {
+      workspaceId: channel.workspaceId,
+      contentText: text,
+      contentJson: cardDoc(text, url),
+      parentId: message.parentId ?? message.id,
+    });
+
+    return { ok: true, issueKey, status: refreshed?.status ?? null };
+  }
+
+  /**
+   * Re-fetches the issue and rewrites the matching unfurl on the source
+   * message in place, pushing MESSAGE_UPDATED so open cards refresh live.
+   */
+  private async refreshCardUnfurl(
+    message: Message,
+    connection: AtlassianConnection,
+    token: string,
+    issueKey: string,
+  ): Promise<JiraUnfurl | null> {
+    const issue = await this.api.getIssue(token, connection.siteId, issueKey);
+    if (!issue) return null;
+    const fresh: JiraUnfurl = {
+      type: 'jira',
+      url: `${connection.siteUrl}/browse/${issue.key}`,
+      key: issue.key,
+      title: issue.summary,
+      status: issue.status,
+      issueType: issue.issueType,
+      priority: issue.priority,
+      assigneeAccountId: issue.assigneeAccountId,
+    };
+    const unfurls = (message.unfurls as JiraUnfurl[] | null) ?? [];
+    const next = unfurls.map((u) => (u.type === 'jira' && u.key === issueKey ? fresh : u));
+    await this.integrationMessages.updateUnfurls(message.id, next);
+    return fresh;
   }
 }

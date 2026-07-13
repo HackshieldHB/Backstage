@@ -16,6 +16,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
 import { SearchModule } from './search/search.module';
 import { UsersModule } from './users/users.module';
 import { AtlassianModule } from './atlassian/atlassian.module';
+import { IntegrationsModule } from './integrations/app-registry';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 import { RateLimitGuard } from './common/rate-limit.guard';
@@ -23,6 +24,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
 @Module({
   imports: [
     PrismaModule,
+    IntegrationsModule,
     EmailModule,
     AuthModule,
     AuthzModule,

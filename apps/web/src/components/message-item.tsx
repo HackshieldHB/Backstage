@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
 import {
@@ -12,7 +12,7 @@ import {
   SquareKanban,
   Trash2,
 } from 'lucide-react';
-import type { MessageDto } from '@backstages/shared';
+import type { JiraActionInput, JiraTransition, MessageDto } from '@backstages/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
@@ -166,7 +166,7 @@ export function MessageItem({
         )}
 
         <AttachmentView attachments={message.attachments} />
-        <UnfurlCards unfurls={message.unfurls} />
+        <UnfurlCards message={message} />
 
         {/* Reactions */}
         {message.reactions.length > 0 && (
@@ -272,7 +272,9 @@ export function MessageItem({
   );
 }
 
-function UnfurlCards({ unfurls }: { unfurls: unknown }) {
+function UnfurlCards({ message }: { message: MessageDto }) {
+  const atlassian = useAtlassianStatus(message.workspaceId);
+  const unfurls = message.unfurls;
   if (!Array.isArray(unfurls) || unfurls.length === 0) return null;
   const cards = unfurls as Array<{
     type: string;
@@ -283,35 +285,132 @@ function UnfurlCards({ unfurls }: { unfurls: unknown }) {
     issueType?: string | null;
     priority?: string | null;
   }>;
+  const canAct = Boolean(message.channelId) && Boolean(atlassian.data?.connected);
   return (
     <div className="mt-1.5 space-y-1.5">
       {cards.map((card) => (
-        <a
+        <div
           key={card.url}
-          href={card.url}
-          target="_blank"
-          rel="noreferrer noopener"
           data-testid="unfurl-card"
-          className="flex max-w-md items-center gap-2.5 rounded-lg border-l-4 border border-gray-200 border-l-[#2684FF] bg-gray-50 px-3 py-2 hover:bg-gray-100 dark:border-gray-700 dark:border-l-[#2684FF] dark:bg-gray-800 dark:hover:bg-gray-700"
+          className="max-w-md overflow-hidden rounded-lg border-l-4 border border-gray-200 border-l-[#2684FF] bg-gray-50 dark:border-gray-700 dark:border-l-[#2684FF] dark:bg-gray-800"
         >
-          <span className="min-w-0">
-            <span className="block truncate text-[13px] font-semibold">
-              {card.key ? `${card.key} · ` : ''}
-              {card.title}
+          <a
+            href={card.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-[13px] font-semibold">
+                {card.key ? `${card.key} · ` : ''}
+                {card.title}
+              </span>
+              <span className="block text-[11px] text-gray-500">
+                {card.type === 'jira'
+                  ? [card.status, card.issueType, card.priority].filter(Boolean).join(' · ')
+                  : 'Confluence'}
+              </span>
             </span>
-            <span className="block text-[11px] text-gray-500">
-              {card.type === 'jira'
-                ? [card.status, card.issueType, card.priority].filter(Boolean).join(' · ')
-                : 'Confluence'}
-            </span>
-          </span>
-          {card.status && (
-            <span className="ml-auto shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-700 dark:bg-blue-900 dark:text-blue-200">
-              {card.status}
-            </span>
+            {card.status && (
+              <span className="ml-auto shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+                {card.status}
+              </span>
+            )}
+          </a>
+          {card.type === 'jira' && card.key && canAct && (
+            <JiraCardActions messageId={message.id} issueKey={card.key} />
           )}
-        </a>
+        </div>
       ))}
+    </div>
+  );
+}
+
+function JiraActionChip({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-700"
+    >
+      {children}
+    </button>
+  );
+}
+
+function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey: string }) {
+  const [busy, setBusy] = useState(false);
+  const [transitions, setTransitions] = useState<JiraTransition[] | null>(null);
+
+  const act = async (body: JiraActionInput) => {
+    setBusy(true);
+    try {
+      await api('POST', `/messages/${messageId}/jira/action`, body);
+      setTransitions(null);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openMove = async () => {
+    setBusy(true);
+    try {
+      const list = await api<JiraTransition[]>(
+        'GET',
+        `/messages/${messageId}/jira/transitions?issueKey=${encodeURIComponent(issueKey)}`,
+      );
+      setTransitions(list);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not load statuses');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const comment = () => {
+    const text = window.prompt(`Comment on ${issueKey}:`)?.trim();
+    if (text) void act({ issueKey, action: 'comment', text });
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-200 px-3 py-1.5 dark:border-gray-700">
+      <JiraActionChip disabled={busy} onClick={() => void act({ issueKey, action: 'assign_me' })}>
+        Assign to me
+      </JiraActionChip>
+      <JiraActionChip disabled={busy} onClick={() => void openMove()}>
+        Move
+      </JiraActionChip>
+      <JiraActionChip disabled={busy} onClick={comment}>
+        Comment
+      </JiraActionChip>
+      {transitions && (
+        <div className="flex basis-full flex-wrap items-center gap-1.5 pt-1">
+          {transitions.length === 0 ? (
+            <span className="text-[11px] text-gray-500">No transitions available</span>
+          ) : (
+            transitions.map((t) => (
+              <JiraActionChip
+                key={t.id}
+                disabled={busy}
+                onClick={() => void act({ issueKey, action: 'transition', transitionId: t.id })}
+              >
+                {t.name}
+              </JiraActionChip>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

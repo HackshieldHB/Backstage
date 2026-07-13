@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
+import { JiraActionSchema } from '@backstages/shared';
 import { AtlassianService } from './atlassian.service';
 import { AtlassianSyncService } from './sync.service';
 import { JiraEventsService, type JiraWebhookBody } from './jira-events.service';
@@ -59,6 +60,11 @@ export class AtlassianController {
   @Get('workspaces/:id/atlassian/status')
   status(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
     return this.atlassian.status(user.id, workspaceId);
+  }
+
+  @Get('workspaces/:id/atlassian/user-connect-url')
+  userConnectUrl(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
+    return this.atlassian.userConnectUrl(user.id, workspaceId);
   }
 
   @HttpCode(200)
@@ -166,5 +172,27 @@ export class AtlassianController {
     @Body(new ZodValidationPipe(CreateIssueSchema)) body: z.infer<typeof CreateIssueSchema>,
   ) {
     return this.jiraActions.createIssueFromMessage(user.id, messageId, body);
+  }
+
+  @Get('messages/:id/jira/transitions')
+  transitions(
+    @CurrentUser() user: AuthUser,
+    @Param('id') messageId: string,
+    @Query('issueKey') issueKey: string,
+  ) {
+    return this.jiraActions.listTransitions(user.id, messageId, (issueKey ?? '').toUpperCase());
+  }
+
+  @HttpCode(200)
+  @Post('messages/:id/jira/action')
+  action(
+    @CurrentUser() user: AuthUser,
+    @Param('id') messageId: string,
+    @Body(new ZodValidationPipe(JiraActionSchema)) body: z.infer<typeof JiraActionSchema>,
+  ) {
+    return this.jiraActions.performAction(user.id, messageId, {
+      ...body,
+      issueKey: body.issueKey.toUpperCase(),
+    });
   }
 }

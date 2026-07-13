@@ -19,7 +19,7 @@ const CONNECT_SCOPES = ['read:jira-user', 'read:jira-work', 'write:jira-work', '
 const SSO_SCOPES = ['read:me', 'offline_access'];
 
 interface OAuthState {
-  kind: 'connect' | 'sso';
+  kind: 'connect' | 'sso' | 'user-connect';
   workspaceId?: string;
   userId?: string;
   nonce: string;
@@ -53,10 +53,30 @@ export class AtlassianService {
       where: { workspaceId },
       select: { id: true, siteUrl: true, siteName: true, lastSyncAt: true, createdAt: true },
     });
-    return { connected: !!connection, connection };
+    const link = await this.prisma.atlassianAccountLink.findUnique({
+      where: { userId },
+      select: { accessTokenEnc: true, scopes: true },
+    });
+    // "canAct": the caller has personally granted write access, so Jira actions
+    // are attributed to them rather than the shared workspace connection.
+    const canAct = Boolean(link?.accessTokenEnc && link.scopes?.includes('write:jira-work'));
+    return { connected: !!connection, connection, me: { linked: !!link, canAct } };
   }
 
-  /** OAuth redirect target for BOTH flows; dispatches on the signed state. */
+  // ---------- per-user connect ("Connect my Jira account") ----------
+
+  /** Any workspace member may grant their own write access for correct attribution. */
+  async userConnectUrl(userId: string, workspaceId: string): Promise<{ url: string }> {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    await this.connectionForWorkspace(workspaceId); // workspace must be connected first
+    const state = await this.jwtService.signAsync(
+      { kind: 'user-connect', workspaceId, userId, nonce: randomBytes(8).toString('hex') } satisfies OAuthState,
+      { expiresIn: '10m' },
+    );
+    return { url: this.api.authorizeUrl(state, CONNECT_SCOPES) };
+  }
+
+  /** OAuth redirect target for ALL flows; dispatches on the signed state. */
   async handleCallback(code: string, rawState: string): Promise<{ redirect: string }> {
     let state: OAuthState;
     try {
@@ -65,7 +85,36 @@ export class AtlassianService {
       throw new UnauthorizedException('Invalid OAuth state');
     }
     if (state.kind === 'connect') return this.completeConnect(code, state);
+    if (state.kind === 'user-connect') return this.completeUserConnect(code, state);
     return this.completeSso(code);
+  }
+
+  private async completeUserConnect(code: string, state: OAuthState): Promise<{ redirect: string }> {
+    const userId = state.userId!;
+    const workspaceId = state.workspaceId!;
+    const tokens = await this.api.exchangeCode(code);
+    const profile = await this.api.me(tokens.accessToken);
+    await this.prisma.atlassianAccountLink.upsert({
+      where: { userId },
+      create: {
+        userId,
+        atlassianAccountId: profile.accountId,
+        siteUrl: 'https://api.atlassian.com',
+        accessTokenEnc: encryptToken(tokens.accessToken),
+        refreshTokenEnc: encryptToken(tokens.refreshToken),
+        scopes: tokens.scopes,
+        tokenExpiresAt: new Date(Date.now() + tokens.expiresInSeconds * 1000),
+      },
+      update: {
+        atlassianAccountId: profile.accountId,
+        accessTokenEnc: encryptToken(tokens.accessToken),
+        refreshTokenEnc: encryptToken(tokens.refreshToken),
+        scopes: tokens.scopes,
+        tokenExpiresAt: new Date(Date.now() + tokens.expiresInSeconds * 1000),
+      },
+    });
+    const web = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+    return { redirect: `${web}/app?ws=${workspaceId}&atlassian=account-connected` };
   }
 
   private async completeConnect(code: string, state: OAuthState): Promise<{ redirect: string }> {
@@ -209,6 +258,38 @@ export class AtlassianService {
       },
     });
     return fresh.accessToken;
+  }
+
+  /**
+   * Returns the caller's PERSONAL Jira access token if they've granted write
+   * access (so actions are attributed to them), refreshing if near expiry.
+   * Returns null when the user hasn't personally connected — callers then fall
+   * back to the shared workspace connection token.
+   */
+  async userAccessTokenFor(userId: string): Promise<string | null> {
+    const link = await this.prisma.atlassianAccountLink.findUnique({ where: { userId } });
+    if (!link?.accessTokenEnc || !link.refreshTokenEnc) return null;
+    if (!link.scopes?.includes('write:jira-work')) return null;
+
+    const expiresSoon =
+      !link.tokenExpiresAt || link.tokenExpiresAt.getTime() < Date.now() + 60_000;
+    if (!expiresSoon) return decryptToken(link.accessTokenEnc);
+
+    try {
+      const fresh = await this.api.refreshTokens(decryptToken(link.refreshTokenEnc));
+      await this.prisma.atlassianAccountLink.update({
+        where: { userId },
+        data: {
+          accessTokenEnc: encryptToken(fresh.accessToken),
+          refreshTokenEnc: encryptToken(fresh.refreshToken),
+          scopes: fresh.scopes,
+          tokenExpiresAt: new Date(Date.now() + fresh.expiresInSeconds * 1000),
+        },
+      });
+      return fresh.accessToken;
+    } catch {
+      return null; // fall back to the workspace connection token
+    }
   }
 
   // ---------- member-facing helpers ----------

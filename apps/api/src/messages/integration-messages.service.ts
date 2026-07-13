@@ -92,11 +92,20 @@ export class IntegrationMessagesService {
 
     return dto;
   }
-}
 
-/** Optional hook implemented by the Atlassian module: computes link unfurls. */
-export const UNFURL_SERVICE = Symbol('UNFURL_SERVICE');
-
-export interface UnfurlProvider {
-  unfurl(workspaceId: string, contentText: string): Promise<unknown[] | null>;
+  /** Replaces a message's unfurls in place and pushes MESSAGE_UPDATED. */
+  async updateUnfurls(messageId: string, unfurls: unknown): Promise<MessageDto> {
+    const message = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { unfurls: unfurls as Prisma.InputJsonValue },
+      include: messageInclude,
+    });
+    const dto = toMessageDto(message);
+    this.realtime.emitToContainer(
+      { channelId: dto.channelId, conversationId: dto.conversationId },
+      SOCKET_EVENTS.MESSAGE_UPDATED,
+      { message: dto },
+    );
+    return dto;
+  }
 }
