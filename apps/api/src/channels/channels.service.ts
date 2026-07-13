@@ -33,6 +33,7 @@ export class ChannelsService {
         topic: input.topic,
         description: input.description,
         isPrivate: input.isPrivate,
+        groupKey: input.groupKey,
         createdById: userId,
         members: { create: [{ userId }] },
       },
@@ -76,6 +77,7 @@ export class ChannelsService {
       isPrivate: c.isPrivate,
       isArchived: c.isArchived,
       isDefault: c.isDefault,
+      groupKey: c.groupKey,
       memberCount: c._count.members,
       isMember: c.members.length > 0,
     }));

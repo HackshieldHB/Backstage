@@ -24,7 +24,15 @@ export interface JiraWebhookBody {
       assignee?: { accountId: string; displayName?: string } | null;
     };
   };
-  changelog?: { items?: Array<{ field: string; fromString?: string | null; toString?: string | null; to?: string | null }> };
+  changelog?: {
+    items?: Array<{
+      field: string;
+      fromString?: string | null;
+      toString?: string | null;
+      from?: string | null;
+      to?: string | null;
+    }>;
+  };
   comment?: { body?: unknown; author?: { accountId: string; displayName?: string } };
 }
 
@@ -145,20 +153,33 @@ export class JiraEventsService {
           }
         : undefined;
 
-    // 1) Personal DM for assignment events.
+    // 1) Personal DMs for assignment events — "task in" for the new assignee,
+    //    "task out" for whoever the issue was just taken away from.
     let dmUserId: string | null = null;
     if (event === 'issue_assigned') {
-      const accountId =
-        body.issue?.fields?.assignee?.accountId ??
-        body.changelog?.items?.find((i) => i.field === 'assignee')?.to ??
-        null;
+      const change = body.changelog?.items?.find((i) => i.field === 'assignee');
+      const accountId = body.issue?.fields?.assignee?.accountId ?? change?.to ?? null;
       if (accountId) {
         const link = await this.prisma.atlassianAccountLink.findUnique({
           where: { atlassianAccountId: String(accountId) },
         });
         if (link) {
           dmUserId = link.userId;
-          await this.sendJiraDm(connection, link.userId, text, issueUrl, issueKey);
+          await this.sendJiraDm(connection, link.userId, text, issueUrl, issueKey, 'in');
+        }
+      }
+      // Previous assignee — the task left them.
+      const fromAccountId = change?.from ?? null;
+      if (fromAccountId && fromAccountId !== accountId) {
+        const prevLink = await this.prisma.atlassianAccountLink.findUnique({
+          where: { atlassianAccountId: String(fromAccountId) },
+        });
+        if (prevLink) {
+          const summary = body.issue?.fields?.summary ?? '';
+          const outText = accountId
+            ? `${issueKey} reassigned away from you: ${summary}`
+            : `${issueKey} unassigned from you: ${summary}`;
+          await this.sendJiraDm(connection, prevLink.userId, outText, issueUrl, issueKey, 'out');
         }
       }
     }
@@ -185,6 +206,7 @@ export class JiraEventsService {
     text: string,
     issueUrl: string | undefined,
     issueKey: string | undefined,
+    direction: 'in' | 'out' = 'in',
   ) {
     const memberKey = `jira:${userId}`;
     const conversation = await this.prisma.conversation.upsert({
@@ -213,7 +235,7 @@ export class JiraEventsService {
         userId,
         type: 'SYSTEM',
         conversationId: conversation.id,
-        payload: { source: 'jira', issueKey: issueKey ?? null },
+        payload: { source: 'jira', issueKey: issueKey ?? null, direction },
       },
     });
     this.realtime.emitToUser(userId, SOCKET_EVENTS.NOTIFICATION_NEW, {

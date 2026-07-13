@@ -6,11 +6,17 @@ export const ChannelNameSchema = z
   .max(80)
   .regex(/^[a-z0-9][a-z0-9-_]*$/, 'lowercase letters, numbers, dashes and underscores only');
 
+/** Sidebar grouping for integration channels. */
+export const ChannelGroupSchema = z.enum(['jira', 'confluence']);
+export type ChannelGroup = z.infer<typeof ChannelGroupSchema>;
+
 export const CreateChannelSchema = z.object({
   name: ChannelNameSchema,
   topic: z.string().max(250).optional(),
   description: z.string().max(500).optional(),
   isPrivate: z.boolean().default(false),
+  /** Places the channel under an integration group in the sidebar. */
+  groupKey: ChannelGroupSchema.optional(),
 });
 export type CreateChannelInput = z.infer<typeof CreateChannelSchema>;
 
@@ -38,6 +44,7 @@ export const ChannelDtoSchema = z.object({
   isPrivate: z.boolean(),
   isArchived: z.boolean(),
   isDefault: z.boolean(),
+  groupKey: z.string().nullable().optional(),
   memberCount: z.number().optional(),
   isMember: z.boolean().optional(),
 });

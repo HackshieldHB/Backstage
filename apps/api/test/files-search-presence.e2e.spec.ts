@@ -499,4 +499,39 @@ describe('files, search, presence, activity (e2e)', () => {
         .expect(400);
     });
   });
+
+  describe('channel groups', () => {
+    it('creates a channel under an integration group and returns groupKey in the list', async () => {
+      const created = await http()
+        .post(`/workspaces/${workspaceId}/channels`)
+        .set(auth(alice))
+        .send({ name: `grp-${run}`, groupKey: 'jira' })
+        .expect(201);
+      expect(created.body.data.groupKey).toBe('jira');
+
+      const list = await http()
+        .get(`/workspaces/${workspaceId}/channels`)
+        .set(auth(alice))
+        .expect(200);
+      const ch = list.body.data.find((c: { id: string }) => c.id === created.body.data.id);
+      expect(ch.groupKey).toBe('jira');
+    });
+
+    it('rejects an unknown group key', async () => {
+      await http()
+        .post(`/workspaces/${workspaceId}/channels`)
+        .set(auth(alice))
+        .send({ name: `grp2-${run}`, groupKey: 'bogus' })
+        .expect(400);
+    });
+
+    it('a normal channel has a null group', async () => {
+      const created = await http()
+        .post(`/workspaces/${workspaceId}/channels`)
+        .set(auth(alice))
+        .send({ name: `plain-${run}` })
+        .expect(201);
+      expect(created.body.data.groupKey).toBeNull();
+    });
+  });
 });

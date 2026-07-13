@@ -141,15 +141,24 @@ export function useRealtime(workspaceId: string | null) {
         typeof Notification !== 'undefined' &&
         Notification.permission === 'granted'
       ) {
+        const pl = (p.payload ?? {}) as { source?: string; issueKey?: string; direction?: string };
         const title =
-          p.type === 'MENTION'
-            ? `${p.actor?.displayName ?? 'Someone'} mentioned you`
-            : p.type === 'THREAD_REPLY'
-              ? `${p.actor?.displayName ?? 'Someone'} replied in a thread`
-              : p.type === 'DM'
-                ? `New message from ${p.actor?.displayName ?? 'someone'}`
-                : 'New activity in Backstages';
-        new Notification(title, { silent: true });
+          pl.source === 'jira'
+            ? pl.direction === 'out'
+              ? `Jira: ${pl.issueKey ?? 'an issue'} unassigned from you`
+              : `Jira: ${pl.issueKey ?? 'an issue'} assigned to you`
+            : p.type === 'MENTION'
+              ? `${p.actor?.displayName ?? 'Someone'} mentioned you`
+              : p.type === 'THREAD_REPLY'
+                ? `${p.actor?.displayName ?? 'Someone'} replied in a thread`
+                : p.type === 'DM'
+                  ? `New message from ${p.actor?.displayName ?? 'someone'}`
+                  : 'New activity in Backstages';
+        const n = new Notification(title, { tag: p.id });
+        n.onclick = () => {
+          window.focus();
+          n.close();
+        };
       }
     };
 
