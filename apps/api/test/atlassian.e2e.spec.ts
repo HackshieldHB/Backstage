@@ -603,6 +603,43 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
       const after = await http().get(`/channels/${channelId}/messages`).set(auth(owner)).expect(200);
       expect(after.body.data.messages.length).toBe(before.body.data.messages.length);
     });
+
+    it('reassigning an issue notifies the previous assignee (task out)', async () => {
+      await http()
+        .post(`/webhooks/jira/${connectionId}`)
+        .set('x-backstages-secret', webhookSecret)
+        .send({
+          webhookEvent: 'jira:issue_updated',
+          issue: {
+            key: 'PROJ-1',
+            fields: {
+              summary: 'Fix the flux capacitor',
+              status: { name: 'In Progress' },
+              project: { key: 'PROJ' },
+              assignee: { accountId: ACC.newbie, displayName: 'Newbie FromJira' },
+            },
+          },
+          changelog: {
+            items: [{ field: 'assignee', from: ACC.linked, to: ACC.newbie, toString: 'Newbie FromJira' }],
+          },
+        })
+        .expect(200);
+
+      const convos = await http()
+        .get(`/workspaces/${workspaceId}/conversations`)
+        .set(auth(linkedUser))
+        .expect(200);
+      const jiraDm = convos.body.data.find((c: { title: string | null }) => c.title === 'Jira');
+      const dmMessages = await http()
+        .get(`/conversations/${jiraDm.id}/messages`)
+        .set(auth(linkedUser))
+        .expect(200);
+      expect(
+        dmMessages.body.data.messages.some((m: { contentText: string }) =>
+          m.contentText.includes('reassigned away from you'),
+        ),
+      ).toBe(true);
+    });
   });
 
   describe('jira actions', () => {

@@ -61,11 +61,20 @@ export function Sidebar({
   const [dialog, setDialog] = useState<
     'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'atlassian'
   >('none');
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   const unreadFor = (id: string) =>
     unreads.data?.find((u) => (u.channelId ?? u.conversationId) === id) ?? { unread: 0, mentions: 0 };
 
   const activityBadge = notifications.data?.unreadCount ?? 0;
+
+  const ungroupedChannels = useMemo(() => channels.filter((c) => !c.groupKey), [channels]);
+  const groupedChannels = useMemo(() => {
+    const g: Record<string, ChannelWithMeta[]> = {};
+    for (const c of channels) if (c.groupKey) (g[c.groupKey] ??= []).push(c);
+    return g;
+  }, [channels]);
+  const groupKeys = useMemo(() => Object.keys(groupedChannels).sort(), [groupedChannels]);
 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col bg-sidebar text-gray-200">
@@ -131,43 +140,48 @@ export function Sidebar({
           onBrowse={() => setDialog('browse')}
         />
         <ul>
-          {channels.map((ch) => {
-            const u = unreadFor(ch.id);
-            const active = container?.kind === 'channel' && container.id === ch.id;
-            return (
-              <li key={ch.id}>
-                <button
-                  onClick={() => onNavigate({ kind: 'channel', id: ch.id })}
-                  data-testid={`channel-${ch.name}`}
-                  className={clsx(
-                    'group flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px]',
-                    active
-                      ? 'bg-sidebar-active font-medium text-white'
-                      : u.unread > 0
-                        ? 'font-semibold text-white hover:bg-sidebar-hover'
-                        : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-gray-100',
-                  )}
-                >
-                  {ch.isPrivate ? <Lock size={13} className="shrink-0" /> : <Hash size={13} className="shrink-0" />}
-                  <span className="truncate">{ch.name}</span>
-                  {u.mentions > 0 && (
-                    <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
-                      {u.mentions}
-                    </span>
-                  )}
-                  {u.mentions === 0 && u.unread > 0 && (
-                    <span
-                      className="ml-auto rounded-full bg-white/20 px-1.5 text-[11px] font-semibold text-white"
-                      data-testid={`unread-${ch.name}`}
-                    >
-                      {u.unread}
-                    </span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
+          {ungroupedChannels.map((ch) => (
+            <ChannelRow
+              key={ch.id}
+              ch={ch}
+              active={container?.kind === 'channel' && container.id === ch.id}
+              unread={unreadFor(ch.id)}
+              onClick={() => onNavigate({ kind: 'channel', id: ch.id })}
+            />
+          ))}
         </ul>
+
+        {/* Integration channel groups (Jira / Confluence) */}
+        {groupKeys.map((gk) => {
+          const collapsed = collapsedGroups[gk];
+          return (
+            <div key={gk}>
+              <button
+                onClick={() => setCollapsedGroups((s) => ({ ...s, [gk]: !s[gk] }))}
+                className="mt-4 flex w-full items-center gap-1 px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted hover:text-white"
+              >
+                <ChevronDown
+                  size={12}
+                  className={clsx('transition-transform', collapsed && '-rotate-90')}
+                />
+                {GROUP_LABELS[gk] ?? gk}
+              </button>
+              {!collapsed && (
+                <ul>
+                  {groupedChannels[gk].map((ch) => (
+                    <ChannelRow
+                      key={ch.id}
+                      ch={ch}
+                      active={container?.kind === 'channel' && container.id === ch.id}
+                      unread={unreadFor(ch.id)}
+                      onClick={() => onNavigate({ kind: 'channel', id: ch.id })}
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })}
 
         {/* DMs */}
         <SectionHeader label="Direct messages" onAdd={() => setDialog('dm')} />
@@ -260,6 +274,53 @@ export function Sidebar({
         />
       )}
     </aside>
+  );
+}
+
+const GROUP_LABELS: Record<string, string> = { jira: 'Jira', confluence: 'Confluence' };
+
+function ChannelRow({
+  ch,
+  active,
+  unread,
+  onClick,
+}: {
+  ch: ChannelWithMeta;
+  active: boolean;
+  unread: { unread: number; mentions: number };
+  onClick: () => void;
+}) {
+  return (
+    <li>
+      <button
+        onClick={onClick}
+        data-testid={`channel-${ch.name}`}
+        className={clsx(
+          'group flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px]',
+          active
+            ? 'bg-sidebar-active font-medium text-white'
+            : unread.unread > 0
+              ? 'font-semibold text-white hover:bg-sidebar-hover'
+              : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-gray-100',
+        )}
+      >
+        {ch.isPrivate ? <Lock size={13} className="shrink-0" /> : <Hash size={13} className="shrink-0" />}
+        <span className="truncate">{ch.name}</span>
+        {unread.mentions > 0 && (
+          <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+            {unread.mentions}
+          </span>
+        )}
+        {unread.mentions === 0 && unread.unread > 0 && (
+          <span
+            className="ml-auto rounded-full bg-white/20 px-1.5 text-[11px] font-semibold text-white"
+            data-testid={`unread-${ch.name}`}
+          >
+            {unread.unread}
+          </span>
+        )}
+      </button>
+    </li>
   );
 }
 
@@ -592,6 +653,16 @@ function ProfileDialog({ onClose }: { onClose: () => void }) {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission | 'unsupported'>(() =>
+    typeof window === 'undefined' || typeof Notification === 'undefined'
+      ? 'unsupported'
+      : Notification.permission,
+  );
+
+  const enableNotifications = async () => {
+    if (typeof Notification === 'undefined') return;
+    setNotifPerm(await Notification.requestPermission());
+  };
 
   const onPickPhoto = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -685,6 +756,32 @@ function ProfileDialog({ onClose }: { onClose: () => void }) {
             {s === 'ACTIVE' ? 'Active' : s === 'AWAY' ? 'Away' : 'Do not disturb'}
           </label>
         ))}
+      </div>
+
+      <div className="mb-4 rounded-md border border-gray-200 p-2.5 dark:border-gray-700">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+            Desktop notifications
+          </span>
+          {notifPerm === 'granted' ? (
+            <span className="text-xs font-medium text-green-600">Enabled</span>
+          ) : notifPerm === 'unsupported' ? (
+            <span className="text-xs text-gray-400">Not supported</span>
+          ) : notifPerm === 'denied' ? (
+            <span className="text-xs text-gray-400">Blocked in browser</span>
+          ) : (
+            <button
+              onClick={() => void enableNotifications()}
+              className="rounded border border-accent px-2 py-0.5 text-xs font-medium text-accent hover:bg-accent/10"
+              data-testid="enable-notifications"
+            >
+              Enable
+            </button>
+          )}
+        </div>
+        <p className="mt-1 text-[11px] text-gray-400">
+          Get notified when a Jira task is assigned to or removed from you, plus mentions and DMs.
+        </p>
       </div>
 
       <button

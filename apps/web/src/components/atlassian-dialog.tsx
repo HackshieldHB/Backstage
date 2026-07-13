@@ -35,6 +35,33 @@ export function AtlassianDialog({
   const status = useAtlassianStatus(workspaceId);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [projectKey, setProjectKey] = useState('');
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionMsg, setProvisionMsg] = useState<string | null>(null);
+
+  const provisionProjectChannel = async () => {
+    const key = projectKey.trim().toUpperCase();
+    if (!key) return;
+    setProvisioning(true);
+    setProvisionMsg(null);
+    try {
+      const ch = await api<{ id: string; name: string }>('POST', `/workspaces/${workspaceId}/channels`, {
+        name: key.toLowerCase(),
+        groupKey: 'jira',
+      });
+      await api('POST', `/channels/${ch.id}/jira/subscriptions`, {
+        projectKey: key,
+        events: ['issue_created', 'issue_assigned', 'status_changed', 'comment_created'],
+      });
+      await qc.invalidateQueries({ queryKey: keys.channels(workspaceId) });
+      setProvisionMsg(`Created #${ch.name} under Jira, subscribed to ${key}.`);
+      setProjectKey('');
+    } catch (err) {
+      setProvisionMsg(err instanceof Error ? err.message : 'Failed to create channel');
+    } finally {
+      setProvisioning(false);
+    }
+  };
 
   const connect = async () => {
     const { url } = await api<{ url: string }>('GET', `/workspaces/${workspaceId}/atlassian/connect-url`);
@@ -103,6 +130,33 @@ export function AtlassianDialog({
             </button>
           )}
           {syncResult && <p className="rounded-md bg-gray-50 p-2 text-xs dark:bg-gray-800">{syncResult}</p>}
+
+          {isAdmin && (
+            <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+              <p className="mb-1 text-xs font-medium">Jira project channels</p>
+              <p className="mb-2 text-xs text-gray-500">
+                Create a channel under the “Jira” group that follows a project’s events.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={projectKey}
+                  onChange={(e) => setProjectKey(e.target.value.toUpperCase())}
+                  placeholder="e.g. KAN"
+                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+                  data-testid="jira-project-key"
+                />
+                <button
+                  onClick={() => void provisionProjectChannel()}
+                  disabled={provisioning || !projectKey.trim()}
+                  className="rounded-md bg-[#2684FF] px-3 py-2 text-sm font-semibold text-white hover:bg-[#1f6fd6] disabled:opacity-50"
+                >
+                  {provisioning ? 'Creating…' : 'Create'}
+                </button>
+              </div>
+              {provisionMsg && <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">{provisionMsg}</p>}
+            </div>
+          )}
+
           <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
             {status.data.me?.canAct ? (
               <p className="text-xs text-green-600 dark:text-green-400">
