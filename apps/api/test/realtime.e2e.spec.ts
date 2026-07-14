@@ -3,7 +3,13 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { io, Socket } from 'socket.io-client';
 import { randomUUID } from 'crypto';
-import { SOCKET_EVENTS, UnreadUpdatedPayload } from '@backstages/shared';
+import {
+  CLIENT_EVENTS,
+  SOCKET_EVENTS,
+  UnreadUpdatedPayload,
+  type HuddleParticipantsPayload,
+  type HuddleSignalPayload,
+} from '@backstages/shared';
 import { AddressInfo } from 'net';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -27,6 +33,23 @@ function collect<T>(socket: Socket, event: string): T[] {
   const events: T[] = [];
   socket.on(event, (payload: T) => events.push(payload));
   return events;
+}
+
+/** Resolves on the first event matching a predicate — robust to delivery races. */
+function until<T>(socket: Socket, event: string, match: (p: T) => boolean, timeoutMs = 8000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const handler = (payload: T) => {
+      if (!match(payload)) return;
+      clearTimeout(timer);
+      socket.off(event, handler);
+      resolve(payload);
+    };
+    const timer = setTimeout(() => {
+      socket.off(event, handler);
+      reject(new Error(`Timed out waiting for matching '${event}'`));
+    }, timeoutMs);
+    socket.on(event, handler);
+  });
 }
 
 describe('realtime (two-socket e2e)', () => {
@@ -276,5 +299,60 @@ describe('realtime (two-socket e2e)', () => {
     expect(typing.user.id).toBe(alice.id);
     // Sender must not receive their own typing echo.
     expect(aliceTyping).toHaveLength(0);
+  });
+
+  it('huddle: joining broadcasts the participant list to the channel', async () => {
+    const partsPromise = until<HuddleParticipantsPayload>(
+      bob.socket!,
+      SOCKET_EVENTS.HUDDLE_PARTICIPANTS,
+      (p) => p.participants.length === 1,
+    );
+    alice.socket!.emit(CLIENT_EVENTS.HUDDLE_JOIN, { channelId });
+    const parts = await partsPromise;
+    expect(parts.channelId).toBe(channelId);
+    expect(parts.participants.map((p) => p.userId)).toEqual([alice.id]);
+  });
+
+  it('huddle: signaling relays only to the target peer', async () => {
+    const signalPromise = once<HuddleSignalPayload>(bob.socket!, SOCKET_EVENTS.HUDDLE_SIGNAL);
+    const aliceSignals = collect(alice.socket!, SOCKET_EVENTS.HUDDLE_SIGNAL);
+    alice.socket!.emit(CLIENT_EVENTS.HUDDLE_SIGNAL, {
+      channelId,
+      toUserId: bob.id,
+      data: { kind: 'sdp', description: { type: 'offer', sdp: 'x' } },
+    });
+    const sig = await signalPromise;
+    expect(sig.fromUserId).toBe(alice.id);
+    expect((sig.data as { kind: string }).kind).toBe('sdp');
+    // The sender never gets their own relayed signal.
+    expect(aliceSignals).toHaveLength(0);
+  });
+
+  it('huddle: a second join then a leave update the list', async () => {
+    const two = until<HuddleParticipantsPayload>(
+      alice.socket!,
+      SOCKET_EVENTS.HUDDLE_PARTICIPANTS,
+      (p) => p.participants.length === 2,
+    );
+    bob.socket!.emit(CLIENT_EVENTS.HUDDLE_JOIN, { channelId });
+    expect((await two).participants.map((p) => p.userId).sort()).toEqual([alice.id, bob.id].sort());
+
+    const left = until<HuddleParticipantsPayload>(
+      bob.socket!,
+      SOCKET_EVENTS.HUDDLE_PARTICIPANTS,
+      (p) => p.participants.length === 1,
+    );
+    alice.socket!.emit(CLIENT_EVENTS.HUDDLE_LEAVE, { channelId });
+    expect((await left).participants.map((p) => p.userId)).toEqual([bob.id]);
+  });
+
+  it('huddle: disconnecting removes the peer from the huddle', async () => {
+    const gone = until<HuddleParticipantsPayload>(
+      alice.socket!,
+      SOCKET_EVENTS.HUDDLE_PARTICIPANTS,
+      (p) => p.participants.length === 0,
+    );
+    bob.socket!.disconnect();
+    expect((await gone).participants).toHaveLength(0);
   });
 });

@@ -12,7 +12,13 @@ import {
 import { Server, Socket } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
-import { CLIENT_EVENTS, ClientTypingPayload, SOCKET_EVENTS } from '@backstages/shared';
+import {
+  CLIENT_EVENTS,
+  ClientHuddlePayload,
+  ClientHuddleSignalPayload,
+  ClientTypingPayload,
+  SOCKET_EVENTS,
+} from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   RealtimeService,
@@ -21,6 +27,7 @@ import {
   roomForUser,
   roomForWorkspace,
 } from './realtime.service';
+import { HuddleService } from './huddle.service';
 import { PresenceService } from '../presence/presence.service';
 import type { AccessTokenPayload } from '../auth/jwt-auth.guard';
 
@@ -42,6 +49,7 @@ export class RealtimeGateway
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
     private readonly presence: PresenceService,
+    private readonly huddle: HuddleService,
   ) {}
 
   afterInit(server: Server) {
@@ -102,8 +110,59 @@ export class RealtimeGateway
 
   async handleDisconnect(socket: AuthedSocket) {
     if (socket.data.userId) {
+      // Drop the socket from any huddles and refresh those rooms.
+      for (const channelId of this.huddle.removeSocket(socket.data.userId, socket.id)) {
+        await this.broadcastHuddle(channelId);
+      }
       await this.presence.disconnected(socket.data.userId);
     }
+  }
+
+  // ---------- huddles (voice) ----------
+
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_JOIN)
+  async onHuddleJoin(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddlePayload) {
+    // Only channel members (who are in the channel room) may join its huddle.
+    if (!body?.channelId || !socket.rooms.has(roomForChannel(body.channelId))) return;
+    this.huddle.join(body.channelId, socket.data.userId, socket.id);
+    await this.broadcastHuddle(body.channelId);
+  }
+
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_LEAVE)
+  async onHuddleLeave(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddlePayload) {
+    if (!body?.channelId) return;
+    this.huddle.leave(body.channelId, socket.data.userId, socket.id);
+    await this.broadcastHuddle(body.channelId);
+  }
+
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_SIGNAL)
+  onHuddleSignal(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleSignalPayload) {
+    if (!body?.channelId || !body.toUserId) return;
+    // Relay the SDP/ICE payload straight to the target peer.
+    this.realtime.emitToUser(body.toUserId, SOCKET_EVENTS.HUDDLE_SIGNAL, {
+      channelId: body.channelId,
+      fromUserId: socket.data.userId,
+      data: body.data,
+    });
+  }
+
+  /** Pushes the current participant list (with names/avatars) to the whole channel. */
+  private async broadcastHuddle(channelId: string) {
+    const userIds = this.huddle.userIds(channelId);
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, displayName: true, avatarUrl: true },
+        })
+      : [];
+    this.realtime.emitToChannel(channelId, SOCKET_EVENTS.HUDDLE_PARTICIPANTS, {
+      channelId,
+      participants: users.map((u) => ({
+        userId: u.id,
+        displayName: u.displayName,
+        avatarUrl: u.avatarUrl,
+      })),
+    });
   }
 
   @SubscribeMessage('presence:heartbeat')
