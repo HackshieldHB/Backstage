@@ -10,6 +10,57 @@ import {
   type AtlassianProfile,
   type JiraIssueSummary,
 } from '../src/atlassian/atlassian-api.service';
+import { ConfluenceApiService } from '../src/atlassian/confluence-api.service';
+
+class MockConfluenceApi {
+  spaces = [{ key: 'DEV', name: 'Development', id: '100' }];
+  pages = new Map<
+    string,
+    { id: string; title: string; version: number; body: string; webui: string | null }
+  >();
+  private seq = 1;
+  async listSpaces() {
+    return this.spaces;
+  }
+  async listPages() {
+    return [...this.pages.values()];
+  }
+  async getPage(_t: string, _c: string, pageId: string) {
+    return this.pages.get(pageId) ?? null;
+  }
+  async createPage(_t: string, _c: string, input: { spaceKey: string; title: string; body: string }) {
+    const id = `pg-${this.seq++}`;
+    const page = {
+      id,
+      title: input.title,
+      version: 1,
+      body: input.body,
+      webui: `/spaces/${input.spaceKey}/pages/${id}`,
+    };
+    this.pages.set(id, page);
+    return page;
+  }
+  async updatePage(
+    _t: string,
+    _c: string,
+    pageId: string,
+    input: { title: string; body: string; version: number },
+  ) {
+    const prev = this.pages.get(pageId);
+    const page = {
+      id: pageId,
+      title: input.title,
+      version: input.version + 1,
+      body: input.body,
+      webui: prev?.webui ?? null,
+    };
+    this.pages.set(pageId, page);
+    return page;
+  }
+  async deletePage(_t: string, _c: string, pageId: string) {
+    this.pages.delete(pageId);
+  }
+}
 
 const SITE = { id: 'cloud-test-1', url: 'https://testsite.atlassian.net', name: 'Test Site' };
 
@@ -80,6 +131,7 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   const mock = new MockAtlassianApi();
+  const confMock = new MockConfluenceApi();
   const run = randomUUID().slice(0, 8);
 
   interface Actor {
@@ -109,6 +161,8 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(AtlassianApiService)
       .useValue(mock)
+      .overrideProvider(ConfluenceApiService)
+      .useValue(confMock)
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -868,6 +922,75 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
         .send({ issueKey: 'PROJ-500', action: 'assign', assigneeAccountId: ACC.linked })
         .expect(200);
       expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: ACC.linked });
+    });
+  });
+
+  describe('confluence pages', () => {
+    it('lists spaces from the connected site', async () => {
+      const res = await http()
+        .get(`/workspaces/${workspaceId}/confluence/spaces`)
+        .set(auth(owner))
+        .expect(200);
+      expect(res.body.data.map((s: { key: string }) => s.key)).toContain('DEV');
+    });
+
+    it('creates, lists, updates, and deletes a page in a space', async () => {
+      const created = await http()
+        .post(`/workspaces/${workspaceId}/confluence/pages`)
+        .set(auth(owner))
+        .send({ spaceKey: 'DEV', title: 'Runbook', body: 'first line\n\nsecond para' })
+        .expect(201);
+      expect(created.body.data.title).toBe('Runbook');
+      expect(created.body.data.version).toBe(1);
+      expect(created.body.data.url).toContain('/wiki/spaces/DEV');
+      const pageId = created.body.data.id;
+
+      const list = await http()
+        .get(`/workspaces/${workspaceId}/confluence/spaces/DEV/pages`)
+        .set(auth(owner))
+        .expect(200);
+      expect(list.body.data.some((p: { id: string }) => p.id === pageId)).toBe(true);
+
+      // Reading the page back returns body as plain text (storage round-trip).
+      const fetched = await http()
+        .get(`/workspaces/${workspaceId}/confluence/pages/${pageId}`)
+        .set(auth(owner))
+        .expect(200);
+      expect(fetched.body.data.body).toContain('first line');
+      expect(fetched.body.data.body).toContain('second para');
+
+      const updated = await http()
+        .patch(`/workspaces/${workspaceId}/confluence/pages/${pageId}`)
+        .set(auth(owner))
+        .send({ title: 'Runbook v2', body: 'updated', version: 1 })
+        .expect(200);
+      expect(updated.body.data.title).toBe('Runbook v2');
+      expect(updated.body.data.version).toBe(2);
+
+      await http()
+        .delete(`/workspaces/${workspaceId}/confluence/pages/${pageId}`)
+        .set(auth(owner))
+        .expect(200);
+      const after = await http()
+        .get(`/workspaces/${workspaceId}/confluence/spaces/DEV/pages`)
+        .set(auth(owner))
+        .expect(200);
+      expect(after.body.data.some((p: { id: string }) => p.id === pageId)).toBe(false);
+    });
+
+    it('requires workspace membership', async () => {
+      const res = await http()
+        .post('/auth/signup')
+        .send({
+          email: `conf-out-${run}@test.local`,
+          password: 'password123!',
+          displayName: 'Conf Outsider',
+        })
+        .expect(201);
+      await http()
+        .get(`/workspaces/${workspaceId}/confluence/spaces`)
+        .set({ Authorization: `Bearer ${res.body.data.accessToken}` })
+        .expect(404);
     });
   });
 });

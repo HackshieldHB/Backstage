@@ -15,7 +15,15 @@ import { decryptToken, encryptToken } from './crypto';
 import { TokenService } from '../auth/token.service';
 import { toUserDto } from '../auth/auth.service';
 
-const CONNECT_SCOPES = ['read:jira-user', 'read:jira-work', 'write:jira-work', 'offline_access'];
+const CONNECT_SCOPES = [
+  'read:jira-user',
+  'read:jira-work',
+  'write:jira-work',
+  'read:confluence-space.summary',
+  'read:confluence-content.all',
+  'write:confluence-content',
+  'offline_access',
+];
 const SSO_SCOPES = ['read:me', 'offline_access'];
 
 interface OAuthState {

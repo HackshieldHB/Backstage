@@ -35,6 +35,7 @@ import {
 import { Avatar } from './avatar';
 import { Dialog } from './dialog';
 import { AtlassianDialog } from './atlassian-dialog';
+import { ConfluenceDialog } from './confluence-dialog';
 
 export function Sidebar({
   workspaceId,
@@ -59,7 +60,7 @@ export function Sidebar({
   const workspace = workspaces.data?.find((w) => w.id === workspaceId);
 
   const [dialog, setDialog] = useState<
-    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'atlassian'
+    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'atlassian' | 'confluence'
   >('none');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
@@ -271,7 +272,11 @@ export function Sidebar({
           workspaceId={workspaceId}
           isAdmin={workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN'}
           onClose={() => setDialog('none')}
+          onOpenConfluence={() => setDialog('confluence')}
         />
+      )}
+      {dialog === 'confluence' && (
+        <ConfluenceDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
       )}
     </aside>
   );
