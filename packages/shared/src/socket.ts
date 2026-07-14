@@ -21,6 +21,10 @@ export const SOCKET_EVENTS = {
   MEMBER_LEFT: 'member:left',
   CHANNEL_CREATED: 'channel:created',
   CHANNEL_UPDATED: 'channel:updated',
+  /** Huddle (voice) — who is currently in a channel's huddle. */
+  HUDDLE_PARTICIPANTS: 'huddle:participants',
+  /** Huddle WebRTC signaling relayed to a specific peer. */
+  HUDDLE_SIGNAL: 'huddle:signal',
 } as const;
 
 export type SocketEventName = (typeof SOCKET_EVENTS)[keyof typeof SOCKET_EVENTS];
@@ -94,13 +98,45 @@ export interface MemberChangedPayload {
   user: UserDto;
 }
 
+/** A participant currently in a channel's huddle. */
+export interface HuddleParticipant {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+export interface HuddleParticipantsPayload {
+  channelId: string;
+  participants: HuddleParticipant[];
+}
+
+/** A WebRTC signaling message (offer/answer/ICE) relayed between two peers. */
+export interface HuddleSignalPayload {
+  channelId: string;
+  fromUserId: string;
+  data: unknown;
+}
+
 /** Client→server events (server→client use the payloads above). */
 export const CLIENT_EVENTS = {
   TYPING_START: 'typing:start',
   TYPING_STOP: 'typing:stop',
+  HUDDLE_JOIN: 'huddle:join',
+  HUDDLE_LEAVE: 'huddle:leave',
+  HUDDLE_SIGNAL: 'huddle:signal',
 } as const;
 
 export interface ClientTypingPayload {
   channelId?: string;
   conversationId?: string;
+}
+
+export interface ClientHuddlePayload {
+  channelId: string;
+}
+
+export interface ClientHuddleSignalPayload {
+  channelId: string;
+  toUserId: string;
+  data: unknown;
 }

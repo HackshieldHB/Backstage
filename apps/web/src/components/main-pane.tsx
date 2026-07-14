@@ -1,12 +1,14 @@
 'use client';
 
-import { Hash, Info, Lock, Menu, Pin, Users } from 'lucide-react';
+import { Hash, Headphones, Info, Lock, Menu, Pin, Users } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { useChannelMembers, useConversations, usePins, type Container } from '@/hooks/queries';
+import { useHuddle } from '@/hooks/use-huddle';
 import { MessageList } from './message-list';
+import { HuddleBar } from './huddle-bar';
 import { Composer, TypingIndicator } from './composer';
 
 export function MainPane({
@@ -31,6 +33,8 @@ export function MainPane({
     queryFn: () => api<{ name: string; topic: string | null; isPrivate: boolean; isDefault: boolean }>('GET', `/channels/${container.id}`),
     enabled: container.kind === 'channel',
   });
+
+  const huddle = useHuddle(container.kind === 'channel' ? container.id : null);
 
   const dm = conversations.data?.find((c) => c.id === container.id);
   const dmOthers = dm?.members.filter((m) => m.id !== me?.id) ?? [];
@@ -60,6 +64,16 @@ export function MainPane({
           <span className="hidden truncate text-[13px] text-gray-500 md:inline">{channel.data.topic}</span>
         )}
         <span className="flex-1" />
+        {container.kind === 'channel' && !huddle.joined && (
+          <button
+            title="Start or join a huddle"
+            onClick={() => void huddle.join()}
+            className="flex items-center gap-1 rounded p-1.5 text-[12px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+            data-testid="start-huddle"
+          >
+            <Headphones size={15} />
+          </button>
+        )}
         {container.kind === 'channel' && (
           <>
             {(pins.data?.length ?? 0) > 0 && (
@@ -90,6 +104,8 @@ export function MainPane({
           <Info size={16} />
         </button>
       </header>
+
+      {container.kind === 'channel' && <HuddleBar huddle={huddle} />}
 
       <MessageList
         workspaceId={workspaceId}
