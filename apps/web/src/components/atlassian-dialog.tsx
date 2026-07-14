@@ -26,10 +26,12 @@ export function AtlassianDialog({
   workspaceId,
   isAdmin,
   onClose,
+  onOpenConfluence,
 }: {
   workspaceId: string;
   isAdmin: boolean;
   onClose: () => void;
+  onOpenConfluence?: () => void;
 }) {
   const qc = useQueryClient();
   const status = useAtlassianStatus(workspaceId);
@@ -156,6 +158,16 @@ export function AtlassianDialog({
               {provisionMsg && <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">{provisionMsg}</p>}
             </div>
           )}
+
+          <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+            <button
+              onClick={() => onOpenConfluence?.()}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+              data-testid="open-confluence"
+            >
+              Manage Confluence pages
+            </button>
+          </div>
 
           <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
             {status.data.me?.canAct ? (
