@@ -1,6 +1,7 @@
 'use client';
 
-import { Hash, Headphones, Info, Lock, Menu, Pin, Users } from 'lucide-react';
+import { Hash, Headphones, Info, Lightbulb, Lock, Menu, Pin, Users } from 'lucide-react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
@@ -10,6 +11,7 @@ import { useHuddle } from '@/hooks/use-huddle';
 import { MessageList } from './message-list';
 import { HuddleBar } from './huddle-bar';
 import { Composer, TypingIndicator } from './composer';
+import { CheatSheetDialog } from './cheat-sheet-dialog';
 
 export function MainPane({
   workspaceId,
@@ -24,6 +26,7 @@ export function MainPane({
 }) {
   const me = useAuthStore((s) => s.user);
   const { setRightPanel, toggleSidebar } = useUiStore();
+  const [tipsOpen, setTipsOpen] = useState(false);
   const pins = usePins(container.kind === 'channel' ? container.id : null);
   const channelMembers = useChannelMembers(container.kind === 'channel' ? container.id : null);
   const conversations = useConversations(workspaceId);
@@ -96,6 +99,14 @@ export function MainPane({
           </>
         )}
         <button
+          title="Tips & shortcuts"
+          onClick={() => setTipsOpen(true)}
+          className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+          data-testid="tips-button"
+        >
+          <Lightbulb size={16} />
+        </button>
+        <button
           title="Details"
           onClick={() => setRightPanel({ kind: 'details' })}
           className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -104,6 +115,8 @@ export function MainPane({
           <Info size={16} />
         </button>
       </header>
+
+      {tipsOpen && <CheatSheetDialog onClose={() => setTipsOpen(false)} />}
 
       {container.kind === 'channel' && <HuddleBar huddle={huddle} />}
 

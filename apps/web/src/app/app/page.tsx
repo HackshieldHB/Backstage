@@ -61,6 +61,26 @@ function AppShell() {
   useRealtime(workspaceId);
   useTypingJanitor();
 
+  const qc = useQueryClient();
+  // Open (or create) a DM with a user — fired from profile cards anywhere.
+  useEffect(() => {
+    const onOpenDm = async (e: Event) => {
+      const userId = (e as CustomEvent<string>).detail;
+      if (!workspaceId || !userId || userId === user?.id) return;
+      try {
+        const dm = await api<{ id: string }>('POST', `/workspaces/${workspaceId}/conversations`, {
+          memberIds: [userId],
+        });
+        await qc.invalidateQueries({ queryKey: keys.conversations(workspaceId) });
+        navigate({ kind: 'conversation', id: dm.id });
+      } catch {
+        /* ignore — e.g. provisional target */
+      }
+    };
+    window.addEventListener('bs:open-dm', onOpenDm);
+    return () => window.removeEventListener('bs:open-dm', onOpenDm);
+  }, [workspaceId, user?.id, qc, navigate]);
+
   // Pending invite from an /invite/<token> visit pre-login.
   useEffect(() => {
     const pending = window.localStorage.getItem('bs.pendingInvite');

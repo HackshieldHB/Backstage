@@ -42,6 +42,7 @@ import {
 } from '@/hooks/queries';
 import { SuggestionList, type SuggestionItem, type SuggestionListHandle } from './suggestion-popup';
 import { EmojiPickerPopover } from './emoji-picker';
+import { CreateJiraIssueDialog } from './create-jira-issue-dialog';
 import { Avatar } from './avatar';
 
 const lowlight = createLowlight(common);
@@ -153,6 +154,7 @@ export function Composer({
   const upload = useUploadFile(workspaceId);
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [jiraCreateSummary, setJiraCreateSummary] = useState<string | null>(null);
   const [alsoSend, setAlsoSend] = useState(false);
   const typingRef = useRef<{ active: boolean; timer: ReturnType<typeof setTimeout> | null }>({ active: false, timer: null });
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -220,6 +222,13 @@ export function Composer({
     editorProps: {
       attributes: { class: 'px-3 py-2 text-[14px]', 'data-testid': 'composer' },
       handleKeyDown: (_view, event) => {
+        // Inside a code block, Enter and Shift+Enter add a newline (never send),
+        // so multi-line snippets can be written normally.
+        if (event.key === 'Enter' && editorRef.current?.isActive('codeBlock')) {
+          event.preventDefault();
+          editorRef.current.chain().focus().insertContent('\n').run();
+          return true;
+        }
         if (event.key === 'Enter' && !event.shiftKey) {
           // Let suggestion popups consume Enter first (they use capture handlers).
           const suggestionOpen = document.querySelector('[data-testid^="suggestion-"]');
@@ -282,6 +291,14 @@ export function Composer({
     const ready = uploads.filter((u) => u.attachment);
     if (!text && ready.length === 0) return;
     if (uploads.some((u) => !u.attachment && !u.error)) return; // uploads still in flight
+
+    // Slash command: /jira create <summary> opens the create-issue dialog.
+    const jiraCreate = /^\/jira\s+create\b\s*(.*)$/i.exec(text);
+    if (jiraCreate && container.kind === 'channel') {
+      editor.commands.clearContent();
+      setJiraCreateSummary(jiraCreate[1].trim());
+      return;
+    }
 
     // Slash command: /jira PROJ-123 posts an issue status card instead of a message.
     const jiraMatch = /^\/jira\s+([A-Za-z][A-Za-z0-9]+-\d+)\s*$/.exec(text);
@@ -453,6 +470,17 @@ export function Composer({
           onClose={() => setEmojiOpen(false)}
         />
       )}
+
+      {jiraCreateSummary !== null && container.kind === 'channel' && (
+        <CreateJiraIssueDialog
+          workspaceId={workspaceId}
+          defaultSummary={jiraCreateSummary}
+          onCreate={(input) =>
+            api<{ key: string; url: string }>('POST', `/channels/${container.id}/jira/create-issue`, input)
+          }
+          onClose={() => setJiraCreateSummary(null)}
+        />
+      )}
     </div>
   );
 }
@@ -490,6 +518,7 @@ function FormatButton({
 
 export function EditMessageEditor({ message, onDone }: { message: MessageDto; onDone: () => void }) {
   const saveRef = useRef<() => void>(() => undefined);
+  const editorRef = useRef<Editor | null>(null);
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -502,6 +531,11 @@ export function EditMessageEditor({ message, onDone }: { message: MessageDto; on
     editorProps: {
       attributes: { class: 'px-3 py-2 text-[14px]', 'data-testid': 'edit-editor' },
       handleKeyDown: (_view, event) => {
+        if (event.key === 'Enter' && editorRef.current?.isActive('codeBlock')) {
+          event.preventDefault();
+          editorRef.current.chain().focus().insertContent('\n').run();
+          return true;
+        }
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
           saveRef.current();
@@ -515,6 +549,8 @@ export function EditMessageEditor({ message, onDone }: { message: MessageDto; on
       },
     },
   });
+
+  editorRef.current = editor;
 
   const save = async () => {
     if (!editor) return;

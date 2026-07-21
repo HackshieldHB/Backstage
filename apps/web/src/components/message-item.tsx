@@ -22,25 +22,21 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
-import { keys, type PendingMessage } from '@/hooks/queries';
+import { keys, usePresence, type PendingMessage } from '@/hooks/queries';
+import { emojiChar } from '@/lib/emoji';
 import { Avatar } from './avatar';
+import { UserProfileDialog } from './user-profile-dialog';
 import { MessageBody } from './message-body';
 import { AttachmentView } from './attachment-view';
 import { EmojiPickerPopover } from './emoji-picker';
 import { EditMessageEditor } from './composer';
+import { CreateJiraIssueDialog } from './create-jira-issue-dialog';
 import { useAtlassianStatus } from './atlassian-dialog';
 
 const QUICK_EMOJI = ['thumbsup', 'heart', 'joy', 'eyes', 'tada'];
 
-const EMOJI_MAP: Record<string, string> = {
-  thumbsup: '👍', '+1': '👍', heart: '❤️', joy: '😂', eyes: '👀', tada: '🎉', rocket: '🚀',
-  fire: '🔥', pray: '🙏', smile: '😄', wave: '👋', thinking_face: '🤔', check: '✅',
-  white_check_mark: '✅', x: '❌', clap: '👏', raised_hands: '🙌', sob: '😭', ghost: '👻',
-};
-
-export function emojiChar(code: string): string {
-  return EMOJI_MAP[code] ?? `:${code}:`;
-}
+// Re-exported for callers that already import it from here (e.g. right-panel).
+export { emojiChar };
 
 export function MessageItem({
   message,
@@ -59,7 +55,10 @@ export function MessageItem({
   const qc = useQueryClient();
   const [hovered, setHovered] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [jiraOpen, setJiraOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [localEditing, setLocalEditing] = useState(false);
+  const presence = usePresence(message.workspaceId);
   const editingMessageId = useUiStore((s) => s.editingMessageId);
   const setEditingMessageId = useUiStore((s) => s.setEditingMessageId);
   const editing = localEditing || editingMessageId === message.id;
@@ -92,20 +91,6 @@ export function MessageItem({
   };
 
   const atlassian = useAtlassianStatus(message.workspaceId);
-  const createJiraIssue = async () => {
-    const projectKey = window.prompt('Jira project key (e.g. PROJ):')?.trim().toUpperCase();
-    if (!projectKey) return;
-    try {
-      const res = await api<{ key: string; url: string }>(
-        'POST',
-        `/messages/${message.id}/create-jira-issue`,
-        { projectKey },
-      );
-      window.open(res.url, '_blank', 'noopener');
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Failed to create issue');
-    }
-  };
 
   if (message.isDeleted) {
     return (
@@ -134,6 +119,16 @@ export function MessageItem({
         </span>
       ) : message.kind === 'INTEGRATION' ? (
         <JiraAvatar className="mt-0.5" />
+      ) : message.user ? (
+        <button
+          type="button"
+          onClick={() => setProfileOpen(true)}
+          className="mt-0.5 shrink-0"
+          title={`View ${message.user.displayName}'s profile`}
+          data-testid="author-avatar"
+        >
+          <Avatar user={message.user} size="md" />
+        </button>
       ) : (
         <Avatar user={message.user} size="md" className="mt-0.5" />
       )}
@@ -255,7 +250,7 @@ export function MessageItem({
           {message.channelId && atlassian.data?.connected && (
             <ToolbarButton
               title="Create Jira issue from message"
-              onClick={() => void createJiraIssue()}
+              onClick={() => setJiraOpen(true)}
               testId="create-jira-issue"
             >
               <SquareKanban size={15} className="text-[#2684FF]" />
@@ -276,6 +271,25 @@ export function MessageItem({
 
       {emojiOpen && (
         <EmojiPickerPopover onPick={(code) => void toggleReaction(code)} onClose={() => setEmojiOpen(false)} />
+      )}
+
+      {jiraOpen && (
+        <CreateJiraIssueDialog
+          workspaceId={message.workspaceId}
+          defaultSummary={message.contentText.slice(0, 100)}
+          onCreate={(input) =>
+            api<{ key: string; url: string }>('POST', `/messages/${message.id}/create-jira-issue`, input)
+          }
+          onClose={() => setJiraOpen(false)}
+        />
+      )}
+
+      {profileOpen && message.user && (
+        <UserProfileDialog
+          user={message.user}
+          presence={presence.data?.[message.user.id]}
+          onClose={() => setProfileOpen(false)}
+        />
       )}
     </div>
   );

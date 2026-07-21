@@ -28,6 +28,9 @@ class MockConfluenceApi {
   async getPage(_t: string, _c: string, pageId: string) {
     return this.pages.get(pageId) ?? null;
   }
+  async getPageSummary(_t: string, _c: string, pageId: string) {
+    return this.pages.get(pageId) ?? null;
+  }
   async createPage(_t: string, _c: string, input: { spaceKey: string; title: string; body: string }) {
     const id = `pg-${this.seq++}`;
     const page = {
@@ -86,7 +89,9 @@ class MockAtlassianApi {
       accessToken: `at-${randomUUID()}`,
       refreshToken: `rt-${randomUUID()}`,
       expiresInSeconds: 3600,
-      scopes: 'read:jira-user read:jira-work write:jira-work offline_access',
+      scopes:
+        'read:jira-user read:jira-work write:jira-work ' +
+        'read:space:confluence read:page:confluence write:page:confluence delete:page:confluence offline_access',
     };
   }
   async refreshTokens() {
@@ -772,6 +777,61 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
       expect(list[0].key).toBe('PROJ-77');
       expect(list[0].title).toBe('Unfurl me please');
       expect(list[0].status).toBe('To Do');
+    });
+
+    it('pasted Confluence page URLs unfurl with the real page title', async () => {
+      confMock.pages.set('998877', {
+        id: '998877',
+        title: 'Release Runbook',
+        version: 3,
+        body: '<p>steps</p>',
+        webui: '/spaces/DEV/pages/998877',
+      });
+      const msg = await http()
+        .post(`/channels/${channelId}/messages`)
+        .set(auth(owner))
+        .send({
+          clientMsgId: randomUUID(),
+          contentJson: { type: 'doc', content: [] },
+          contentText: `runbook: ${SITE.url}/wiki/spaces/DEV/pages/998877/Stale+Slug+Title`,
+        })
+        .expect(201);
+
+      let unfurls: unknown = null;
+      for (let i = 0; i < 20 && !unfurls; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        const row = await prisma.message.findUnique({ where: { id: msg.body.data.id } });
+        unfurls = row?.unfurls ?? null;
+      }
+      expect(unfurls).toBeTruthy();
+      const list = unfurls as Array<{ type: string; title: string; url: string }>;
+      expect(list).toHaveLength(1);
+      expect(list[0].type).toBe('confluence');
+      // Fetched title wins over the (possibly stale) slug in the URL.
+      expect(list[0].title).toBe('Release Runbook');
+    });
+
+    it('falls back to the URL slug when the page cannot be fetched', async () => {
+      const msg = await http()
+        .post(`/channels/${channelId}/messages`)
+        .set(auth(owner))
+        .send({
+          clientMsgId: randomUUID(),
+          contentJson: { type: 'doc', content: [] },
+          contentText: `see ${SITE.url}/wiki/spaces/DEV/pages/424242/Deploy+Checklist`,
+        })
+        .expect(201);
+
+      let unfurls: unknown = null;
+      for (let i = 0; i < 20 && !unfurls; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        const row = await prisma.message.findUnique({ where: { id: msg.body.data.id } });
+        unfurls = row?.unfurls ?? null;
+      }
+      expect(unfurls).toBeTruthy();
+      const list = unfurls as Array<{ type: string; title: string }>;
+      expect(list[0].type).toBe('confluence');
+      expect(list[0].title).toBe('Deploy Checklist');
     });
   });
 

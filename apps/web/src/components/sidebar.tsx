@@ -13,6 +13,7 @@ import {
   Moon,
   Plus,
   Search,
+  Smile,
   Sun,
   UserPlus,
 } from 'lucide-react';
@@ -32,10 +33,13 @@ import {
   type ChannelWithMeta,
   type Container,
 } from '@/hooks/queries';
+import { emojiChar } from '@/lib/emoji';
 import { Avatar } from './avatar';
 import { Dialog } from './dialog';
-import { AtlassianDialog } from './atlassian-dialog';
+import { EmojiPickerPopover } from './emoji-picker';
+import { AtlassianDialog, useAtlassianStatus } from './atlassian-dialog';
 import { ConfluenceDialog } from './confluence-dialog';
+import { JiraTree, ConfluenceTree } from './integration-tree';
 
 export function Sidebar({
   workspaceId,
@@ -56,6 +60,7 @@ export function Sidebar({
   const unreads = useUnreads(workspaceId);
   const presence = usePresence(workspaceId);
   const notifications = useNotifications();
+  const atlassian = useAtlassianStatus(workspaceId);
   const workspaces = useWorkspaces();
   const workspace = workspaces.data?.find((w) => w.id === workspaceId);
 
@@ -184,6 +189,13 @@ export function Sidebar({
           );
         })}
 
+        {/* Integration browse trees: Jira projects → issues, Confluence spaces → pages.
+            Kept under Channels (above DMs) so the workspace navigation stays together. */}
+        {atlassian.data?.connected && <JiraTree workspaceId={workspaceId} />}
+        {atlassian.data?.connected && atlassian.data.confluenceReady && (
+          <ConfluenceTree workspaceId={workspaceId} />
+        )}
+
         {/* DMs */}
         <SectionHeader label="Direct messages" onAdd={() => setDialog('dm')} />
         <ul>
@@ -233,7 +245,7 @@ export function Sidebar({
             <span className="block truncate text-[13px] font-medium text-white">{me?.displayName}</span>
             {me?.statusText && (
               <span className="block truncate text-[11px] text-sidebar-muted">
-                {me.statusEmoji ? `:${me.statusEmoji}: ` : ''}
+                {me.statusEmoji ? `${emojiChar(me.statusEmoji)} ` : ''}
                 {me.statusText}
               </span>
             )}
@@ -266,7 +278,14 @@ export function Sidebar({
       {dialog === 'dm' && (
         <DmPickerDialog workspaceId={workspaceId} onClose={() => setDialog('none')} onOpen={(id) => { setDialog('none'); onNavigate({ kind: 'conversation', id }); }} />
       )}
-      {dialog === 'status' && <ProfileDialog onClose={() => setDialog('none')} />}
+      {dialog === 'status' && (
+        <ProfileDialog
+          initialPresence={
+            (me && (presence.data?.[me.id] as 'ACTIVE' | 'AWAY' | 'DND' | undefined)) ?? 'ACTIVE'
+          }
+          onClose={() => setDialog('none')}
+        />
+      )}
       {dialog === 'atlassian' && (
         <AtlassianDialog
           workspaceId={workspaceId}
@@ -588,6 +607,7 @@ function DmPickerDialog({
   onOpen: (id: string) => void;
 }) {
   const me = useAuthStore((s) => s.user);
+  const qc = useQueryClient();
   const members = useMembers(workspaceId);
   const [selected, setSelected] = useState<string[]>([]);
   const [filter, setFilter] = useState('');
@@ -638,6 +658,9 @@ function DmPickerDialog({
           const dm = await api<{ id: string }>('POST', `/workspaces/${workspaceId}/conversations`, {
             memberIds: selected,
           });
+          // Refresh the conversations list so the new DM shows in the sidebar and
+          // resolves in the main pane immediately (no navigate-away-and-back).
+          await qc.invalidateQueries({ queryKey: keys.conversations(workspaceId) });
           onOpen(dm.id);
         }}
         className="w-full rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
@@ -648,13 +671,26 @@ function DmPickerDialog({
   );
 }
 
-function ProfileDialog({ onClose }: { onClose: () => void }) {
+const PRESENCE_META: Record<'ACTIVE' | 'AWAY' | 'DND', { label: string; dot: string }> = {
+  ACTIVE: { label: 'Active', dot: 'bg-green-500' },
+  AWAY: { label: 'Away', dot: 'bg-yellow-400' },
+  DND: { label: 'Do not disturb', dot: 'bg-red-500' },
+};
+
+function ProfileDialog({
+  initialPresence = 'ACTIVE',
+  onClose,
+}: {
+  initialPresence?: 'ACTIVE' | 'AWAY' | 'DND';
+  onClose: () => void;
+}) {
   const me = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const [name, setName] = useState(me?.displayName ?? '');
   const [emoji, setEmoji] = useState(me?.statusEmoji ?? '');
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [text, setText] = useState(me?.statusText ?? '');
-  const [presenceState, setPresenceState] = useState<'ACTIVE' | 'AWAY' | 'DND'>('ACTIVE');
+  const [presenceState, setPresenceState] = useState<'ACTIVE' | 'AWAY' | 'DND'>(initialPresence);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -740,25 +776,50 @@ function ProfileDialog({ onClose }: { onClose: () => void }) {
 
       <label className="mb-1 block text-xs font-medium text-gray-500">Status</label>
       <div className="mb-3 flex gap-2">
-        <input
-          className={clsx(inputCls, 'w-20')}
-          placeholder=":emoji:"
-          value={emoji}
-          onChange={(e) => setEmoji(e.target.value.replace(/:/g, ''))}
-        />
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setEmojiPickerOpen((v) => !v)}
+            className={clsx(inputCls, 'flex h-full w-12 items-center justify-center text-lg')}
+            title="Pick an emoji"
+            data-testid="status-emoji-button"
+          >
+            {emoji ? emojiChar(emoji) : <Smile size={16} className="text-gray-400" />}
+          </button>
+          {emojiPickerOpen && (
+            <EmojiPickerPopover
+              onPick={(code) => {
+                setEmoji(code);
+                setEmojiPickerOpen(false);
+              }}
+              onClose={() => setEmojiPickerOpen(false)}
+            />
+          )}
+        </div>
         <input
           className={clsx(inputCls, 'flex-1')}
           placeholder="What's your status?"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
+        {emoji && (
+          <button
+            type="button"
+            onClick={() => setEmoji('')}
+            className="px-1 text-xs text-gray-400 hover:text-gray-600"
+            title="Clear emoji"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
-      <div className="mb-4 flex gap-3 text-sm">
+      <div className="mb-4 flex gap-4 text-sm">
         {(['ACTIVE', 'AWAY', 'DND'] as const).map((s) => (
-          <label key={s} className="flex items-center gap-1">
+          <label key={s} className="flex cursor-pointer items-center gap-1.5">
             <input type="radio" checked={presenceState === s} onChange={() => setPresenceState(s)} />
-            {s === 'ACTIVE' ? 'Active' : s === 'AWAY' ? 'Away' : 'Do not disturb'}
+            <span className={clsx('h-2.5 w-2.5 rounded-full', PRESENCE_META[s].dot)} />
+            {PRESENCE_META[s].label}
           </label>
         ))}
       </div>

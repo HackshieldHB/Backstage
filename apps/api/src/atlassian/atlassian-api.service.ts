@@ -223,7 +223,13 @@ export class AtlassianApiService {
   async createIssue(
     accessToken: string,
     cloudId: string,
-    input: { projectKey: string; summary: string; description: string },
+    input: {
+      projectKey: string;
+      summary: string;
+      description: string;
+      priority?: string;
+      reporterAccountId?: string;
+    },
   ): Promise<{ key: string }> {
     const res = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue`, {
       method: 'POST',
@@ -233,6 +239,8 @@ export class AtlassianApiService {
           project: { key: input.projectKey },
           summary: input.summary,
           issuetype: { name: 'Task' },
+          ...(input.priority ? { priority: { name: input.priority } } : {}),
+          ...(input.reporterAccountId ? { reporter: { id: input.reporterAccountId } } : {}),
           description: {
             type: 'doc',
             version: 1,
@@ -244,6 +252,39 @@ export class AtlassianApiService {
     if (!res.ok) throw new BadGatewayException('Failed to create Jira issue');
     const json = (await res.json()) as { key: string };
     return { key: json.key };
+  }
+
+  /** Projects on the site (for the sidebar browse tree). */
+  async listProjects(
+    accessToken: string,
+    cloudId: string,
+  ): Promise<Array<{ id: string; key: string; name: string }>> {
+    const json = await this.get<{ values?: Array<{ id: string; key: string; name: string }> }>(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/project/search?maxResults=50&orderBy=key`,
+      accessToken,
+    );
+    return (json?.values ?? []).map((p) => ({ id: p.id, key: p.key, name: p.name }));
+  }
+
+  /** Recent issues in a project. Uses the /search/jql endpoint — the old
+   * /search was removed by Atlassian (returns 410 Gone). */
+  async searchIssues(
+    accessToken: string,
+    cloudId: string,
+    projectKey: string,
+  ): Promise<Array<{ key: string; summary: string; status: string | null }>> {
+    const jql = encodeURIComponent(`project="${projectKey}" ORDER BY updated DESC`);
+    const json = await this.get<{
+      issues?: Array<{ key: string; fields?: { summary?: string; status?: { name?: string } } }>;
+    }>(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql?jql=${jql}&maxResults=50&fields=summary,status`,
+      accessToken,
+    );
+    return (json?.issues ?? []).map((i) => ({
+      key: i.key,
+      summary: i.fields?.summary ?? i.key,
+      status: i.fields?.status?.name ?? null,
+    }));
   }
 
   private issueBase(cloudId: string, issueKey: string): string {

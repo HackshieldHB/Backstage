@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
-import { AtSign, Bell, FileText, Hash, MessageSquareText, Reply, Smile, X } from 'lucide-react';
+import { AtSign, Bell, BellOff, FileText, Hash, MessageSquareText, Reply, Smile, SquareKanban, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, fileUrl } from '@/lib/api';
 import { useUiStore, type RightPanel } from '@/stores/ui-store';
@@ -16,6 +16,7 @@ import {
   useSaved,
   useSearch,
   useThread,
+  useWorkspaces,
   type Container,
 } from '@/hooks/queries';
 import { useQuery } from '@tanstack/react-query';
@@ -23,6 +24,8 @@ import { MessageItem, emojiChar } from './message-item';
 import { Composer } from './composer';
 import { Avatar } from './avatar';
 import { MessageBody } from './message-body';
+import { UserProfileDialog } from './user-profile-dialog';
+import type { UserDto } from '@backstages/shared';
 
 export function RightPanelView({
   workspaceId,
@@ -130,7 +133,11 @@ function DetailsPanel({
   onNavigate: (c: Container, highlight?: string) => void;
 }) {
   const [tab, setTab] = useState<'about' | 'members' | 'pinned' | 'files'>('about');
+  const [profileUser, setProfileUser] = useState<UserDto | null>(null);
   const qc = useQueryClient();
+  const workspaces = useWorkspaces();
+  const myRole = workspaces.data?.find((w) => w.id === workspaceId)?.myRole;
+  const isAdmin = myRole === 'OWNER' || myRole === 'ADMIN';
   const members = useChannelMembers(channelId);
   const pins = usePins(channelId);
   const presence = usePresence(workspaceId);
@@ -189,16 +196,37 @@ function DetailsPanel({
             </select>
           </div>
           {!channel.data.isDefault && (
-            <button
-              onClick={async () => {
-                await api('POST', `/channels/${channelId}/leave`);
-                await qc.invalidateQueries({ queryKey: keys.channels(workspaceId) });
-                window.location.href = `/app?ws=${workspaceId}`;
-              }}
-              className="text-sm font-medium text-red-600 hover:underline"
-            >
-              Leave channel
-            </button>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={async () => {
+                  await api('POST', `/channels/${channelId}/leave`);
+                  await qc.invalidateQueries({ queryKey: keys.channels(workspaceId) });
+                  window.location.href = `/app?ws=${workspaceId}`;
+                }}
+                className="text-sm font-medium text-red-600 hover:underline"
+              >
+                Leave channel
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`Delete #${channel.data!.name}? This permanently removes the channel and its messages for everyone.`))
+                      return;
+                    try {
+                      await api('DELETE', `/channels/${channelId}`);
+                      await qc.invalidateQueries({ queryKey: keys.channels(workspaceId) });
+                      window.location.href = `/app?ws=${workspaceId}`;
+                    } catch (err) {
+                      window.alert(err instanceof Error ? err.message : 'Failed to delete channel');
+                    }
+                  }}
+                  className="text-sm font-medium text-red-600 hover:underline"
+                  data-testid="delete-channel"
+                >
+                  Delete channel
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -206,17 +234,31 @@ function DetailsPanel({
       {tab === 'members' && (
         <ul className="p-2">
           {(members.data ?? []).map((m) => (
-            <li key={m.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800">
-              <Avatar user={m} size="sm" presence={presence.data?.[m.id]} />
-              <span className="text-sm">{m.displayName}</span>
-              {m.isProvisional && (
-                <span className="rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700 dark:bg-amber-900 dark:text-amber-300">
-                  provisional
-                </span>
-              )}
+            <li key={m.id}>
+              <button
+                onClick={() => setProfileUser(m)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
+                data-testid={`member-${m.id}`}
+              >
+                <Avatar user={m} size="sm" presence={presence.data?.[m.id]} />
+                <span className="text-sm">{m.displayName}</span>
+                {m.isProvisional && (
+                  <span className="rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+                    provisional
+                  </span>
+                )}
+              </button>
             </li>
           ))}
         </ul>
+      )}
+
+      {profileUser && (
+        <UserProfileDialog
+          user={profileUser}
+          presence={presence.data?.[profileUser.id]}
+          onClose={() => setProfileUser(null)}
+        />
       )}
 
       {tab === 'pinned' && (
@@ -265,20 +307,60 @@ function DetailsPanel({
 
 // ---------- activity ----------
 
-function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: string) => void }) {
-  const notifications = useNotifications();
-  const qc = useQueryClient();
+interface NotifPayload {
+  source?: string;
+  action?: string;
+  issueKey?: string;
+  title?: string;
+  summary?: string;
+  url?: string;
+  direction?: string;
+  emoji?: string;
+}
 
-  const iconFor = (type: string) =>
-    type === 'MENTION' ? <AtSign size={14} className="text-accent" />
+function iconForNotification(type: string, pl: NotifPayload) {
+  if (type === 'SYSTEM' && pl.source === 'jira')
+    return <SquareKanban size={14} className="text-[#2684FF]" />;
+  if (type === 'SYSTEM' && pl.source === 'confluence')
+    return <FileText size={14} className="text-[#2684FF]" />;
+  return type === 'MENTION' ? <AtSign size={14} className="text-accent" />
     : type === 'THREAD_REPLY' ? <Reply size={14} className="text-emerald-600" />
     : type === 'REACTION' ? <Smile size={14} className="text-amber-500" />
     : type === 'DM' ? <MessageSquareText size={14} className="text-blue-500" />
     : <Bell size={14} className="text-gray-400" />;
+}
+
+/** Main text line for a SYSTEM (integration) notification, else null. */
+function systemText(pl: NotifPayload): string | null {
+  if (pl.source === 'jira') {
+    if (pl.action === 'created') return `Created Jira issue ${pl.issueKey ?? ''}`;
+    return pl.direction === 'out'
+      ? `${pl.issueKey ?? 'An issue'} unassigned from you`
+      : `${pl.issueKey ?? 'An issue'} assigned to you`;
+  }
+  if (pl.source === 'confluence' && pl.action === 'created')
+    return `Created Confluence page “${pl.title ?? ''}”`;
+  return null;
+}
+
+function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: string) => void }) {
+  const notifications = useNotifications();
+  const qc = useQueryClient();
+  const muted = useUiStore((s) => s.notificationsMuted);
+  const setMuted = useUiStore((s) => s.setNotificationsMuted);
 
   return (
     <div className="p-2" data-testid="activity-list">
-      <div className="flex justify-end px-2 pb-1">
+      <div className="flex items-center justify-between px-2 pb-1">
+        <button
+          className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+          onClick={() => setMuted(!muted)}
+          title={muted ? 'Notifications muted — click to unmute' : 'Mute desktop notifications'}
+          data-testid="mute-notifications"
+        >
+          {muted ? <BellOff size={13} /> : <Bell size={13} />}
+          {muted ? 'Muted' : 'Mute'}
+        </button>
         <button
           className="text-xs font-medium text-accent hover:underline"
           onClick={async () => {
@@ -289,37 +371,51 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
           Mark all read
         </button>
       </div>
-      {(notifications.data?.notifications ?? []).map((n) => (
-        <button
-          key={n.id}
-          onClick={() => {
-            if (n.channelId) onNavigate({ kind: 'channel', id: n.channelId }, n.messageId ?? undefined);
-            else if (n.conversationId) onNavigate({ kind: 'conversation', id: n.conversationId }, n.messageId ?? undefined);
-          }}
-          className={clsx(
-            'mb-1 flex w-full items-start gap-2 rounded-lg p-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800',
-            !n.readAt && 'bg-accent/5',
-          )}
-        >
-          <span className="mt-0.5">{iconFor(n.type)}</span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[13px]">
-              <strong>{n.actor?.displayName ?? 'Someone'}</strong>{' '}
-              {n.type === 'MENTION' && 'mentioned you'}
-              {n.type === 'THREAD_REPLY' && 'replied to a thread'}
-              {n.type === 'REACTION' &&
-                `reacted ${emojiChar(String((n.payload as { emoji?: string } | null)?.emoji ?? ''))}`}
-              {n.type === 'DM' && 'sent you a message'}
-              {n.channelName && <span className="text-gray-400"> in #{n.channelName}</span>}
+      {(notifications.data?.notifications ?? []).map((n) => {
+        const pl = (n.payload ?? {}) as NotifPayload;
+        const sysText = n.type === 'SYSTEM' ? systemText(pl) : null;
+        const open = () => {
+          if (pl.url) window.open(pl.url, '_blank', 'noopener');
+          else if (n.channelId) onNavigate({ kind: 'channel', id: n.channelId }, n.messageId ?? undefined);
+          else if (n.conversationId)
+            onNavigate({ kind: 'conversation', id: n.conversationId }, n.messageId ?? undefined);
+        };
+        return (
+          <button
+            key={n.id}
+            onClick={open}
+            className={clsx(
+              'mb-1 flex w-full items-start gap-2 rounded-lg p-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800',
+              !n.readAt && 'bg-accent/5',
+            )}
+          >
+            <span className="mt-0.5">{iconForNotification(n.type, pl)}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px]">
+                {sysText ? (
+                  <strong>{sysText}</strong>
+                ) : (
+                  <>
+                    <strong>{n.actor?.displayName ?? 'Someone'}</strong>{' '}
+                    {n.type === 'MENTION' && 'mentioned you'}
+                    {n.type === 'THREAD_REPLY' && 'replied to a thread'}
+                    {n.type === 'REACTION' && `reacted ${emojiChar(String(pl.emoji ?? ''))}`}
+                    {n.type === 'DM' && 'sent you a message'}
+                  </>
+                )}
+                {n.channelName && <span className="text-gray-400"> in #{n.channelName}</span>}
+              </span>
+              {(pl.summary || n.preview) && (
+                <span className="block truncate text-xs text-gray-500">{pl.summary ?? n.preview}</span>
+              )}
+              <span className="block text-[11px] text-gray-400">
+                {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true })}
+              </span>
             </span>
-            {n.preview && <span className="block truncate text-xs text-gray-500">{n.preview}</span>}
-            <span className="block text-[11px] text-gray-400">
-              {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true })}
-            </span>
-          </span>
-          {!n.readAt && <span className="mt-1.5 h-2 w-2 rounded-full bg-accent" />}
-        </button>
-      ))}
+            {!n.readAt && <span className="mt-1.5 h-2 w-2 rounded-full bg-accent" />}
+          </button>
+        );
+      })}
       {(notifications.data?.notifications ?? []).length === 0 && (
         <p className="p-3 text-sm text-gray-400">No activity yet.</p>
       )}

@@ -37,6 +37,13 @@ const JiraCommandSchema = z.object({
 const CreateIssueSchema = z.object({
   projectKey: z.string().regex(/^[A-Z][A-Z0-9]+$/),
   summary: z.string().max(200).optional(),
+  priority: z.enum(['Highest', 'High', 'Medium', 'Low', 'Lowest']).optional(),
+});
+
+const CreateChannelIssueSchema = z.object({
+  projectKey: z.string().regex(/^[A-Z][A-Z0-9]+$/),
+  summary: z.string().min(1).max(200),
+  priority: z.enum(['Highest', 'High', 'Medium', 'Low', 'Lowest']).optional(),
 });
 
 @Controller()
@@ -152,6 +159,22 @@ export class AtlassianController {
     return { ok: true };
   }
 
+  // ----- browse tree -----
+
+  @Get('workspaces/:id/jira/projects')
+  jiraProjects(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
+    return this.jiraActions.listProjects(user.id, workspaceId);
+  }
+
+  @Get('workspaces/:id/jira/projects/:projectKey/issues')
+  jiraProjectIssues(
+    @CurrentUser() user: AuthUser,
+    @Param('id') workspaceId: string,
+    @Param('projectKey') projectKey: string,
+  ) {
+    return this.jiraActions.listProjectIssues(user.id, workspaceId, projectKey.toUpperCase());
+  }
+
   // ----- actions -----
 
   @HttpCode(200)
@@ -162,6 +185,16 @@ export class AtlassianController {
     @Body(new ZodValidationPipe(JiraCommandSchema)) body: z.infer<typeof JiraCommandSchema>,
   ) {
     return this.jiraActions.jiraCommand(user.id, channelId, body.issueKey.toUpperCase());
+  }
+
+  @HttpCode(200)
+  @Post('channels/:id/jira/create-issue')
+  createChannelIssue(
+    @CurrentUser() user: AuthUser,
+    @Param('id') channelId: string,
+    @Body(new ZodValidationPipe(CreateChannelIssueSchema)) body: z.infer<typeof CreateChannelIssueSchema>,
+  ) {
+    return this.jiraActions.createIssueInChannel(user.id, channelId, body);
   }
 
   @HttpCode(200)

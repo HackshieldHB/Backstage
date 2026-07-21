@@ -8,8 +8,32 @@ import { AtlassianService } from './atlassian.service';
 import { IntegrationMessagesService } from '../messages/integration-messages.service';
 import { channelContainer } from '../messages/messages.service';
 import { AppRegistry, type IntegrationApp } from '../integrations/app-registry';
+import { NotificationsService } from '../notifications/notifications.service';
+import { ConfluenceApiService } from './confluence-api.service';
+import { hasGranularConfluence } from './scopes';
 
 const ISSUE_KEY_RE = /^[A-Z][A-Z0-9]+-\d+$/;
+
+/**
+ * Pulls the numeric page id out of the two URL shapes Confluence Cloud hands
+ * out: `/wiki/spaces/DEV/pages/12345/Some+Title` and the legacy
+ * `/wiki/pages/viewpage.action?pageId=12345`.
+ */
+function confluencePageId(url: string): string | null {
+  return (/\/pages\/(\d+)/.exec(url) ?? /[?&]pageId=(\d+)/.exec(url))?.[1] ?? null;
+}
+
+/** Human-readable title from the URL slug, for when the page can't be fetched. */
+function titleFromWikiUrl(url: string): string {
+  const slug = /\/pages\/\d+\/([^/?#]+)/.exec(url)?.[1];
+  if (!slug) return 'Confluence page';
+  try {
+    return decodeURIComponent(slug.replace(/\+/g, ' ')).trim() || 'Confluence page';
+  } catch {
+    // Malformed percent-encoding — the slug is unusable.
+    return 'Confluence page';
+  }
+}
 
 function cardDoc(text: string, href: string) {
   return {
@@ -32,9 +56,11 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
     private readonly api: AtlassianApiService,
+    private readonly confluenceApi: ConfluenceApiService,
     private readonly atlassian: AtlassianService,
     private readonly integrationMessages: IntegrationMessagesService,
     private readonly registry: AppRegistry,
+    private readonly notifications: NotificationsService,
   ) {}
 
   onModuleInit() {
@@ -79,11 +105,28 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
       if (unfurls.length >= 5) break;
     }
 
+    // Confluence pages resolve to their real title when the connection carries
+    // granular scopes; otherwise fall back to the URL slug so the card is still
+    // more useful than a bare "Confluence page".
+    const canReadPages = hasGranularConfluence(connection.scopes);
     for (const match of contentText.matchAll(wikiRe)) {
       const url = match[0];
-      if (seen.has(url) || unfurls.length >= 5) continue;
-      seen.add(url);
-      unfurls.push({ type: 'confluence', url, title: 'Confluence page' });
+      const pageId = confluencePageId(url);
+      const dedupeKey = pageId ? `confluence:${pageId}` : url;
+      if (seen.has(dedupeKey) || unfurls.length >= 5) continue;
+      seen.add(dedupeKey);
+
+      let title = titleFromWikiUrl(url);
+      if (pageId && canReadPages) {
+        try {
+          const token = await this.atlassian.accessTokenFor(connection);
+          const page = await this.confluenceApi.getPageSummary(token, connection.siteId, pageId);
+          if (page) title = page.title;
+        } catch {
+          // Skip unfurl on API failure — never break message delivery.
+        }
+      }
+      unfurls.push({ type: 'confluence', url, title });
     }
 
     return unfurls.length > 0 ? unfurls : null;
@@ -125,7 +168,7 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
   async createIssueFromMessage(
     userId: string,
     messageId: string,
-    input: { projectKey: string; summary?: string },
+    input: { projectKey: string; summary?: string; priority?: string },
   ) {
     const message = await this.prisma.message.findUnique({ where: { id: messageId } });
     if (!message || message.deletedAt || !message.channelId) {
@@ -133,13 +176,21 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
     }
     const { channel } = await this.policy.requireChannelMember(userId, message.channelId);
     const connection = await this.atlassian.connectionForWorkspace(channel.workspaceId);
-    const token = await this.atlassian.accessTokenFor(connection);
+    // Prefer the caller's personal token so the new issue's Reporter is *them*,
+    // not the shared workspace bot; fall back to the connection when unlinked.
+    const userToken = await this.atlassian.userAccessTokenFor(userId);
+    const token = userToken ?? (await this.atlassian.accessTokenFor(connection));
+    const link = await this.prisma.atlassianAccountLink.findUnique({ where: { userId } });
 
     const summary = input.summary?.trim() || message.contentText.slice(0, 100);
     const created = await this.api.createIssue(token, connection.siteId, {
       projectKey: input.projectKey,
       summary,
       description: `From Backstages #${channel.name}: ${message.contentText.slice(0, 500)}`,
+      priority: input.priority,
+      // Only settable when we know the caller's Jira identity (and the project
+      // allows setting Reporter). Harmless to omit otherwise.
+      reporterAccountId: link?.atlassianAccountId,
     });
 
     const url = `${connection.siteUrl}/browse/${created.key}`;
@@ -151,7 +202,73 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
       contentJson: cardDoc(text, url),
       parentId: message.parentId ?? message.id,
     });
+    await this.notifyIssueCreated(userId, message.channelId, created.key, summary, url);
     return { key: created.key, url };
+  }
+
+  /** Create an issue straight from a channel (e.g. the `/jira create` command),
+   * not tied to a source message. Posts a card and files an Activity notification. */
+  async createIssueInChannel(
+    userId: string,
+    channelId: string,
+    input: { projectKey: string; summary: string; priority?: string },
+  ) {
+    const { channel } = await this.policy.requireChannelMember(userId, channelId);
+    const connection = await this.atlassian.connectionForWorkspace(channel.workspaceId);
+    const userToken = await this.atlassian.userAccessTokenFor(userId);
+    const token = userToken ?? (await this.atlassian.accessTokenFor(connection));
+    const link = await this.prisma.atlassianAccountLink.findUnique({ where: { userId } });
+
+    const summary = input.summary.trim();
+    const created = await this.api.createIssue(token, connection.siteId, {
+      projectKey: input.projectKey,
+      summary,
+      description: `Created from Backstages #${channel.name}`,
+      priority: input.priority,
+      reporterAccountId: link?.atlassianAccountId,
+    });
+
+    const url = `${connection.siteUrl}/browse/${created.key}`;
+    const text = `Created ${created.key}: ${summary}`;
+    await this.integrationMessages.post(channelContainer(channelId), {
+      workspaceId: channel.workspaceId,
+      contentText: text,
+      contentJson: cardDoc(text, url),
+    });
+    await this.notifyIssueCreated(userId, channelId, created.key, summary, url);
+    return { key: created.key, url };
+  }
+
+  private async notifyIssueCreated(
+    userId: string,
+    channelId: string,
+    issueKey: string,
+    summary: string,
+    url: string,
+  ) {
+    await this.notifications.notify({
+      userId,
+      type: 'SYSTEM',
+      channelId,
+      payload: { source: 'jira', action: 'created', issueKey, summary, url },
+    });
+  }
+
+  // ---------- browse tree (projects → issues) ----------
+
+  async listProjects(userId: string, workspaceId: string) {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const connection = await this.atlassian.connectionForWorkspace(workspaceId);
+    const token = await this.atlassian.accessTokenFor(connection);
+    return this.api.listProjects(token, connection.siteId);
+  }
+
+  async listProjectIssues(userId: string, workspaceId: string, projectKey: string) {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const connection = await this.atlassian.connectionForWorkspace(workspaceId);
+    const token = await this.atlassian.accessTokenFor(connection);
+    const issues = await this.api.searchIssues(token, connection.siteId, projectKey);
+    return issues.map((i) => ({ ...i, url: `${connection.siteUrl}/browse/${i.key}` }));
   }
 
   // ---------- interactive actions (Assign / Move / Comment) ----------
@@ -225,7 +342,7 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
       case 'assign_me': {
         const link = await this.prisma.atlassianAccountLink.findUnique({ where: { userId } });
         if (!link) {
-          throw new BadRequestException('Hubungkan akun Atlassian kamu dulu untuk assign issue');
+          throw new BadRequestException('Connect your Atlassian account first to assign issues');
         }
         await this.api.assignIssue(token, connection.siteId, issueKey, link.atlassianAccountId);
         summary = `assigned ${issueKey} to themselves`;
