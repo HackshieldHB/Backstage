@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { AtlassianConnection } from '@prisma/client';
 import type {
   ConfluencePage,
@@ -9,6 +9,8 @@ import type {
 import { PolicyService } from '../authz/policy.service';
 import { AtlassianService } from './atlassian.service';
 import { ConfluenceApiService, type ConfluencePageRaw } from './confluence-api.service';
+import { hasGranularConfluence } from './scopes';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /** Wraps plain user text into Confluence storage-format XHTML. */
 function toStorage(text: string): string {
@@ -41,11 +43,20 @@ export class ConfluenceService {
     private readonly policy: PolicyService,
     private readonly atlassian: AtlassianService,
     private readonly api: ConfluenceApiService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private async ctx(userId: string, workspaceId: string) {
     await this.policy.requireWorkspaceMember(userId, workspaceId);
     const connection = await this.atlassian.connectionForWorkspace(workspaceId);
+    // The v2 Confluence API requires GRANULAR scopes (…:confluence). Classic
+    // read:confluence-* scopes only worked with the now-removed v1 API and yield
+    // an opaque 401 — require a granular scope and surface an actionable message.
+    if (!hasGranularConfluence(connection.scopes)) {
+      throw new ForbiddenException(
+        'This Atlassian connection is missing Confluence access. A workspace admin needs to reconnect Atlassian (Workspace menu → Connect Atlassian) to grant Confluence permissions.',
+      );
+    }
     const token = await this.atlassian.accessTokenFor(connection);
     return { connection, token };
   }
@@ -79,7 +90,19 @@ export class ConfluenceService {
       title: input.title,
       body: toStorage(input.body),
     });
-    return this.toDto(connection, page);
+    const dto = this.toDto(connection, page);
+    await this.notifications.notify({
+      userId,
+      type: 'SYSTEM',
+      payload: {
+        source: 'confluence',
+        action: 'created',
+        title: dto.title,
+        spaceKey: input.spaceKey,
+        url: dto.url,
+      },
+    });
+    return dto;
   }
 
   async updatePage(
@@ -104,11 +127,11 @@ export class ConfluenceService {
   }
 
   private toDto(connection: AtlassianConnection, p: ConfluencePageRaw): ConfluencePage {
-    return {
-      id: p.id,
-      title: p.title,
-      version: p.version,
-      url: p.webui ? `${connection.siteUrl}/wiki${p.webui}` : null,
-    };
+    // v2 list responses sometimes omit _links.webui — fall back to the stable
+    // pageId view URL so a page is always openable.
+    const url = p.webui
+      ? `${connection.siteUrl}/wiki${p.webui}`
+      : `${connection.siteUrl}/wiki/pages/viewpage.action?pageId=${p.id}`;
+    return { id: p.id, title: p.title, version: p.version, url };
   }
 }

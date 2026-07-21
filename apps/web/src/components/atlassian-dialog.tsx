@@ -10,6 +10,7 @@ import { Dialog } from './dialog';
 interface AtlassianStatus {
   connected: boolean;
   connection: { id: string; siteUrl: string; siteName: string; lastSyncAt: string | null } | null;
+  confluenceReady?: boolean;
   me?: { linked: boolean; canAct: boolean };
 }
 
@@ -160,13 +161,33 @@ export function AtlassianDialog({
           )}
 
           <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
-            <button
-              onClick={() => onOpenConfluence?.()}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
-              data-testid="open-confluence"
-            >
-              Manage Confluence pages
-            </button>
+            {status.data.confluenceReady === false ? (
+              <div className="rounded-md bg-amber-50 p-2.5 dark:bg-amber-900/20">
+                <p className="mb-2 text-xs text-amber-700 dark:text-amber-300">
+                  This connection has no Confluence access.{' '}
+                  {isAdmin
+                    ? 'Reconnect Atlassian to grant Confluence permissions.'
+                    : 'Ask a workspace admin to reconnect Atlassian.'}
+                </p>
+                {isAdmin && (
+                  <button
+                    onClick={() => void connect()}
+                    className="rounded-md bg-[#2684FF] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#1f6fd6]"
+                    data-testid="reconnect-confluence"
+                  >
+                    Reconnect for Confluence
+                  </button>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => onOpenConfluence?.()}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+                data-testid="open-confluence"
+              >
+                Manage Confluence pages
+              </button>
+            )}
           </div>
 
           <div className="border-t border-gray-200 pt-3 dark:border-gray-700">

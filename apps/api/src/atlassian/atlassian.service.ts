@@ -12,6 +12,7 @@ import { PolicyService } from '../authz/policy.service';
 import { AtlassianApiService } from './atlassian-api.service';
 import { AtlassianSyncService } from './sync.service';
 import { decryptToken, encryptToken } from './crypto';
+import { hasGranularConfluence } from './scopes';
 import { TokenService } from '../auth/token.service';
 import { toUserDto } from '../auth/auth.service';
 
@@ -19,9 +20,13 @@ const CONNECT_SCOPES = [
   'read:jira-user',
   'read:jira-work',
   'write:jira-work',
-  'read:confluence-space.summary',
-  'read:confluence-content.all',
-  'write:confluence-content',
+  // Confluence GRANULAR scopes — required by the v2 REST API. The classic
+  // read:confluence-* scopes only work with the v1 API, which Atlassian has
+  // removed (it now returns 410 Gone).
+  'read:space:confluence',
+  'read:page:confluence',
+  'write:page:confluence',
+  'delete:page:confluence',
   'offline_access',
 ];
 const SSO_SCOPES = ['read:me', 'offline_access'];
@@ -57,10 +62,16 @@ export class AtlassianService {
 
   async status(userId: string, workspaceId: string) {
     await this.policy.requireWorkspaceMember(userId, workspaceId);
-    const connection = await this.prisma.atlassianConnection.findUnique({
+    const row = await this.prisma.atlassianConnection.findUnique({
       where: { workspaceId },
-      select: { id: true, siteUrl: true, siteName: true, lastSyncAt: true, createdAt: true },
+      select: { id: true, siteUrl: true, siteName: true, lastSyncAt: true, createdAt: true, scopes: true },
     });
+    // Strip scopes from the client-facing connection object; expose only the
+    // derived readiness flag so the UI can prompt a reconnect when needed.
+    const connection = row
+      ? { id: row.id, siteUrl: row.siteUrl, siteName: row.siteName, lastSyncAt: row.lastSyncAt, createdAt: row.createdAt }
+      : null;
+    const confluenceReady = hasGranularConfluence(row?.scopes);
     const link = await this.prisma.atlassianAccountLink.findUnique({
       where: { userId },
       select: { accessTokenEnc: true, scopes: true },
@@ -68,7 +79,7 @@ export class AtlassianService {
     // "canAct": the caller has personally granted write access, so Jira actions
     // are attributed to them rather than the shared workspace connection.
     const canAct = Boolean(link?.accessTokenEnc && link.scopes?.includes('write:jira-work'));
-    return { connected: !!connection, connection, me: { linked: !!link, canAct } };
+    return { connected: !!connection, connection, confluenceReady, me: { linked: !!link, canAct } };
   }
 
   // ---------- per-user connect ("Connect my Jira account") ----------
