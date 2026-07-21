@@ -18,6 +18,19 @@ describe('rate limiting (e2e)', () => {
 
   const http = () => request(app.getHttpServer());
 
+  /**
+   * RateLimitGuard uses a FIXED window (`floor(now / windowMs)`), so a burst
+   * that straddles a bucket boundary sees the counter reset mid-way and every
+   * request succeeds. Under full-suite load the sends are slow enough for that
+   * to happen, so wait out the tail of the current window when there isn't
+   * comfortably enough of it left for the burst.
+   */
+  const awaitFreshWindow = async (windowSeconds: number, needMs = 8000) => {
+    const windowMs = windowSeconds * 1000;
+    const remaining = windowMs - (Date.now() % windowMs);
+    if (remaining < needMs) await new Promise((r) => setTimeout(r, remaining + 50));
+  };
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
@@ -63,6 +76,7 @@ describe('rate limiting (e2e)', () => {
   });
 
   it('throttles message sends to 10 per 10 seconds per user', async () => {
+    await awaitFreshWindow(10);
     const statuses: number[] = [];
     for (let i = 0; i < 12; i++) {
       const res = await http()
