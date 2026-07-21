@@ -67,6 +67,15 @@ class MockConfluenceApi {
 
 const SITE = { id: 'cloud-test-1', url: 'https://testsite.atlassian.net', name: 'Test Site' };
 
+interface MockJiraRow {
+  key: string;
+  summary: string;
+  status: string | null;
+  priority: string | null;
+  dueDate: string | null;
+  updated: string | null;
+}
+
 class MockAtlassianApi {
   directory: AtlassianDirectoryUser[] = [];
   issues = new Map<string, JiraIssueSummary>();
@@ -115,18 +124,13 @@ class MockAtlassianApi {
     return { key: `${input.projectKey}-999` };
   }
   /** Rows returned by searchJql, plus a log of (jql, token) for assertions. */
-  searchRows: Array<{
-    key: string;
-    summary: string;
-    status: string | null;
-    priority: string | null;
-    dueDate: string | null;
-    updated: string | null;
-  }> = [];
+  searchRows: MockJiraRow[] = [];
   searches: Array<{ jql: string; token: string }> = [];
+  /** Lets a test vary rows by query (e.g. "moved" vs "overdue" digest slices). */
+  jqlHandler: ((jql: string) => MockJiraRow[]) | null = null;
   async searchJql(token: string, _c: string, jql: string) {
     this.searches.push({ jql, token });
-    return this.searchRows;
+    return this.jqlHandler ? this.jqlHandler(jql) : this.searchRows;
   }
   async searchIssues(token: string, cloudId: string, projectKey: string) {
     return this.searchJql(token, cloudId, `project="${projectKey}" ORDER BY updated DESC`);
@@ -1048,6 +1052,81 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
         .expect(400);
       expect(res.body.error.message).toMatch(/connect your atlassian account/i);
       expect(mock.searches).toHaveLength(0);
+    });
+  });
+
+  describe('standup digest', () => {
+    const row = (key: string, summary: string, status: string): MockJiraRow => ({
+      key,
+      summary,
+      status,
+      priority: null,
+      dueDate: null,
+      updated: null,
+    });
+
+    afterEach(() => {
+      mock.jqlHandler = null;
+    });
+
+    const latestMessage = async () =>
+      prisma.message.findFirst({ where: { channelId }, orderBy: { createdAt: 'desc' } });
+
+    it('posts what moved and what is overdue for the subscribed project', async () => {
+      mock.searches = [];
+      mock.jqlHandler = (jql) =>
+        jql.includes('duedate <')
+          ? [row('PROJ-70', 'Overdue thing', 'In Progress')]
+          : [row('PROJ-71', 'Moved thing', 'Done')];
+
+      const res = await http()
+        .post(`/channels/${channelId}/jira/digest`)
+        .set(auth(owner))
+        .expect(200);
+      expect(res.body.data.posted).toBe(true);
+
+      const msg = await latestMessage();
+      expect(msg!.contentText).toContain('Standup digest');
+      expect(msg!.contentText).toContain('PROJ — 1 updated since yesterday, 1 overdue');
+      expect(msg!.contentText).toContain('Moved: PROJ-71');
+      expect(msg!.contentText).toContain('Overdue: PROJ-70');
+      expect(msg!.kind).toBe('INTEGRATION');
+
+      // Both slices avoid workflow-specific status names.
+      const jqls = mock.searches.map((s) => s.jql).join(' | ');
+      expect(jqls).toContain('updated >= -1d');
+      expect(jqls).toContain('statusCategory != Done');
+      expect(jqls).not.toMatch(/status\s*=\s*"?Blocked/i);
+    });
+
+    it('says nothing when there is nothing to report', async () => {
+      mock.jqlHandler = () => [];
+      const before = await latestMessage();
+
+      const res = await http()
+        .post(`/channels/${channelId}/jira/digest`)
+        .set(auth(owner))
+        .expect(200);
+      expect(res.body.data.posted).toBe(false);
+
+      const after = await latestMessage();
+      expect(after!.id).toBe(before!.id);
+    });
+
+    it('is refused for a non-member of the channel', async () => {
+      mock.jqlHandler = () => [];
+      const outsider = await http()
+        .post('/auth/signup')
+        .send({
+          email: `digest-out-${run}@test.local`,
+          password: 'password123!',
+          displayName: 'Digest Outsider',
+        })
+        .expect(201);
+      const res = await http()
+        .post(`/channels/${channelId}/jira/digest`)
+        .set({ Authorization: `Bearer ${outsider.body.data.accessToken}` });
+      expect([403, 404]).toContain(res.status);
     });
   });
 

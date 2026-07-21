@@ -17,6 +17,7 @@ import { AtlassianService } from './atlassian.service';
 import { AtlassianSyncService } from './sync.service';
 import { JiraEventsService, type JiraWebhookBody } from './jira-events.service';
 import { JiraActionsService } from './jira-actions.service';
+import { StandupService } from './standup.service';
 import { PolicyService } from '../authz/policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
@@ -53,6 +54,7 @@ export class AtlassianController {
     private readonly sync: AtlassianSyncService,
     private readonly jiraEvents: JiraEventsService,
     private readonly jiraActions: JiraActionsService,
+    private readonly standup: StandupService,
     private readonly policy: PolicyService,
     private readonly prisma: PrismaService,
   ) {}
@@ -160,6 +162,12 @@ export class AtlassianController {
   }
 
   // ----- browse tree -----
+
+  @HttpCode(200)
+  @Post('channels/:id/jira/digest')
+  standupDigest(@CurrentUser() user: AuthUser, @Param('id') channelId: string) {
+    return this.standup.postForChannelAsUser(user.id, channelId);
+  }
 
   @Get('workspaces/:id/jira/my-issues')
   jiraMyIssues(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {

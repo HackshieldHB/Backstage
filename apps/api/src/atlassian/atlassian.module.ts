@@ -5,6 +5,8 @@ import { AtlassianSyncService } from './sync.service';
 import { AtlassianSyncQueue } from './sync.queue';
 import { JiraEventsService } from './jira-events.service';
 import { JiraActionsService } from './jira-actions.service';
+import { StandupService } from './standup.service';
+import { StandupQueue } from './standup.queue';
 import { ConfluenceApiService } from './confluence-api.service';
 import { ConfluenceService } from './confluence.service';
 import { AtlassianController } from './atlassian.controller';
@@ -24,6 +26,8 @@ import { AuthModule } from '../auth/auth.module';
     JiraEventsService,
     // Registers itself as the 'jira' app with the AppRegistry on init.
     JiraActionsService,
+    StandupService,
+    StandupQueue,
     ConfluenceApiService,
     ConfluenceService,
   ],
