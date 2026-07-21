@@ -3,12 +3,14 @@ import { CreateConversationInput } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { toUserDto } from '../auth/auth.service';
+import { RealtimeService, roomForConversation } from '../realtime/realtime.service';
 
 @Injectable()
 export class ConversationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   /** Opens (or returns the existing) DM for the exact member set. */
@@ -46,6 +48,14 @@ export class ConversationsService {
       },
       include: { members: { include: { user: true } } },
     });
+    // Every participant's live sockets only joined the rooms that existed at
+    // connect time; subscribe them now so realtime delivery works immediately
+    // (both for the opener and anyone else currently online).
+    await Promise.all(
+      allIds.map((id) =>
+        this.realtime.subscribeUserToRoom(id, roomForConversation(created.id)).catch(() => undefined),
+      ),
+    );
     return this.toDto(created);
   }
 

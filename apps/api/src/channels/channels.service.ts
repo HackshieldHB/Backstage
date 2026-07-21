@@ -5,16 +5,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AddChannelMemberInput, CreateChannelInput, UpdateChannelInput } from '@backstages/shared';
+import { AddChannelMemberInput, CreateChannelInput, SOCKET_EVENTS, UpdateChannelInput } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { toUserDto } from '../auth/auth.service';
+import { RealtimeService, roomForChannel } from '../realtime/realtime.service';
 
 @Injectable()
 export class ChannelsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async create(userId: string, workspaceId: string, input: CreateChannelInput) {
@@ -26,7 +28,7 @@ export class ChannelsService {
     });
     if (existing) throw new ConflictException('A channel with this name already exists');
 
-    return this.prisma.channel.create({
+    const channel = await this.prisma.channel.create({
       data: {
         workspaceId,
         name: input.name,
@@ -38,6 +40,15 @@ export class ChannelsService {
         members: { create: [{ userId }] },
       },
     });
+    // The creator's live sockets must join the room now — they were only in the
+    // rooms that existed at connect time, so without this new realtime (messages,
+    // huddle join) would silently not reach them until a reconnect.
+    await this.realtime.subscribeUserToRoom(userId, roomForChannel(channel.id)).catch(() => undefined);
+    // Public channels appear in everyone's browser; refresh workspace sidebars.
+    if (!channel.isPrivate) {
+      this.realtime.emitToWorkspace(workspaceId, SOCKET_EVENTS.CHANNEL_CREATED, { channelId: channel.id });
+    }
+    return channel;
   }
 
   /** Channels the caller belongs to (sidebar). */
@@ -138,15 +149,33 @@ export class ChannelsService {
     const existing = await this.prisma.channelMember.findUnique({
       where: { channelId_userId: { channelId, userId } },
     });
-    if (existing) return existing;
-    return this.prisma.channelMember.create({ data: { channelId, userId } });
+    if (existing) {
+      // Idempotent re-join: still make sure this session's sockets are subscribed.
+      await this.realtime.subscribeUserToRoom(userId, roomForChannel(channelId)).catch(() => undefined);
+      return existing;
+    }
+    const created = await this.prisma.channelMember.create({ data: { channelId, userId } });
+    await this.subscribeAndAnnounce(userId, channelId);
+    return created;
   }
 
   async leave(userId: string, channelId: string) {
     const { channel, channelMember } = await this.policy.requireChannelMember(userId, channelId);
     if (channel.isDefault) throw new ForbiddenException('You cannot leave the default channel');
     await this.prisma.channelMember.delete({ where: { id: channelMember.id } });
+    await this.realtime.unsubscribeUserFromRoom(userId, roomForChannel(channelId)).catch(() => undefined);
+    this.realtime.emitToChannel(channelId, SOCKET_EVENTS.MEMBER_LEFT, { channelId, userId });
     return { ok: true };
+  }
+
+  /** Subscribe a freshly-added member's sockets and tell the channel they joined. */
+  private async subscribeAndAnnounce(userId: string, channelId: string) {
+    await this.realtime.subscribeUserToRoom(userId, roomForChannel(channelId)).catch(() => undefined);
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    this.realtime.emitToChannel(channelId, SOCKET_EVENTS.MEMBER_JOINED, {
+      channelId,
+      user: user ? toUserDto(user) : null,
+    });
   }
 
   async addMember(actorId: string, channelId: string, input: AddChannelMemberInput) {
@@ -162,7 +191,11 @@ export class ChannelsService {
       where: { channelId_userId: { channelId, userId: input.userId } },
     });
     if (existing) return existing;
-    return this.prisma.channelMember.create({ data: { channelId, userId: input.userId } });
+    const created = await this.prisma.channelMember.create({
+      data: { channelId, userId: input.userId },
+    });
+    await this.subscribeAndAnnounce(input.userId, channelId);
+    return created;
   }
 
   async removeMember(actorId: string, channelId: string, targetUserId: string) {
