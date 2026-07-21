@@ -994,6 +994,81 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
       expect(res.body.data.map((s: { key: string }) => s.key)).toContain('DEV');
     });
 
+    it('captures a whole thread as a page and links it back into the thread', async () => {
+      const root = await http()
+        .post(`/channels/${channelId}/messages`)
+        .set(auth(owner))
+        .send({
+          clientMsgId: randomUUID(),
+          contentJson: { type: 'doc', content: [] },
+          contentText: 'Should we ship the migration on Friday?',
+        })
+        .expect(201);
+      const rootId = root.body.data.id;
+
+      await http()
+        .post(`/channels/${channelId}/messages`)
+        .set(auth(plainMember))
+        .send({
+          clientMsgId: randomUUID(),
+          contentJson: { type: 'doc', content: [] },
+          contentText: 'No — rollback window is too tight. Monday.',
+          parentId: rootId,
+        })
+        .expect(201);
+
+      // Called from the REPLY, not the root: the whole thread is still captured.
+      const replies = await http().get(`/messages/${rootId}/thread`).set(auth(owner)).expect(200);
+      const replyId = replies.body.data.replies[0].id;
+
+      const res = await http()
+        .post(`/messages/${replyId}/confluence-page`)
+        .set(auth(owner))
+        .send({ spaceKey: 'DEV' })
+        .expect(200);
+
+      // Title defaults to the thread opener, not the message that was clicked.
+      expect(res.body.data.title).toBe('Should we ship the migration on Friday?');
+
+      const page = confMock.pages.get(res.body.data.id)!;
+      expect(page.body).toContain('Should we ship the migration on Friday?');
+      expect(page.body).toContain('rollback window is too tight');
+      expect(page.body).toContain('Participants:');
+      // Provenance link back to the source thread.
+      expect(page.body).toContain(`thread=${rootId}`);
+
+      // The confirmation lands as a reply in the same thread.
+      const after = await http().get(`/messages/${rootId}/thread`).set(auth(owner)).expect(200);
+      const confirmation = after.body.data.replies.find((r: { contentText: string }) =>
+        r.contentText.startsWith('Saved this thread to Confluence'),
+      );
+      expect(confirmation).toBeTruthy();
+      expect(confirmation.unfurls[0].type).toBe('confluence');
+    });
+
+    it('escapes user text so a thread cannot inject storage-format markup', async () => {
+      const root = await http()
+        .post(`/channels/${channelId}/messages`)
+        .set(auth(owner))
+        .send({
+          clientMsgId: randomUUID(),
+          contentJson: { type: 'doc', content: [] },
+          contentText: '<script>alert(1)</script> & <h1>not a heading</h1>',
+        })
+        .expect(201);
+
+      const res = await http()
+        .post(`/messages/${root.body.data.id}/confluence-page`)
+        .set(auth(owner))
+        .send({ spaceKey: 'DEV', title: 'Escaping check' })
+        .expect(200);
+
+      const page = confMock.pages.get(res.body.data.id)!;
+      expect(page.body).not.toContain('<script>');
+      expect(page.body).toContain('&lt;script&gt;');
+      expect(page.body).toContain('&amp;');
+    });
+
     it('creates, lists, updates, and deletes a page in a space', async () => {
       const created = await http()
         .post(`/workspaces/${workspaceId}/confluence/pages`)

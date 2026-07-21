@@ -25,6 +25,8 @@ import { Composer } from './composer';
 import { Avatar } from './avatar';
 import { MessageBody } from './message-body';
 import { UserProfileDialog } from './user-profile-dialog';
+import { SaveThreadDialog } from './save-thread-dialog';
+import { useAtlassianStatus } from './atlassian-dialog';
 import type { UserDto } from '@backstages/shared';
 
 export function RightPanelView({
@@ -79,10 +81,18 @@ function ThreadPanel({
   messageId: string;
 }) {
   const thread = useThread(messageId);
+  const atlassian = useAtlassianStatus(workspaceId);
+  const [saveOpen, setSaveOpen] = useState(false);
 
   if (!thread.data) {
     return <p className="p-4 text-sm text-gray-400">Loading thread…</p>;
   }
+
+  // Capturing a thread writes a page, so it needs the granular Confluence scopes.
+  const canSave =
+    container.kind === 'channel' &&
+    Boolean(atlassian.data?.connected) &&
+    Boolean(atlassian.data?.confluenceReady);
 
   return (
     <div className="flex h-full flex-col">
@@ -93,7 +103,25 @@ function ThreadPanel({
         <div className="mx-5 my-2 flex items-center gap-2 text-xs text-gray-400">
           <span>{thread.data.replies.length} {thread.data.replies.length === 1 ? 'reply' : 'replies'}</span>
           <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+          {canSave && (
+            <button
+              type="button"
+              onClick={() => setSaveOpen(true)}
+              data-testid="save-thread-button"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+            >
+              <FileText size={12} /> Save to Confluence
+            </button>
+          )}
         </div>
+        {saveOpen && (
+          <SaveThreadDialog
+            workspaceId={workspaceId}
+            messageId={messageId}
+            defaultTitle={thread.data.parent.contentText}
+            onClose={() => setSaveOpen(false)}
+          />
+        )}
         <div data-testid="thread-replies">
           {thread.data.replies.map((reply, i) => (
             <MessageItem

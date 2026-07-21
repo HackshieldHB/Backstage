@@ -1,7 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
 import {
+  CreatePageFromThreadSchema,
   CreatePageSchema,
   UpdatePageSchema,
+  type CreatePageFromThreadInput,
   type CreatePageInput,
   type UpdatePageInput,
 } from '@backstages/shared';
@@ -43,6 +45,16 @@ export class ConfluenceController {
     @Body(new ZodValidationPipe(CreatePageSchema)) body: CreatePageInput,
   ) {
     return this.confluence.createPage(user.id, workspaceId, body);
+  }
+
+  @HttpCode(200)
+  @Post('messages/:id/confluence-page')
+  createFromThread(
+    @CurrentUser() user: AuthUser,
+    @Param('id') messageId: string,
+    @Body(new ZodValidationPipe(CreatePageFromThreadSchema)) body: CreatePageFromThreadInput,
+  ) {
+    return this.confluence.createPageFromThread(user.id, messageId, body);
   }
 
   @Patch('workspaces/:id/confluence/pages/:pageId')

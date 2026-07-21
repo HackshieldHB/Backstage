@@ -24,6 +24,14 @@ export const CreatePageSchema = z.object({
 });
 export type CreatePageInput = z.infer<typeof CreatePageSchema>;
 
+/** Capture a whole thread as a Confluence page. */
+export const CreatePageFromThreadSchema = z.object({
+  spaceKey: z.string().min(1).max(64),
+  /** Defaults to the thread's opening line when omitted. */
+  title: z.string().min(1).max(255).optional(),
+});
+export type CreatePageFromThreadInput = z.infer<typeof CreatePageFromThreadSchema>;
+
 export const UpdatePageSchema = z.object({
   title: z.string().min(1).max(255),
   body: z.string().max(50000).default(''),

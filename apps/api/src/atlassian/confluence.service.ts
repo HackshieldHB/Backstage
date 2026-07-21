@@ -3,6 +3,7 @@ import type { AtlassianConnection } from '@prisma/client';
 import type {
   ConfluencePage,
   ConfluenceSpace,
+  CreatePageFromThreadInput,
   CreatePageInput,
   UpdatePageInput,
 } from '@backstages/shared';
@@ -11,16 +12,57 @@ import { AtlassianService } from './atlassian.service';
 import { ConfluenceApiService, type ConfluencePageRaw } from './confluence-api.service';
 import { hasGranularConfluence } from './scopes';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { IntegrationMessagesService } from '../messages/integration-messages.service';
+import { channelContainer } from '../messages/messages.service';
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Wraps plain user text into Confluence storage-format XHTML. */
 function toStorage(text: string): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const paras = text
     .split(/\n{2,}/)
     .map((p) => `<p>${esc(p).replace(/\n/g, '<br/>')}</p>`)
     .join('');
   return paras || '<p></p>';
+}
+
+/** One captured thread message: who said it, when, and what. */
+interface ThreadEntry {
+  author: string;
+  at: Date;
+  text: string;
+}
+
+/**
+ * Renders a thread as a Confluence decision log: a provenance line back to the
+ * channel, the participant list, then every message in order. Storage format is
+ * XHTML, so every piece of user text goes through esc().
+ */
+function threadToStorage(input: {
+  channelName: string;
+  threadUrl: string;
+  entries: ThreadEntry[];
+}): string {
+  const participants = [...new Set(input.entries.map((e) => e.author))];
+  const when = input.entries[0]?.at ?? new Date();
+  const fmt = (d: Date) => d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+
+  const header =
+    `<p>Captured from the Backstages thread in ` +
+    `<a href="${esc(input.threadUrl)}">#${esc(input.channelName)}</a>` +
+    ` — started ${esc(fmt(when))}.</p>` +
+    `<p><strong>Participants:</strong> ${esc(participants.join(', '))}</p>`;
+
+  const body = input.entries
+    .map(
+      (e) =>
+        `<p><strong>${esc(e.author)}</strong> <em>${esc(fmt(e.at))}</em><br/>` +
+        `${esc(e.text).replace(/\n/g, '<br/>')}</p>`,
+    )
+    .join('');
+
+  return `${header}<h2>Discussion</h2>${body}`;
 }
 
 /** Best-effort inverse of toStorage for the edit form. */
@@ -44,6 +86,8 @@ export class ConfluenceService {
     private readonly atlassian: AtlassianService,
     private readonly api: ConfluenceApiService,
     private readonly notifications: NotificationsService,
+    private readonly prisma: PrismaService,
+    private readonly integrationMessages: IntegrationMessagesService,
   ) {}
 
   private async ctx(userId: string, workspaceId: string) {
@@ -98,6 +142,83 @@ export class ConfluenceService {
         source: 'confluence',
         action: 'created',
         title: dto.title,
+        spaceKey: input.spaceKey,
+        url: dto.url,
+      },
+    });
+    return dto;
+  }
+
+  /**
+   * Captures a channel thread as a Confluence page — the decision log flow.
+   * Works from any message in the thread (the root is resolved first) and posts
+   * the resulting link back into that same thread.
+   */
+  async createPageFromThread(
+    userId: string,
+    messageId: string,
+    input: CreatePageFromThreadInput,
+  ): Promise<ConfluencePage> {
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message || message.deletedAt || !message.channelId) {
+      throw new NotFoundException('Message not found');
+    }
+    const { channel } = await this.policy.requireChannelMember(userId, message.channelId);
+
+    // Capture the whole thread regardless of which message was clicked.
+    const rootId = message.parentId ?? message.id;
+    const rows = await this.prisma.message.findMany({
+      where: { OR: [{ id: rootId }, { parentId: rootId }], deletedAt: null },
+      include: { user: { select: { displayName: true } } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    if (rows.length === 0) throw new NotFoundException('Thread not found');
+
+    const entries: ThreadEntry[] = rows.map((r) => ({
+      // Integration posts (Jira cards, bots) carry no user row.
+      author: r.user?.displayName ?? 'Backstages',
+      at: r.createdAt,
+      text: r.contentText,
+    }));
+
+    const web = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+    const threadUrl = `${web}/app?channel=${message.channelId}&thread=${rootId}`;
+    const title = input.title?.trim() || entries[0].text.slice(0, 120) || `Thread in #${channel.name}`;
+
+    const { connection, token } = await this.ctx(userId, channel.workspaceId);
+    const page = await this.api.createPage(token, connection.siteId, {
+      spaceKey: input.spaceKey,
+      title,
+      body: threadToStorage({ channelName: channel.name, threadUrl, entries }),
+    });
+    const dto = this.toDto(connection, page);
+
+    const text = `Saved this thread to Confluence: ${title}`;
+    await this.integrationMessages.post(channelContainer(message.channelId), {
+      workspaceId: channel.workspaceId,
+      contentText: text,
+      contentJson: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text, ...(dto.url ? { marks: [{ type: 'link', attrs: { href: dto.url } }] } : {}) },
+            ],
+          },
+        ],
+      },
+      parentId: rootId,
+      ...(dto.url ? { unfurls: [{ type: 'confluence', url: dto.url, title }] } : {}),
+    });
+
+    await this.notifications.notify({
+      userId,
+      type: 'SYSTEM',
+      payload: {
+        source: 'confluence',
+        action: 'created',
+        title,
         spaceKey: input.spaceKey,
         url: dto.url,
       },
