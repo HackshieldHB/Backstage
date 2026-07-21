@@ -12,12 +12,13 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { JiraActionSchema } from '@backstages/shared';
+import { DeclareIncidentSchema, JiraActionSchema, type DeclareIncidentInput } from '@backstages/shared';
 import { AtlassianService } from './atlassian.service';
 import { AtlassianSyncService } from './sync.service';
 import { JiraEventsService, type JiraWebhookBody } from './jira-events.service';
 import { JiraActionsService } from './jira-actions.service';
 import { StandupService } from './standup.service';
+import { IncidentService } from './incident.service';
 import { PolicyService } from '../authz/policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
@@ -55,6 +56,7 @@ export class AtlassianController {
     private readonly jiraEvents: JiraEventsService,
     private readonly jiraActions: JiraActionsService,
     private readonly standup: StandupService,
+    private readonly incident: IncidentService,
     private readonly policy: PolicyService,
     private readonly prisma: PrismaService,
   ) {}
@@ -162,6 +164,16 @@ export class AtlassianController {
   }
 
   // ----- browse tree -----
+
+  @HttpCode(200)
+  @Post('workspaces/:id/incident')
+  declareIncident(
+    @CurrentUser() user: AuthUser,
+    @Param('id') workspaceId: string,
+    @Body(new ZodValidationPipe(DeclareIncidentSchema)) body: DeclareIncidentInput,
+  ) {
+    return this.incident.declare(user.id, workspaceId, body);
+  }
 
   @HttpCode(200)
   @Post('channels/:id/jira/digest')

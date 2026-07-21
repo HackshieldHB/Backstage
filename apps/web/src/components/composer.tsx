@@ -43,6 +43,7 @@ import {
 import { SuggestionList, type SuggestionItem, type SuggestionListHandle } from './suggestion-popup';
 import { EmojiPickerPopover } from './emoji-picker';
 import { CreateJiraIssueDialog } from './create-jira-issue-dialog';
+import { DeclareIncidentDialog } from './declare-incident-dialog';
 import { Avatar } from './avatar';
 
 const lowlight = createLowlight(common);
@@ -155,6 +156,7 @@ export function Composer({
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [jiraCreateSummary, setJiraCreateSummary] = useState<string | null>(null);
+  const [incidentTitle, setIncidentTitle] = useState<string | null>(null);
   const [alsoSend, setAlsoSend] = useState(false);
   const typingRef = useRef<{ active: boolean; timer: ReturnType<typeof setTimeout> | null }>({ active: false, timer: null });
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -291,6 +293,14 @@ export function Composer({
     const ready = uploads.filter((u) => u.attachment);
     if (!text && ready.length === 0) return;
     if (uploads.some((u) => !u.attachment && !u.error)) return; // uploads still in flight
+
+    // Slash command: /incident <title> opens the declare-incident dialog.
+    const incident = /^\/incident\b\s*(.*)$/i.exec(text);
+    if (incident) {
+      editor.commands.clearContent();
+      setIncidentTitle(incident[1].trim());
+      return;
+    }
 
     // Slash command: /jira create <summary> opens the create-issue dialog.
     const jiraCreate = /^\/jira\s+create\b\s*(.*)$/i.exec(text);
@@ -479,6 +489,17 @@ export function Composer({
             api<{ key: string; url: string }>('POST', `/channels/${container.id}/jira/create-issue`, input)
           }
           onClose={() => setJiraCreateSummary(null)}
+        />
+      )}
+
+      {incidentTitle !== null && (
+        <DeclareIncidentDialog
+          workspaceId={workspaceId}
+          defaultTitle={incidentTitle}
+          // The new channel arrives in the sidebar over CHANNEL_CREATED, so
+          // there is nothing to navigate here.
+          onDeclared={() => undefined}
+          onClose={() => setIncidentTitle(null)}
         />
       )}
     </div>

@@ -1130,6 +1130,86 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
     });
   });
 
+  describe('incident flow', () => {
+    it('creates the channel, the tracking issue and the postmortem page, cross-linked', async () => {
+      const res = await http()
+        .post(`/workspaces/${workspaceId}/incident`)
+        .set(auth(owner))
+        .send({ title: 'Checkout 500s', projectKey: 'PROJ', spaceKey: 'DEV', severity: 'sev1' })
+        .expect(200);
+
+      const inc = res.body.data;
+      expect(inc.channelName).toBe('inc-checkout-500s');
+      expect(inc.issueKey).toBe('PROJ-999');
+      expect(inc.issueUrl).toBe(`${SITE.url}/browse/PROJ-999`);
+      expect(inc.warnings).toEqual([]);
+
+      // The Jira summary carries the severity.
+      expect(mock.createdIssues.at(-1)!.summary).toBe('[SEV1] Checkout 500s');
+
+      // Postmortem page exists and links back to the issue and channel.
+      const page = confMock.pages.get(inc.pageId)!;
+      expect(page.title).toBe('Postmortem: Checkout 500s');
+      expect(page.body).toContain('PROJ-999');
+      expect(page.body).toContain('inc-checkout-500s');
+      expect(page.body).toContain('Root cause');
+
+      // Kickoff message in the new channel links both.
+      const msg = await prisma.message.findFirst({
+        where: { channelId: inc.channelId },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(msg!.contentText).toContain('SEV1 incident: Checkout 500s');
+      const unfurls = msg!.unfurls as Array<{ type: string; url: string }>;
+      expect(unfurls.map((u) => u.type).sort()).toEqual(['confluence', 'jira']);
+
+      // The declaring user is a member of the incident channel.
+      const membership = await prisma.channelMember.findUnique({
+        where: { channelId_userId: { channelId: inc.channelId, userId: owner.id } },
+      });
+      expect(membership).toBeTruthy();
+    });
+
+    it('suffixes the channel name when an incident repeats', async () => {
+      const res = await http()
+        .post(`/workspaces/${workspaceId}/incident`)
+        .set(auth(owner))
+        .send({ title: 'Checkout 500s', projectKey: 'PROJ' })
+        .expect(200);
+      expect(res.body.data.channelName).toBe('inc-checkout-500s-2');
+      // No spaceKey given -> no page, and that is not a warning.
+      expect(res.body.data.pageId).toBeNull();
+      expect(res.body.data.warnings).toEqual([]);
+    });
+
+    it('keeps the channel and issue when the postmortem page fails', async () => {
+      const boom = jest
+        .spyOn(confMock, 'createPage')
+        .mockRejectedValueOnce(new Error('confluence down'));
+
+      const res = await http()
+        .post(`/workspaces/${workspaceId}/incident`)
+        .set(auth(owner))
+        .send({ title: 'Payments degraded', projectKey: 'PROJ', spaceKey: 'DEV' })
+        .expect(200);
+
+      expect(res.body.data.channelName).toBe('inc-payments-degraded');
+      expect(res.body.data.issueKey).toBe('PROJ-999');
+      expect(res.body.data.pageId).toBeNull();
+      expect(res.body.data.warnings).toContain('Postmortem page could not be created.');
+      boom.mockRestore();
+    });
+
+    it('falls back to a usable name for a title with no usable characters', async () => {
+      const res = await http()
+        .post(`/workspaces/${workspaceId}/incident`)
+        .set(auth(owner))
+        .send({ title: '!!! ???', projectKey: 'PROJ' })
+        .expect(200);
+      expect(res.body.data.channelName).toBe('inc-incident');
+    });
+  });
+
   describe('confluence pages', () => {
     it('lists spaces from the connected site', async () => {
       const res = await http()

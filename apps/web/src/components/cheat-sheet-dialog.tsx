@@ -29,6 +29,8 @@ export function CheatSheetDialog({ onClose }: { onClose: () => void }) {
       <div className="space-y-3">
         <Section title="Slash commands">
           <Row keys="/jira KEY-123" desc="Post a live Jira issue status card" />
+          <Row keys="/jira create <summary>" desc="Create a Jira issue in this channel" />
+          <Row keys="/incident <title>" desc="Spin up an incident channel, issue and postmortem" />
         </Section>
 
         <Section title="In the message box">

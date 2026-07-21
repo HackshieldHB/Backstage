@@ -6,6 +6,8 @@ import { AtlassianSyncQueue } from './sync.queue';
 import { JiraEventsService } from './jira-events.service';
 import { JiraActionsService } from './jira-actions.service';
 import { StandupService } from './standup.service';
+import { IncidentService } from './incident.service';
+import { ChannelsModule } from '../channels/channels.module';
 import { StandupQueue } from './standup.queue';
 import { ConfluenceApiService } from './confluence-api.service';
 import { ConfluenceService } from './confluence.service';
@@ -16,7 +18,7 @@ import { AuthModule } from '../auth/auth.module';
 
 @Global()
 @Module({
-  imports: [MessagesModule, AuthModule],
+  imports: [MessagesModule, AuthModule, ChannelsModule],
   controllers: [AtlassianController, ConfluenceController],
   providers: [
     AtlassianApiService,
@@ -28,6 +30,7 @@ import { AuthModule } from '../auth/auth.module';
     JiraActionsService,
     StandupService,
     StandupQueue,
+    IncidentService,
     ConfluenceApiService,
     ConfluenceService,
   ],

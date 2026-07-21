@@ -32,6 +32,27 @@ export const CreatePageFromThreadSchema = z.object({
 });
 export type CreatePageFromThreadInput = z.infer<typeof CreatePageFromThreadSchema>;
 
+/** Spin up an incident: channel + Jira issue + (optional) postmortem page. */
+export const DeclareIncidentSchema = z.object({
+  title: z.string().min(3).max(120),
+  projectKey: z.string().regex(/^[A-Z][A-Z0-9]+$/),
+  /** Omit to skip the postmortem page. */
+  spaceKey: z.string().min(1).max(64).optional(),
+  severity: z.enum(['sev1', 'sev2', 'sev3']).default('sev2'),
+});
+export type DeclareIncidentInput = z.infer<typeof DeclareIncidentSchema>;
+
+export interface IncidentResult {
+  channelId: string;
+  channelName: string;
+  issueKey: string;
+  issueUrl: string;
+  pageId: string | null;
+  pageUrl: string | null;
+  /** Non-fatal problems, e.g. the postmortem page could not be created. */
+  warnings: string[];
+}
+
 export const UpdatePageSchema = z.object({
   title: z.string().min(1).max(255),
   body: z.string().max(50000).default(''),
