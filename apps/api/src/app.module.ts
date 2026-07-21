@@ -9,6 +9,7 @@ import { WorkspacesModule } from './workspaces/workspaces.module';
 import { ChannelsModule } from './channels/channels.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { MessagesModule } from './messages/messages.module';
 import { RedisModule } from './redis/redis.module';
 import { PresenceModule } from './presence/presence.module';
@@ -32,6 +33,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     ChannelsModule,
     ConversationsModule,
     RealtimeModule,
+    NotificationsModule,
     MessagesModule,
     RedisModule,
     PresenceModule,

@@ -134,26 +134,37 @@ export function useRealtime(workspaceId: string | null) {
 
     const onNotification = (p: NotificationNewPayload) => {
       qc.invalidateQueries({ queryKey: keys.notifications });
-      // Desktop notification when the tab is not focused.
+      // Desktop notification when the tab is not focused — unless the user muted.
       if (
+        !useUiStore.getState().notificationsMuted &&
         typeof document !== 'undefined' &&
         !document.hasFocus() &&
         typeof Notification !== 'undefined' &&
         Notification.permission === 'granted'
       ) {
-        const pl = (p.payload ?? {}) as { source?: string; issueKey?: string; direction?: string };
+        const pl = (p.payload ?? {}) as {
+          source?: string;
+          action?: string;
+          issueKey?: string;
+          title?: string;
+          direction?: string;
+        };
         const title =
-          pl.source === 'jira'
-            ? pl.direction === 'out'
-              ? `Jira: ${pl.issueKey ?? 'an issue'} unassigned from you`
-              : `Jira: ${pl.issueKey ?? 'an issue'} assigned to you`
-            : p.type === 'MENTION'
-              ? `${p.actor?.displayName ?? 'Someone'} mentioned you`
-              : p.type === 'THREAD_REPLY'
-                ? `${p.actor?.displayName ?? 'Someone'} replied in a thread`
-                : p.type === 'DM'
-                  ? `New message from ${p.actor?.displayName ?? 'someone'}`
-                  : 'New activity in Backstages';
+          pl.action === 'created' && pl.source === 'jira'
+            ? `Jira issue created: ${pl.issueKey ?? ''}`
+            : pl.action === 'created' && pl.source === 'confluence'
+              ? `Confluence page created: ${pl.title ?? ''}`
+              : pl.source === 'jira'
+                ? pl.direction === 'out'
+                  ? `Jira: ${pl.issueKey ?? 'an issue'} unassigned from you`
+                  : `Jira: ${pl.issueKey ?? 'an issue'} assigned to you`
+                : p.type === 'MENTION'
+                  ? `${p.actor?.displayName ?? 'Someone'} mentioned you`
+                  : p.type === 'THREAD_REPLY'
+                    ? `${p.actor?.displayName ?? 'Someone'} replied in a thread`
+                    : p.type === 'DM'
+                      ? `New message from ${p.actor?.displayName ?? 'someone'}`
+                      : 'New activity in Backstages';
         const n = new Notification(title, { tag: p.id });
         n.onclick = () => {
           window.focus();

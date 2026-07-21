@@ -24,12 +24,15 @@ interface UiState {
   typing: Record<string, TypingEntry[]>;
   /** Message currently in inline-edit mode (ArrowUp shortcut). */
   editingMessageId: string | null;
+  /** When true, suppress desktop notifications (Activity mute). Persisted. */
+  notificationsMuted: boolean;
 
   setEditingMessageId: (id: string | null) => void;
   setRightPanel: (panel: RightPanel) => void;
   toggleSidebar: (open?: boolean) => void;
   setSearchOpen: (open: boolean) => void;
   setTheme: (theme: 'light' | 'dark') => void;
+  setNotificationsMuted: (muted: boolean) => void;
   upsertTyping: (containerId: string, entry: TypingEntry) => void;
   removeTyping: (containerId: string, userId: string) => void;
 }
@@ -41,8 +44,16 @@ export const useUiStore = create<UiState>((set) => ({
   theme: 'light',
   typing: {},
   editingMessageId: null,
+  notificationsMuted:
+    typeof window !== 'undefined' && window.localStorage.getItem('bs.notificationsMuted') === '1',
 
   setEditingMessageId: (id) => set({ editingMessageId: id }),
+  setNotificationsMuted: (muted) => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('bs.notificationsMuted', muted ? '1' : '0');
+    }
+    set({ notificationsMuted: muted });
+  },
   setRightPanel: (panel) => set({ rightPanel: panel }),
   toggleSidebar: (open) => set((s) => ({ sidebarOpen: open ?? !s.sidebarOpen })),
   setSearchOpen: (open) => set({ searchOpen: open }),
