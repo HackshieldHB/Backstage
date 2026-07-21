@@ -114,6 +114,19 @@ export interface JiraUnfurl {
   assigneeAccountId?: string | null;
 }
 
+/** One row in the caller's personal Jira work queue. */
+export interface JiraMyIssue {
+  key: string;
+  summary: string;
+  status: string | null;
+  priority: string | null;
+  /** ISO date (no time), or null when unset. */
+  dueDate: string | null;
+  /** Server-computed so client and server agree on "today". */
+  overdue: boolean;
+  url: string;
+}
+
 /** Interactive action fired from a Jira card. */
 export const JiraActionSchema = z.object({
   issueKey: z.string().min(3).max(30),

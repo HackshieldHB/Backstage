@@ -1,6 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import type { AtlassianConnection, Message } from '@prisma/client';
-import type { JiraActionInput, JiraAssignableUser, JiraTransition, JiraUnfurl } from '@backstages/shared';
+import type {
+  JiraActionInput,
+  JiraAssignableUser,
+  JiraMyIssue,
+  JiraTransition,
+  JiraUnfurl,
+} from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { AtlassianApiService } from './atlassian-api.service';
@@ -261,6 +267,41 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
     const connection = await this.atlassian.connectionForWorkspace(workspaceId);
     const token = await this.atlassian.accessTokenFor(connection);
     return this.api.listProjects(token, connection.siteId);
+  }
+
+  /**
+   * The caller's own open work queue.
+   *
+   * This MUST run on the caller's personal token: `currentUser()` resolves to
+   * whoever owns the token, so falling back to the shared workspace connection
+   * would silently hand back the connecting admin's issues instead. Unlinked
+   * callers get told to link rather than a wrong list.
+   */
+  async myIssues(userId: string, workspaceId: string): Promise<JiraMyIssue[]> {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const connection = await this.atlassian.connectionForWorkspace(workspaceId);
+    const token = await this.atlassian.userAccessTokenFor(userId);
+    if (!token) {
+      throw new BadRequestException(
+        'Connect your Atlassian account to see the issues assigned to you',
+      );
+    }
+    const rows = await this.api.searchJql(
+      token,
+      connection.siteId,
+      'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC',
+    );
+    return rows.map((r) => ({
+      key: r.key,
+      summary: r.summary,
+      status: r.status,
+      priority: r.priority,
+      dueDate: r.dueDate,
+      // Flagged for the UI so an overdue item can be called out without the
+      // client having to agree with the server about "today".
+      overdue: Boolean(r.dueDate && r.dueDate < new Date().toISOString().slice(0, 10)),
+      url: `${connection.siteUrl}/browse/${r.key}`,
+    }));
   }
 
   async listProjectIssues(userId: string, workspaceId: string, projectKey: string) {

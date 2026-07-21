@@ -161,6 +161,11 @@ export class AtlassianController {
 
   // ----- browse tree -----
 
+  @Get('workspaces/:id/jira/my-issues')
+  jiraMyIssues(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
+    return this.jiraActions.myIssues(user.id, workspaceId);
+  }
+
   @Get('workspaces/:id/jira/projects')
   jiraProjects(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
     return this.jiraActions.listProjects(user.id, workspaceId);

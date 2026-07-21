@@ -39,6 +39,17 @@ export interface JiraIssueSummary {
   assigneeAccountId: string | null;
 }
 
+/** One row from a JQL search. */
+export interface JiraSearchRow {
+  key: string;
+  summary: string;
+  status: string | null;
+  priority: string | null;
+  /** ISO date (no time) or null when the issue has no due date. */
+  dueDate: string | null;
+  updated: string | null;
+}
+
 /**
  * Thin HTTP client for the Atlassian cloud APIs. Kept behind one injectable so
  * integration tests can substitute a mock without touching business logic.
@@ -266,25 +277,52 @@ export class AtlassianApiService {
     return (json?.values ?? []).map((p) => ({ id: p.id, key: p.key, name: p.name }));
   }
 
-  /** Recent issues in a project. Uses the /search/jql endpoint — the old
-   * /search was removed by Atlassian (returns 410 Gone). */
-  async searchIssues(
+  /**
+   * Runs a JQL query. Uses the /search/jql endpoint — the old /search was
+   * removed by Atlassian (returns 410 Gone).
+   *
+   * Callers build the JQL, so it must never be assembled from raw user input;
+   * today every caller passes either a server-owned literal or a project key
+   * already validated against /^[A-Z][A-Z0-9]+$/.
+   */
+  async searchJql(
     accessToken: string,
     cloudId: string,
-    projectKey: string,
-  ): Promise<Array<{ key: string; summary: string; status: string | null }>> {
-    const jql = encodeURIComponent(`project="${projectKey}" ORDER BY updated DESC`);
+    jql: string,
+  ): Promise<JiraSearchRow[]> {
     const json = await this.get<{
-      issues?: Array<{ key: string; fields?: { summary?: string; status?: { name?: string } } }>;
+      issues?: Array<{
+        key: string;
+        fields?: {
+          summary?: string;
+          status?: { name?: string };
+          priority?: { name?: string };
+          duedate?: string | null;
+          updated?: string;
+        };
+      }>;
     }>(
-      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql?jql=${jql}&maxResults=50&fields=summary,status`,
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}` +
+        `&maxResults=50&fields=summary,status,priority,duedate,updated`,
       accessToken,
     );
     return (json?.issues ?? []).map((i) => ({
       key: i.key,
       summary: i.fields?.summary ?? i.key,
       status: i.fields?.status?.name ?? null,
+      priority: i.fields?.priority?.name ?? null,
+      dueDate: i.fields?.duedate ?? null,
+      updated: i.fields?.updated ?? null,
     }));
+  }
+
+  /** Recent issues in a project (the sidebar browse tree). */
+  async searchIssues(
+    accessToken: string,
+    cloudId: string,
+    projectKey: string,
+  ): Promise<JiraSearchRow[]> {
+    return this.searchJql(accessToken, cloudId, `project="${projectKey}" ORDER BY updated DESC`);
   }
 
   private issueBase(cloudId: string, issueKey: string): string {

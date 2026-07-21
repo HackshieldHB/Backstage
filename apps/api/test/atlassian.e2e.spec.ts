@@ -114,6 +114,26 @@ class MockAtlassianApi {
     this.createdIssues.push(input);
     return { key: `${input.projectKey}-999` };
   }
+  /** Rows returned by searchJql, plus a log of (jql, token) for assertions. */
+  searchRows: Array<{
+    key: string;
+    summary: string;
+    status: string | null;
+    priority: string | null;
+    dueDate: string | null;
+    updated: string | null;
+  }> = [];
+  searches: Array<{ jql: string; token: string }> = [];
+  async searchJql(token: string, _c: string, jql: string) {
+    this.searches.push({ jql, token });
+    return this.searchRows;
+  }
+  async searchIssues(token: string, cloudId: string, projectKey: string) {
+    return this.searchJql(token, cloudId, `project="${projectKey}" ORDER BY updated DESC`);
+  }
+  async listProjects() {
+    return [{ id: '1', key: 'PROJ', name: 'Project One' }];
+  }
   async getTransitions() {
     return Object.entries(this.transitionNames).map(([id, name]) => ({ id, name }));
   }
@@ -982,6 +1002,52 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
         .send({ issueKey: 'PROJ-500', action: 'assign', assigneeAccountId: ACC.linked })
         .expect(200);
       expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: ACC.linked });
+    });
+  });
+
+  describe('my jira work queue', () => {
+    // plainMember personally connected in the previous describe.
+    beforeEach(() => {
+      mock.searches = [];
+      const today = new Date();
+      const past = new Date(today.getTime() - 3 * 86400000).toISOString().slice(0, 10);
+      const future = new Date(today.getTime() + 3 * 86400000).toISOString().slice(0, 10);
+      mock.searchRows = [
+        { key: 'PROJ-11', summary: 'Late thing', status: 'In Progress', priority: 'High', dueDate: past, updated: null },
+        { key: 'PROJ-12', summary: 'Future thing', status: 'To Do', priority: null, dueDate: future, updated: null },
+        { key: 'PROJ-13', summary: 'No due date', status: 'To Do', priority: null, dueDate: null, updated: null },
+      ];
+    });
+
+    it('returns the caller-scoped open issues and flags overdue ones', async () => {
+      const res = await http()
+        .get(`/workspaces/${workspaceId}/jira/my-issues`)
+        .set(auth(plainMember))
+        .expect(200);
+
+      const rows = res.body.data as Array<{ key: string; overdue: boolean; url: string }>;
+      expect(rows.map((r) => r.key)).toEqual(['PROJ-11', 'PROJ-12', 'PROJ-13']);
+      // Overdue is computed on the server so client/server agree on "today".
+      expect(rows.find((r) => r.key === 'PROJ-11')!.overdue).toBe(true);
+      expect(rows.find((r) => r.key === 'PROJ-12')!.overdue).toBe(false);
+      expect(rows.find((r) => r.key === 'PROJ-13')!.overdue).toBe(false);
+      expect(rows[0].url).toBe(`${SITE.url}/browse/PROJ-11`);
+
+      // Scoped to the caller and to open work only.
+      const jql = mock.searches.at(-1)!.jql;
+      expect(jql).toContain('assignee = currentUser()');
+      expect(jql).toContain('statusCategory != Done');
+    });
+
+    it('refuses to fall back to the workspace token for an unlinked caller', async () => {
+      // currentUser() resolves to the token owner, so a fallback would hand back
+      // the connecting admin's issues. It must fail loudly instead.
+      const res = await http()
+        .get(`/workspaces/${workspaceId}/jira/my-issues`)
+        .set(auth(linkedUser))
+        .expect(400);
+      expect(res.body.error.message).toMatch(/connect your atlassian account/i);
+      expect(mock.searches).toHaveLength(0);
     });
   });
 

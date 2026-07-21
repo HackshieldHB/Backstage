@@ -2,12 +2,13 @@
 
 import { useState } from 'react';
 import clsx from 'clsx';
-import { ChevronDown, FileText, Search, SquareKanban } from 'lucide-react';
+import { ChevronDown, FileText, Search, SquareKanban, UserCheck } from 'lucide-react';
 import {
   useConfluencePages,
   useConfluenceSpaces,
   useJiraIssues,
   useJiraProjects,
+  useMyJiraIssues,
 } from '@/hooks/queries';
 
 function openUrl(url?: string | null) {
@@ -77,6 +78,7 @@ export function JiraTree({ workspaceId }: { workspaceId: string }) {
         <>
           <FilterInput value={filter} onChange={setFilter} placeholder="Search projects & issues" />
           <ul>
+            <MyIssuesRow workspaceId={workspaceId} filter={filter} />
             {projects.isLoading && <li className="px-4 py-1 text-[12px] text-sidebar-muted">Loading…</li>}
             {visible.map((p) => (
               <JiraProjectRow
@@ -94,6 +96,62 @@ export function JiraTree({ workspaceId }: { workspaceId: string }) {
         </>
       )}
     </div>
+  );
+}
+
+/** "Assigned to me" — the daily work queue, pinned above the project list. */
+function MyIssuesRow({ workspaceId, filter }: { workspaceId: string; filter: string }) {
+  const [open, setOpen] = useState(true);
+  const mine = useMyJiraIssues(workspaceId, open);
+  const visible = (mine.data ?? []).filter((i) => match(filter, i.key, i.summary));
+
+  return (
+    <li data-testid="jira-my-issues">
+      <button onClick={() => setOpen((v) => !v)} className={clsx(rowCls, 'pl-2')}>
+        <SectionCaret open={open} />
+        <UserCheck size={13} className="shrink-0 text-[#2684FF]" />
+        <span className="truncate font-medium">Assigned to me</span>
+        {mine.data && mine.data.length > 0 && (
+          <span className="ml-auto shrink-0 rounded bg-white/10 px-1 text-[10px]">
+            {mine.data.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <ul>
+          {mine.isLoading && <li className="py-1 pl-9 text-[12px] text-sidebar-muted">Loading…</li>}
+          {/* Not linked yet is the common case here, not a failure. */}
+          {mine.isError && (
+            <li className="py-1 pl-9 pr-2 text-[12px] text-sidebar-muted">
+              Connect your Atlassian account to see your issues.
+            </li>
+          )}
+          {visible.map((i) => (
+            <li key={i.key}>
+              <button onClick={() => openUrl(i.url)} className={clsx(rowCls, 'pl-9')} title={i.summary}>
+                <span className="shrink-0 font-mono text-[11px] text-sidebar-muted">{i.key}</span>
+                <span className="truncate">{i.summary}</span>
+                {i.overdue && (
+                  <span className="ml-auto shrink-0 rounded bg-red-500/20 px-1 text-[10px] font-bold uppercase text-red-300">
+                    Overdue
+                  </span>
+                )}
+                {!i.overdue && i.status && (
+                  <span className="ml-auto shrink-0 rounded bg-white/10 px-1 text-[10px] uppercase">
+                    {i.status}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+          {!mine.isLoading && !mine.isError && visible.length === 0 && (
+            <li className="py-1 pl-9 text-[12px] text-sidebar-muted">
+              {filter ? 'No matching issues' : 'Nothing assigned to you'}
+            </li>
+          )}
+        </ul>
+      )}
+    </li>
   );
 }
 

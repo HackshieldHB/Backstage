@@ -13,6 +13,7 @@ import type {
   ConfluencePage,
   ConfluenceSpace,
   ConversationDto,
+  JiraMyIssue,
   MessageDto,
   MessagePage,
   SearchResponse,
@@ -213,6 +214,21 @@ export function useJiraIssues(workspaceId: string, projectKey: string, enabled: 
       api<JiraIssueRow[]>('GET', `/workspaces/${workspaceId}/jira/projects/${projectKey}/issues`),
     enabled: !!workspaceId && !!projectKey && enabled,
     staleTime: 120000,
+  });
+}
+
+/**
+ * The caller's own open Jira issues. Fails with 400 when the account isn't
+ * linked, which is an expected state rather than an outage — no retries, and
+ * the tree renders a connect hint from `error`.
+ */
+export function useMyJiraIssues(workspaceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['jira-my-issues', workspaceId],
+    queryFn: () => api<JiraMyIssue[]>('GET', `/workspaces/${workspaceId}/jira/my-issues`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 60000,
+    retry: false,
   });
 }
 
