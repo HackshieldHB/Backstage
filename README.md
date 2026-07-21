@@ -58,8 +58,13 @@ The Playwright suite starts its own servers from the built artifacts. First run:
 - **Files**: 25MB server-enforced uploads, image previews + lightbox, HMAC-signed download URLs.
 - **Atlassian**: OAuth 3LO connect + SSO, encrypted tokens, member directory sync (manual +
   nightly BullMQ), Jira webhooks → personal DMs and per-channel subscribed cards with
-  issue-threading and badge dedup, link unfurling, `/jira KEY-123`, create-issue-from-message.
-  See [docs/atlassian-setup.md](docs/atlassian-setup.md).
+  issue-threading and badge dedup, link unfurling (Jira issues *and* Confluence page titles),
+  `/jira KEY-123`, `/jira create`, create-issue-from-message, and a sidebar browse tree over
+  the connected site. See [docs/atlassian-setup.md](docs/atlassian-setup.md).
+- **Workflows built on top**: "Assigned to me" personal Jira queue (JQL, caller-scoped token),
+  save-a-thread-as-a-Confluence-page, weekday standup digest (BullMQ, `0 9 * * 1-5`),
+  `/incident` → channel + tracking issue + draft postmortem in one command, and Bitbucket
+  pull request events as threaded channel cards.
 
 ## API conventions
 
