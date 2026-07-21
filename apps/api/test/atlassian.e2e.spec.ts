@@ -1130,6 +1130,151 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
     });
   });
 
+  describe('bitbucket pull requests', () => {
+    let bbChannelId: string;
+    let subId: string;
+    let webhookUrl: string;
+    const secretOf = (url: string) => new URL(url, 'http://x').searchParams.get('secret')!;
+
+    const prBody = (id: number, extra: Record<string, unknown> = {}) => ({
+      repository: { full_name: 'acme/api' },
+      actor: { display_name: 'Dev Person' },
+      pullrequest: {
+        id,
+        title: 'Add retry to the payments client',
+        state: 'OPEN',
+        links: { html: { href: `https://bitbucket.org/acme/api/pull-requests/${id}` } },
+        author: { display_name: 'Dev Person' },
+        source: { branch: { name: 'feat/retry' } },
+        destination: { branch: { name: 'main' } },
+        ...extra,
+      },
+    });
+
+    const post = (id: string, secret: string, eventKey: string, body: object) =>
+      http()
+        .post(`/webhooks/bitbucket/${id}?secret=${secret}`)
+        .set('x-event-key', eventKey)
+        .send(body);
+
+    beforeAll(async () => {
+      const ch = await http()
+        .post(`/workspaces/${workspaceId}/channels`)
+        .set(auth(owner))
+        .send({ name: `bitbucket-feed-${run}` })
+        .expect(201);
+      bbChannelId = ch.body.data.id;
+
+      const sub = await http()
+        .post(`/channels/${bbChannelId}/bitbucket/subscriptions`)
+        .set(auth(owner))
+        .send({
+          repoFullName: 'acme/api',
+          events: ['pr_created', 'pr_approved', 'pr_merged'],
+        })
+        .expect(201);
+      subId = sub.body.data.id;
+      webhookUrl = sub.body.data.webhookUrl;
+      expect(webhookUrl).toContain(`/webhooks/bitbucket/${subId}`);
+    });
+
+    it('rejects a webhook with the wrong secret', async () => {
+      await post(subId, 'not-the-secret', 'pullrequest:created', prBody(1)).expect(401);
+    });
+
+    it('posts a card for a new PR and threads later events under it', async () => {
+      const secret = secretOf(webhookUrl);
+
+      await post(subId, secret, 'pullrequest:created', prBody(42)).expect(200);
+      const card = await prisma.message.findFirst({
+        where: { channelId: bbChannelId, parentId: null, kind: 'INTEGRATION' },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(card!.contentText).toContain('PR #42 opened by Dev Person (feat/retry → main)');
+      const unfurls = card!.unfurls as Array<{ type: string; url: string; status?: string }>;
+      expect(unfurls[0].type).toBe('bitbucket');
+      expect(unfurls[0].url).toContain('/pull-requests/42');
+
+      // Approval and merge thread under the original card, not as new cards.
+      await post(subId, secret, 'pullrequest:approved', {
+        ...prBody(42),
+        approval: { user: { display_name: 'Reviewer Person' } },
+      }).expect(200);
+      await post(subId, secret, 'pullrequest:fulfilled', prBody(42, { state: 'MERGED' })).expect(200);
+
+      const replies = await prisma.message.findMany({
+        where: { parentId: card!.id },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(replies.map((r) => r.contentText)).toEqual([
+        expect.stringContaining('PR #42 approved by Reviewer Person'),
+        expect.stringContaining('PR #42 merged'),
+      ]);
+
+      // The top card's badge follows the PR state.
+      const refreshed = await prisma.message.findUnique({ where: { id: card!.id } });
+      const after = refreshed!.unfurls as Array<{ status?: string }>;
+      expect(after[0].status).toBe('MERGED');
+
+      const roots = await prisma.message.count({
+        where: { channelId: bbChannelId, parentId: null, kind: 'INTEGRATION' },
+      });
+      expect(roots).toBe(1);
+    });
+
+    it('ignores events the channel did not subscribe to', async () => {
+      const secret = secretOf(webhookUrl);
+      const before = await prisma.message.count({ where: { channelId: bbChannelId } });
+      const res = await post(subId, secret, 'pullrequest:updated', prBody(43)).expect(200);
+      expect(res.body.data.posted).toBe(false);
+      expect(await prisma.message.count({ where: { channelId: bbChannelId } })).toBe(before);
+    });
+
+    it('ignores a payload for a different repository', async () => {
+      const secret = secretOf(webhookUrl);
+      const before = await prisma.message.count({ where: { channelId: bbChannelId } });
+      const res = await post(subId, secret, 'pullrequest:created', {
+        ...prBody(44),
+        repository: { full_name: 'someone-else/evil' },
+      }).expect(200);
+      expect(res.body.data.posted).toBe(false);
+      expect(await prisma.message.count({ where: { channelId: bbChannelId } })).toBe(before);
+    });
+
+    it('re-subscribing rotates the secret so the old one stops working', async () => {
+      const oldSecret = secretOf(webhookUrl);
+      const again = await http()
+        .post(`/channels/${bbChannelId}/bitbucket/subscriptions`)
+        .set(auth(owner))
+        .send({ repoFullName: 'acme/api', events: ['pr_created'] })
+        .expect(201);
+      const newSecret = secretOf(again.body.data.webhookUrl);
+      expect(newSecret).not.toBe(oldSecret);
+
+      await post(subId, oldSecret, 'pullrequest:created', prBody(45)).expect(401);
+      await post(subId, newSecret, 'pullrequest:created', prBody(45)).expect(200);
+      webhookUrl = again.body.data.webhookUrl;
+    });
+
+    it('lists and deletes subscriptions', async () => {
+      const list = await http()
+        .get(`/channels/${bbChannelId}/bitbucket/subscriptions`)
+        .set(auth(owner))
+        .expect(200);
+      expect(list.body.data.map((s: { repoFullName: string }) => s.repoFullName)).toEqual(['acme/api']);
+
+      await http()
+        .delete(`/channels/${bbChannelId}/bitbucket/subscriptions/${subId}`)
+        .set(auth(owner))
+        .expect(200);
+      const after = await http()
+        .get(`/channels/${bbChannelId}/bitbucket/subscriptions`)
+        .set(auth(owner))
+        .expect(200);
+      expect(after.body.data).toEqual([]);
+    });
+  });
+
   describe('incident flow', () => {
     it('creates the channel, the tracking issue and the postmortem page, cross-linked', async () => {
       const res = await http()

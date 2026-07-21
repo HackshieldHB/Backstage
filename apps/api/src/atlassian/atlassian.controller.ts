@@ -11,6 +11,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { DeclareIncidentSchema, JiraActionSchema, type DeclareIncidentInput } from '@backstages/shared';
 import { AtlassianService } from './atlassian.service';
@@ -19,6 +20,11 @@ import { JiraEventsService, type JiraWebhookBody } from './jira-events.service';
 import { JiraActionsService } from './jira-actions.service';
 import { StandupService } from './standup.service';
 import { IncidentService } from './incident.service';
+import {
+  BITBUCKET_EVENTS,
+  BitbucketEventsService,
+  type BitbucketWebhookBody,
+} from './bitbucket-events.service';
 import { PolicyService } from '../authz/policy.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
@@ -30,6 +36,16 @@ const SubscriptionSchema = z.object({
   events: z
     .array(z.enum(['issue_created', 'issue_assigned', 'status_changed', 'comment_created']))
     .min(1),
+});
+
+const BitbucketSubscriptionSchema = z.object({
+  /** Bitbucket's "workspace/repo-slug". */
+  repoFullName: z
+    .string()
+    .min(3)
+    .max(200)
+    .regex(/^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*$/, 'expected "workspace/repo-slug"'),
+  events: z.array(z.enum(BITBUCKET_EVENTS as [string, ...string[]])).min(1),
 });
 
 const JiraCommandSchema = z.object({
@@ -57,6 +73,7 @@ export class AtlassianController {
     private readonly jiraActions: JiraActionsService,
     private readonly standup: StandupService,
     private readonly incident: IncidentService,
+    private readonly bitbucketEvents: BitbucketEventsService,
     private readonly policy: PolicyService,
     private readonly prisma: PrismaService,
   ) {}
@@ -113,6 +130,78 @@ export class AtlassianController {
     @Body() body: JiraWebhookBody,
   ) {
     return this.jiraEvents.handleWebhook(connectionId, headerSecret ?? querySecret, body);
+  }
+
+  // ----- bitbucket -----
+
+  @Public()
+  @HttpCode(200)
+  @Post('webhooks/bitbucket/:subscriptionId')
+  bitbucketWebhook(
+    @Param('subscriptionId') subscriptionId: string,
+    @Headers('x-backstages-secret') headerSecret: string | undefined,
+    @Headers('x-event-key') eventKey: string | undefined,
+    @Query('secret') querySecret: string | undefined,
+    @Body() body: BitbucketWebhookBody,
+  ) {
+    return this.bitbucketEvents.handleWebhook(
+      subscriptionId,
+      headerSecret ?? querySecret,
+      eventKey,
+      body,
+    );
+  }
+
+  @Get('channels/:id/bitbucket/subscriptions')
+  async listBitbucketSubscriptions(@CurrentUser() user: AuthUser, @Param('id') channelId: string) {
+    await this.policy.requireChannelMember(user.id, channelId);
+    return this.prisma.bitbucketSubscription.findMany({
+      where: { channelId },
+      select: { id: true, repoFullName: true, events: true },
+    });
+  }
+
+  @Post('channels/:id/bitbucket/subscriptions')
+  async subscribeBitbucket(
+    @CurrentUser() user: AuthUser,
+    @Param('id') channelId: string,
+    @Body(new ZodValidationPipe(BitbucketSubscriptionSchema))
+    body: z.infer<typeof BitbucketSubscriptionSchema>,
+  ) {
+    const { channel } = await this.policy.requireChannelMember(user.id, channelId);
+    const webhookSecret = randomBytes(24).toString('hex');
+    const sub = await this.prisma.bitbucketSubscription.upsert({
+      where: { channelId_repoFullName: { channelId, repoFullName: body.repoFullName } },
+      // Re-subscribing rotates the secret, so a leaked one can be retired by
+      // simply subscribing again.
+      update: { events: body.events, webhookSecret },
+      create: {
+        channelId,
+        workspaceId: channel.workspaceId,
+        repoFullName: body.repoFullName,
+        events: body.events,
+        webhookSecret,
+      },
+    });
+    const base = process.env.PUBLIC_API_URL ?? process.env.WEB_ORIGIN ?? 'http://localhost:3001';
+    return {
+      id: sub.id,
+      repoFullName: sub.repoFullName,
+      events: sub.events,
+      // Shown once so it can be pasted into Bitbucket's webhook settings.
+      webhookUrl: `${base}/webhooks/bitbucket/${sub.id}?secret=${webhookSecret}`,
+    };
+  }
+
+  @Delete('channels/:id/bitbucket/subscriptions/:subscriptionId')
+  async unsubscribeBitbucket(
+    @CurrentUser() user: AuthUser,
+    @Param('id') channelId: string,
+    @Param('subscriptionId') subscriptionId: string,
+  ) {
+    await this.policy.requireChannelMember(user.id, channelId);
+    await this.prisma.bitbucketSubscription.deleteMany({ where: { id: subscriptionId, channelId } });
+    return { ok: true };
   }
 
   // ----- per-channel project subscriptions -----

@@ -350,7 +350,9 @@ function UnfurlCards({ message }: { message: MessageDto }) {
               <span className="block text-[11px] text-gray-500">
                 {card.type === 'jira'
                   ? [card.status, card.issueType, card.priority].filter(Boolean).join(' · ')
-                  : 'Confluence'}
+                  : card.type === 'bitbucket'
+                    ? ['Bitbucket', card.status].filter(Boolean).join(' · ')
+                    : 'Confluence'}
               </span>
             </span>
             {card.status && (

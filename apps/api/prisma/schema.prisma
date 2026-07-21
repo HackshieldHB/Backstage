@@ -91,6 +91,8 @@ model Workspace {
   conversations       Conversation[]
   messages            Message[]
   atlassianConnection AtlassianConnection?
+
+  bitbucketSubscriptions BitbucketSubscription[]
 }
 
 model WorkspaceMember {
@@ -155,6 +157,9 @@ model Channel {
   notifications     Notification[]
   jiraSubscriptions ChannelJiraSubscription[]
   jiraIssueCards    JiraIssueCard[]
+
+  bitbucketSubscriptions BitbucketSubscription[]
+  bitbucketPrCards       BitbucketPrCard[]
 
   @@unique([workspaceId, name])
 }
@@ -251,6 +256,7 @@ model Message {
   channelLastReadMarkers      ChannelMember[]      @relation("ChannelLastRead")
   conversationLastReadMarkers ConversationMember[] @relation("ConversationLastRead")
   jiraIssueCard               JiraIssueCard?
+  bitbucketPrCard             BitbucketPrCard?
 
   @@unique([userId, clientMsgId])
   @@index([channelId, createdAt])
@@ -456,4 +462,41 @@ model JiraIssueCard {
   message    Message             @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([channelId, issueKey])
+}
+
+/// A channel subscribed to one Bitbucket repository's pull request events.
+/// Bitbucket is not part of the Jira/Confluence OAuth connection — events are
+/// inbound only, so each subscription carries its own webhook secret.
+model BitbucketSubscription {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  channelId     String
+  /// "workspace/repo-slug" as Bitbucket reports it.
+  repoFullName  String
+  webhookSecret String
+  /// Subset of: pr_created, pr_updated, pr_approved, pr_merged, pr_declined, pr_comment.
+  events        String[]
+  createdAt     DateTime @default(now())
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel   Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  cards     BitbucketPrCard[]
+
+  @@unique([channelId, repoFullName])
+}
+
+/// First card posted for a pull request in a channel — follow-ups thread under it.
+model BitbucketPrCard {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  channelId      String
+  prId           String
+  messageId      String   @unique
+  createdAt      DateTime @default(now())
+
+  subscription BitbucketSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  channel      Channel               @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message      Message               @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, prId])
 }

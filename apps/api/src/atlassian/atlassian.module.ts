@@ -7,6 +7,7 @@ import { JiraEventsService } from './jira-events.service';
 import { JiraActionsService } from './jira-actions.service';
 import { StandupService } from './standup.service';
 import { IncidentService } from './incident.service';
+import { BitbucketEventsService } from './bitbucket-events.service';
 import { ChannelsModule } from '../channels/channels.module';
 import { StandupQueue } from './standup.queue';
 import { ConfluenceApiService } from './confluence-api.service';
@@ -31,6 +32,7 @@ import { AuthModule } from '../auth/auth.module';
     StandupService,
     StandupQueue,
     IncidentService,
+    BitbucketEventsService,
     ConfluenceApiService,
     ConfluenceService,
   ],
