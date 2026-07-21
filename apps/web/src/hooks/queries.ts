@@ -10,6 +10,8 @@ import {
 import type {
   AttachmentDto,
   ChannelDto,
+  ConfluencePage,
+  ConfluenceSpace,
   ConversationDto,
   MessageDto,
   MessagePage,
@@ -178,6 +180,58 @@ export function useChannelMembers(channelId: string | null) {
     queryKey: keys.channelMembers(channelId ?? 'none'),
     queryFn: () => api<Array<UserDto & { joinedAt: string }>>('GET', `/channels/${channelId}/members`),
     enabled: !!channelId,
+  });
+}
+
+// ---------- integration browse tree (Jira projects/issues, Confluence spaces/pages) ----------
+
+export interface JiraProject {
+  id: string;
+  key: string;
+  name: string;
+}
+export interface JiraIssueRow {
+  key: string;
+  summary: string;
+  status: string | null;
+  url: string;
+}
+
+export function useJiraProjects(workspaceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['jira-projects', workspaceId],
+    queryFn: () => api<JiraProject[]>('GET', `/workspaces/${workspaceId}/jira/projects`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 300000,
+  });
+}
+
+export function useJiraIssues(workspaceId: string, projectKey: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['jira-issues', workspaceId, projectKey],
+    queryFn: () =>
+      api<JiraIssueRow[]>('GET', `/workspaces/${workspaceId}/jira/projects/${projectKey}/issues`),
+    enabled: !!workspaceId && !!projectKey && enabled,
+    staleTime: 120000,
+  });
+}
+
+export function useConfluenceSpaces(workspaceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['confluence-spaces', workspaceId],
+    queryFn: () => api<ConfluenceSpace[]>('GET', `/workspaces/${workspaceId}/confluence/spaces`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 300000,
+  });
+}
+
+export function useConfluencePages(workspaceId: string, spaceKey: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['confluence-pages', workspaceId, spaceKey],
+    queryFn: () =>
+      api<ConfluencePage[]>('GET', `/workspaces/${workspaceId}/confluence/spaces/${spaceKey}/pages`),
+    enabled: !!workspaceId && !!spaceKey && enabled,
+    staleTime: 120000,
   });
 }
 
