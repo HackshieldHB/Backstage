@@ -8,9 +8,13 @@ import type { HuddleController } from '@/hooks/use-huddle';
 function RemoteAudio({ stream }: { stream: MediaStream }) {
   const ref = useRef<HTMLAudioElement>(null);
   useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream;
+    const el = ref.current;
+    if (!el) return;
+    el.srcObject = stream;
+    // autoPlay alone can be a no-op when srcObject is set after mount; nudge it.
+    el.play().catch(() => undefined);
   }, [stream]);
-  return <audio ref={ref} autoPlay />;
+  return <audio ref={ref} autoPlay playsInline />;
 }
 
 export function HuddleBar({ huddle }: { huddle: HuddleController }) {

@@ -43,6 +43,9 @@ export function useHuddle(channelId: string | null): HuddleController {
 
   const localStream = useRef<MediaStream | null>(null);
   const peers = useRef<Map<string, RTCPeerConnection>>(new Map());
+  // ICE candidates that arrive before the remote description is set must be
+  // buffered — adding them early throws and silently kills the connection.
+  const pendingIce = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const joinedRef = useRef(false);
 
   const sendSignal = useCallback(
@@ -61,6 +64,7 @@ export function useHuddle(channelId: string | null): HuddleController {
       pc.close();
       peers.current.delete(peerId);
     }
+    pendingIce.current.delete(peerId);
     setRemoteStreams((s) => {
       if (!(peerId in s)) return s;
       const next = { ...s };
@@ -99,6 +103,12 @@ export function useHuddle(channelId: string | null): HuddleController {
       if (data.kind === 'sdp') {
         const pc = peers.current.get(fromUserId) ?? createPeer(fromUserId, false);
         await pc.setRemoteDescription(data.description).catch(() => undefined);
+        // Now that the remote description exists, drain any ICE that raced ahead.
+        const queued = pendingIce.current.get(fromUserId);
+        if (queued) {
+          pendingIce.current.delete(fromUserId);
+          for (const c of queued) await pc.addIceCandidate(c).catch(() => undefined);
+        }
         if (data.description.type === 'offer') {
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
@@ -106,7 +116,14 @@ export function useHuddle(channelId: string | null): HuddleController {
         }
       } else {
         const pc = peers.current.get(fromUserId);
-        if (pc?.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => undefined);
+        if (pc?.remoteDescription) {
+          await pc.addIceCandidate(data.candidate).catch(() => undefined);
+        } else {
+          // Peer/remote-desc not ready yet — buffer until setRemoteDescription runs.
+          const q = pendingIce.current.get(fromUserId) ?? [];
+          q.push(data.candidate);
+          pendingIce.current.set(fromUserId, q);
+        }
       }
     },
     [createPeer, sendSignal],
@@ -162,6 +179,7 @@ export function useHuddle(channelId: string | null): HuddleController {
   const leave = useCallback(() => {
     if (channelId) getSocket().emit(CLIENT_EVENTS.HUDDLE_LEAVE, { channelId });
     for (const peerId of [...peers.current.keys()]) closePeer(peerId);
+    pendingIce.current.clear();
     localStream.current?.getTracks().forEach((t) => t.stop());
     localStream.current = null;
     joinedRef.current = false;
