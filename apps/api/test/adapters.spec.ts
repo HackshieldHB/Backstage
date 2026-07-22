@@ -1,6 +1,7 @@
 import { createEmailService } from '../src/email/email.module';
 import { ConsoleEmailService } from '../src/email/email.service';
 import { SmtpEmailService } from '../src/email/smtp-email.service';
+import { createErrorReporter, LoggingErrorReporter } from '../src/observability/error-reporter';
 import { createStorageService } from '../src/attachments/attachments.module';
 import { DiskStorageService } from '../src/storage/storage.service';
 import { S3StorageService } from '../src/storage/s3-storage.service';
@@ -64,6 +65,22 @@ describe('environment-selected adapters', () => {
       const warn = jest.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation();
       createStorageService();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('lost on redeploy'));
+      warn.mockRestore();
+    });
+  });
+
+  describe('error reporting', () => {
+    it('falls back to logging when no DSN is configured', () => {
+      delete process.env.SENTRY_DSN;
+      expect(createErrorReporter()).toBeInstanceOf(LoggingErrorReporter);
+    });
+
+    it('warns in production when errors are not aggregated anywhere', () => {
+      delete process.env.SENTRY_DSN;
+      process.env.NODE_ENV = 'production';
+      const warn = jest.spyOn(require('@nestjs/common').Logger.prototype, 'warn').mockImplementation();
+      createErrorReporter();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('SENTRY_DSN is not set'));
       warn.mockRestore();
     });
   });

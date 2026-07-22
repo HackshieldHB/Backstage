@@ -20,10 +20,13 @@ import { AtlassianModule } from './atlassian/atlassian.module';
 import { IntegrationsModule } from './integrations/app-registry';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
+import { ObservabilityModule } from './observability/observability.module';
 import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
   imports: [
+    // First so its middleware wraps every downstream handler in a context.
+    ObservabilityModule,
     PrismaModule,
     IntegrationsModule,
     EmailModule,
