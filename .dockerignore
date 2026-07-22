@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+.git
+.github
+.toolchain
+uploads
+**/uploads
+**/.env
+**/.env.local
+**/test-results
+**/playwright-report
