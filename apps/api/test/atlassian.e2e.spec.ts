@@ -186,6 +186,23 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
     bot: `acc-bot-${run}`,
   };
 
+  /**
+   * Runs the personal "Connect my Atlassian account" OAuth flow for an actor so
+   * their writes are attributed to them. Idempotent (the link is upserted).
+   * Requires the workspace to already be connected.
+   */
+  const connectPersonally = async (actor: Actor, accountId: string) => {
+    const urlRes = await http()
+      .get(`/workspaces/${workspaceId}/atlassian/user-connect-url`)
+      .set(auth(actor))
+      .expect(200);
+    const state = new URL(urlRes.body.data.url).searchParams.get('state')!;
+    mock.profile = { accountId, email: actor.email, emailVerified: true, displayName: accountId, avatarUrl: null };
+    await http()
+      .get(`/atlassian/callback?code=user-code&state=${encodeURIComponent(state)}`)
+      .expect(302);
+  };
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(AtlassianApiService)
@@ -878,6 +895,9 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
         .send({ issueKey: 'PROJ-500' })
         .expect(200);
       cardId = res.body.data.id;
+      // Owner personally connects so their actions are attributed to them and
+      // not to the shared workspace connection.
+      await connectPersonally(owner, `acc-owner-${run}`);
     });
 
     it('transition moves the issue, updates the card in place, and threads a reply', async () => {
@@ -908,22 +928,27 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
       expect(res.body.data.map((t: { name: string }) => t.name)).toContain('In Progress');
     });
 
-    it('assign-to-me assigns the caller\'s linked Atlassian account', async () => {
-      await http()
-        .post(`/messages/${cardId}/jira/action`)
-        .set(auth(linkedUser))
-        .send({ issueKey: 'PROJ-500', action: 'assign_me' })
-        .expect(200);
-      expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: ACC.linked });
-    });
-
-    it('assign-to-me is rejected for a user with no linked Atlassian account', async () => {
-      // owner was never matched to a directory account -> no link.
+    it('assign-to-me assigns the caller\'s own Atlassian account', async () => {
       await http()
         .post(`/messages/${cardId}/jira/action`)
         .set(auth(owner))
         .send({ issueKey: 'PROJ-500', action: 'assign_me' })
+        .expect(200);
+      expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: `acc-owner-${run}` });
+    });
+
+    it('rejects any action from a member who has not personally connected Atlassian', async () => {
+      // linkedUser is mapped to a Jira account by directory sync but never did
+      // the personal OAuth connect, so has no token of their own. Without this
+      // guard the action would post as the workspace connection owner — the bug.
+      const res = await http()
+        .post(`/messages/${cardId}/jira/action`)
+        .set(auth(linkedUser))
+        .send({ issueKey: 'PROJ-500', action: 'comment', text: 'should not post' })
         .expect(400);
+      expect(res.body.error.message).toMatch(/connect your atlassian account/i);
+      // Nothing was sent to Jira on their behalf.
+      expect(mock.comments.some((c) => c.text.includes('should not post'))).toBe(false);
     });
 
     it('rejects an action for an issue not attached to the message', async () => {
@@ -934,14 +959,19 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
         .expect(400);
     });
 
-    it('comment posts to Jira prefixed with the actor name', async () => {
+    it('comment posts to Jira as the caller, without a faked name prefix', async () => {
       await http()
         .post(`/messages/${cardId}/jira/action`)
         .set(auth(owner))
         .send({ issueKey: 'PROJ-500', action: 'comment', text: 'looking into this' })
         .expect(200);
-      expect(mock.comments.at(-1)!.issueKey).toBe('PROJ-500');
-      expect(mock.comments.at(-1)!.text).toContain('looking into this');
+      const last = mock.comments.at(-1)!;
+      expect(last.issueKey).toBe('PROJ-500');
+      expect(last.text).toContain('looking into this');
+      expect(last.text).toContain('via Backstages');
+      // Authored by the caller's own token now, so it must NOT fake a
+      // "<name> (via Backstages):" prefix the way the buggy version did.
+      expect(last.text).not.toMatch(/\(via Backstages\):/);
     });
 
     it('a member can connect their own Jira account for correct attribution', async () => {
@@ -1439,12 +1469,30 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
   });
 
   describe('confluence pages', () => {
+    beforeAll(async () => {
+      // Page writes are attributed to the token owner, so the acting user must
+      // have personally connected. Idempotent if an earlier describe did it.
+      await connectPersonally(owner, `acc-owner-${run}`);
+    });
+
     it('lists spaces from the connected site', async () => {
       const res = await http()
         .get(`/workspaces/${workspaceId}/confluence/spaces`)
         .set(auth(owner))
         .expect(200);
       expect(res.body.data.map((s: { key: string }) => s.key)).toContain('DEV');
+    });
+
+    it('refuses to create a page for a member who has not connected Atlassian', async () => {
+      // linkedUser is a workspace member (directory sync) but never personally
+      // connected — the page would otherwise be authored by the shared
+      // workspace connection ("Kevin Julian"), not them.
+      const res = await http()
+        .post(`/workspaces/${workspaceId}/confluence/pages`)
+        .set(auth(linkedUser))
+        .send({ spaceKey: 'DEV', title: 'Should be blocked', body: 'nope' })
+        .expect(403);
+      expect(res.body.error.message).toMatch(/connect your own atlassian account/i);
     });
 
     it('captures a whole thread as a page and links it back into the thread', async () => {

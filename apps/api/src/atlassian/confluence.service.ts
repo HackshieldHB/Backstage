@@ -105,6 +105,30 @@ export class ConfluenceService {
     return { connection, token };
   }
 
+  /**
+   * Like {@link ctx}, but for WRITES. A Confluence page is authored by whoever
+   * owns the token, so creating/editing one on the shared workspace connection
+   * attributes it to the person who connected the site, not the actual author.
+   * Writes therefore require the caller's own personal connection. Reads keep
+   * using ctx() — reads are not attributed and shouldn't force everyone to link.
+   */
+  private async writeCtx(userId: string, workspaceId: string) {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const connection = await this.atlassian.connectionForWorkspace(workspaceId);
+    if (!hasGranularConfluence(connection.scopes)) {
+      throw new ForbiddenException(
+        'This Atlassian connection is missing Confluence access. A workspace admin needs to reconnect Atlassian (Workspace menu → Connect Atlassian) to grant Confluence permissions.',
+      );
+    }
+    const token = await this.atlassian.userAccessTokenFor(userId);
+    if (!token) {
+      throw new ForbiddenException(
+        'Connect your own Atlassian account (Workspace menu → Connect Atlassian) to create or edit Confluence pages — otherwise the page would be attributed to the workspace connection, not you.',
+      );
+    }
+    return { connection, token };
+  }
+
   async listSpaces(userId: string, workspaceId: string): Promise<ConfluenceSpace[]> {
     const { connection, token } = await this.ctx(userId, workspaceId);
     return this.api.listSpaces(token, connection.siteId);
@@ -128,7 +152,7 @@ export class ConfluenceService {
   }
 
   async createPage(userId: string, workspaceId: string, input: CreatePageInput): Promise<ConfluencePage> {
-    const { connection, token } = await this.ctx(userId, workspaceId);
+    const { connection, token } = await this.writeCtx(userId, workspaceId);
     const page = await this.api.createPage(token, connection.siteId, {
       spaceKey: input.spaceKey,
       title: input.title,
@@ -185,7 +209,7 @@ export class ConfluenceService {
     const threadUrl = `${web}/app?channel=${message.channelId}&thread=${rootId}`;
     const title = input.title?.trim() || entries[0].text.slice(0, 120) || `Thread in #${channel.name}`;
 
-    const { connection, token } = await this.ctx(userId, channel.workspaceId);
+    const { connection, token } = await this.writeCtx(userId, channel.workspaceId);
     const page = await this.api.createPage(token, connection.siteId, {
       spaceKey: input.spaceKey,
       title,
@@ -232,7 +256,7 @@ export class ConfluenceService {
     pageId: string,
     input: UpdatePageInput,
   ): Promise<ConfluencePage> {
-    const { connection, token } = await this.ctx(userId, workspaceId);
+    const { connection, token } = await this.writeCtx(userId, workspaceId);
     const page = await this.api.updatePage(token, connection.siteId, pageId, {
       title: input.title,
       body: toStorage(input.body),
@@ -242,7 +266,7 @@ export class ConfluenceService {
   }
 
   async deletePage(userId: string, workspaceId: string, pageId: string) {
-    const { connection, token } = await this.ctx(userId, workspaceId);
+    const { connection, token } = await this.writeCtx(userId, workspaceId);
     await this.api.deletePage(token, connection.siteId, pageId);
     return { ok: true };
   }

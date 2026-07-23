@@ -401,10 +401,17 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
       messageId,
       input.issueKey,
     );
-    // Prefer the caller's personal token (correct Jira attribution); fall back
-    // to the shared workspace connection when they haven't connected.
-    const userToken = await this.atlassian.userAccessTokenFor(userId);
-    const token = userToken ?? (await this.atlassian.accessTokenFor(connection));
+    // Every interactive action is recorded in Jira against whoever owns the
+    // token, so it MUST use the caller's own connection. Falling back to the
+    // shared workspace token (as this used to) posts the comment / transition /
+    // assignment as the person who connected the site — i.e. as someone else —
+    // and lets a user who never linked their account act at all. Require it.
+    const token = await this.atlassian.userAccessTokenFor(userId);
+    if (!token) {
+      throw new BadRequestException(
+        'Connect your Atlassian account first (Workspace menu → Connect Atlassian) so this is attributed to you.',
+      );
+    }
     const { issueKey } = input;
     let summary = `updated ${issueKey}`;
 
@@ -436,13 +443,13 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
       }
       case 'comment': {
         if (!input.text?.trim()) throw new BadRequestException('text is required');
-        const author = await this.prisma.user.findUnique({ where: { id: userId } });
-        const name = author?.displayName ?? 'Someone';
+        // Authored by the caller's own Atlassian identity now, so no name
+        // prefix — just mark that it came through Backstages.
         await this.api.addComment(
           token,
           connection.siteId,
           issueKey,
-          `${name} (via Backstages): ${input.text.trim()}`,
+          `${input.text.trim()}\n\n— via Backstages`,
         );
         summary = `commented on ${issueKey}`;
         break;
