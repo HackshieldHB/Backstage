@@ -65,6 +65,29 @@ The Playwright suite starts its own servers from the built artifacts. First run:
   save-a-thread-as-a-Confluence-page, weekday standup digest (BullMQ, `0 9 * * 1-5`),
   `/incident` → channel + tracking issue + draft postmortem in one command, and Bitbucket
   pull request events as threaded channel cards.
+- **Slash commands**: contributed server-side by integration apps (the `commands` hook on
+  `IntegrationApp`), listed over `GET /workspaces/:id/commands`, executed at
+  `POST /channels/:id/commands` — the composer only dispatches.
+- **Operations**: email via SMTP (`SMTP_HOST`; console adapter otherwise), attachments via S3
+  (`STORAGE_DRIVER=s3`; local disk otherwise), request-correlated structured logging and error
+  reporting (`SENTRY_DSN`; logging otherwise). Each logs its choice at boot and warns in
+  production when left on the development default.
+
+## Deploy
+
+Multi-stage Dockerfiles build each app from the repo root (both depend on `packages/shared`):
+
+```bash
+docker build -f apps/api/Dockerfile -t backstages-api .
+docker build -f apps/web/Dockerfile \
+  --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
+  --build-arg NEXT_PUBLIC_SOCKET_URL=https://api.example.com -t backstages-web .
+```
+
+`NEXT_PUBLIC_*` are inlined at web build time, so a web image is environment-specific. Run
+`prisma migrate deploy` as a release step (never on container boot — replicas would race).
+CI (`.github/workflows/ci.yml`) builds the workspace and runs the API suites against real
+Postgres + Redis on every push and PR, with Playwright behind it.
 
 ## API conventions
 
