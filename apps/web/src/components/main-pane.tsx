@@ -116,7 +116,9 @@ export function MainPane({
         </button>
       </header>
 
-      {tipsOpen && <CheatSheetDialog onClose={() => setTipsOpen(false)} />}
+      {tipsOpen && (
+        <CheatSheetDialog workspaceId={workspaceId} onClose={() => setTipsOpen(false)} />
+      )}
 
       {container.kind === 'channel' && <HuddleBar huddle={huddle} />}
 

@@ -13,7 +13,7 @@ import { AtlassianApiService } from './atlassian-api.service';
 import { AtlassianService } from './atlassian.service';
 import { IntegrationMessagesService } from '../messages/integration-messages.service';
 import { channelContainer } from '../messages/messages.service';
-import { AppRegistry, type IntegrationApp } from '../integrations/app-registry';
+import { AppRegistry, type IntegrationApp, type SlashCommand } from '../integrations/app-registry';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ConfluenceApiService } from './confluence-api.service';
 import { hasGranularConfluence } from './scopes';
@@ -71,6 +71,35 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
 
   onModuleInit() {
     this.registry.register(this);
+  }
+
+  // ---------- slash commands (IntegrationApp) ----------
+
+  commands(): SlashCommand[] {
+    return [
+      {
+        name: 'jira',
+        subcommand: 'create',
+        usage: '/jira create <summary>',
+        description: 'Create a Jira issue in this channel',
+        channelOnly: true,
+        dialog: 'jira-create',
+      },
+      {
+        name: 'jira',
+        usage: '/jira KEY-123',
+        description: 'Post a live Jira issue status card',
+        channelOnly: true,
+        run: async (ctx, args) => {
+          const key = args.trim().toUpperCase();
+          if (!ISSUE_KEY_RE.test(key)) {
+            throw new BadRequestException(`"${args.trim()}" is not an issue key (expected e.g. PROJ-123)`);
+          }
+          await this.jiraCommand(ctx.userId, ctx.channelId!, key);
+          return { handled: true, message: `Posted ${key}` };
+        },
+      },
+    ];
   }
 
   // ---------- link unfurling (IntegrationApp) ----------

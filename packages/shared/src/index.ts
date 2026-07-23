@@ -3,6 +3,7 @@ export * from './schemas/auth';
 export * from './schemas/workspace';
 export * from './schemas/channel';
 export * from './schemas/conversation';
+export * from './schemas/command';
 export * from './schemas/confluence';
 export * from './schemas/message';
 export * from './schemas/search';

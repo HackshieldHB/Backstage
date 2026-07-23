@@ -1130,6 +1130,89 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
     });
   });
 
+  describe('slash commands', () => {
+    it('lists the commands the registered apps contribute', async () => {
+      const res = await http()
+        .get(`/workspaces/${workspaceId}/commands`)
+        .set(auth(owner))
+        .expect(200);
+      const usages = res.body.data.map((c: { usage: string }) => c.usage);
+      expect(usages).toEqual(
+        expect.arrayContaining(['/jira KEY-123', '/jira create <summary>', '/incident <title>']),
+      );
+    });
+
+    it('runs /jira KEY-123 server-side and posts the card', async () => {
+      mock.issues.set('PROJ-321', {
+        key: 'PROJ-321',
+        summary: 'Via the command framework',
+        status: 'To Do',
+        issueType: 'Task',
+        priority: null,
+        assigneeAccountId: null,
+      });
+      const res = await http()
+        .post(`/channels/${channelId}/commands`)
+        .set(auth(owner))
+        .send({ text: '/jira PROJ-321' })
+        .expect(200);
+      expect(res.body.data).toMatchObject({ handled: true, message: 'Posted PROJ-321' });
+
+      const msg = await prisma.message.findFirst({
+        where: { channelId },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(msg!.contentText).toContain('PROJ-321');
+    });
+
+    it('resolves the subcommand ahead of the bare command', async () => {
+      // The dangerous case: "/jira create ..." must not be read as an issue key.
+      const res = await http()
+        .post(`/channels/${channelId}/commands`)
+        .set(auth(owner))
+        .send({ text: '/jira create fix the flaky test' })
+        .expect(200);
+      expect(res.body.data).toMatchObject({
+        handled: true,
+        dialog: 'jira-create',
+        args: 'fix the flaky test',
+      });
+    });
+
+    it('hands /incident to the client dialog with the title', async () => {
+      const res = await http()
+        .post(`/channels/${channelId}/commands`)
+        .set(auth(owner))
+        .send({ text: '/incident checkout is down' })
+        .expect(200);
+      expect(res.body.data).toMatchObject({
+        handled: true,
+        dialog: 'incident',
+        args: 'checkout is down',
+      });
+    });
+
+    it('rejects an unknown command instead of posting it as a message', async () => {
+      const before = await prisma.message.count({ where: { channelId } });
+      const res = await http()
+        .post(`/channels/${channelId}/commands`)
+        .set(auth(owner))
+        .send({ text: '/nope do something' })
+        .expect(400);
+      expect(res.body.error.message).toMatch(/unknown command \/nope/i);
+      expect(await prisma.message.count({ where: { channelId } })).toBe(before);
+    });
+
+    it('explains a malformed issue key rather than failing opaquely', async () => {
+      const res = await http()
+        .post(`/channels/${channelId}/commands`)
+        .set(auth(owner))
+        .send({ text: '/jira not-a-key' })
+        .expect(400);
+      expect(res.body.error.message).toMatch(/is not an issue key/i);
+    });
+  });
+
   describe('bitbucket pull requests', () => {
     let bbChannelId: string;
     let subId: string;

@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import {
+  AppRegistry,
+  type IntegrationApp,
+  type SlashCommand,
+} from '../integrations/app-registry';
 import type { DeclareIncidentInput, IncidentResult } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
@@ -56,10 +61,12 @@ function postmortemBody(input: {
  * channel because the wiki was down would be the worse outcome.
  */
 @Injectable()
-export class IncidentService {
+export class IncidentService implements IntegrationApp, OnModuleInit {
+  readonly id = 'incident';
   private readonly logger = new Logger(IncidentService.name);
 
   constructor(
+    private readonly registry: AppRegistry,
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
     private readonly channels: ChannelsService,
@@ -68,6 +75,21 @@ export class IncidentService {
     private readonly confluenceApi: ConfluenceApiService,
     private readonly integrationMessages: IntegrationMessagesService,
   ) {}
+
+  onModuleInit() {
+    this.registry.register(this);
+  }
+
+  commands(): SlashCommand[] {
+    return [
+      {
+        name: 'incident',
+        usage: '/incident <title>',
+        description: 'Spin up an incident channel, tracking issue and postmortem',
+        dialog: 'incident',
+      },
+    ];
+  }
 
   async declare(
     userId: string,

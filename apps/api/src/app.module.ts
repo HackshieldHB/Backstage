@@ -17,7 +17,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
 import { SearchModule } from './search/search.module';
 import { UsersModule } from './users/users.module';
 import { AtlassianModule } from './atlassian/atlassian.module';
-import { IntegrationsModule } from './integrations/app-registry';
+import { IntegrationsModule } from './integrations/integrations.module';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 import { ObservabilityModule } from './observability/observability.module';

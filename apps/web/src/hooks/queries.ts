@@ -18,6 +18,7 @@ import type {
   MessagePage,
   SearchResponse,
   SendMessageInput,
+  SlashCommandDto,
   UnreadUpdatedPayload,
   UserDto,
   WorkspaceDto,
@@ -214,6 +215,16 @@ export function useJiraIssues(workspaceId: string, projectKey: string, enabled: 
       api<JiraIssueRow[]>('GET', `/workspaces/${workspaceId}/jira/projects/${projectKey}/issues`),
     enabled: !!workspaceId && !!projectKey && enabled,
     staleTime: 120000,
+  });
+}
+
+/** Slash commands contributed by the server's integration apps. */
+export function useCommands(workspaceId: string) {
+  return useQuery({
+    queryKey: ['commands', workspaceId],
+    queryFn: () => api<SlashCommandDto[]>('GET', `/workspaces/${workspaceId}/commands`),
+    enabled: !!workspaceId,
+    staleTime: 300000,
   });
 }
 

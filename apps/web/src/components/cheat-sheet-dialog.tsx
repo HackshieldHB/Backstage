@@ -1,5 +1,6 @@
 'use client';
 
+import { useCommands } from '@/hooks/queries';
 import { Dialog } from './dialog';
 
 function Row({ keys, desc }: { keys: string; desc: string }) {
@@ -23,14 +24,28 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 /** Quick reference for slash commands, composer syntax, and shortcuts. */
-export function CheatSheetDialog({ onClose }: { onClose: () => void }) {
+export function CheatSheetDialog({
+  workspaceId,
+  onClose,
+}: {
+  workspaceId: string;
+  onClose: () => void;
+}) {
+  // Listed by the server, so an app that adds a command shows up here without
+  // anyone remembering to edit this file.
+  const commands = useCommands(workspaceId);
+
   return (
     <Dialog title="Tips & shortcuts" onClose={onClose}>
       <div className="space-y-3">
         <Section title="Slash commands">
-          <Row keys="/jira KEY-123" desc="Post a live Jira issue status card" />
-          <Row keys="/jira create <summary>" desc="Create a Jira issue in this channel" />
-          <Row keys="/incident <title>" desc="Spin up an incident channel, issue and postmortem" />
+          {commands.isLoading && <p className="py-1.5 text-sm text-gray-400">Loading…</p>}
+          {commands.data?.map((c) => (
+            <Row key={c.usage} keys={c.usage} desc={c.description} />
+          ))}
+          {commands.data?.length === 0 && (
+            <p className="py-1.5 text-sm text-gray-400">No commands available.</p>
+          )}
         </Section>
 
         <Section title="In the message box">

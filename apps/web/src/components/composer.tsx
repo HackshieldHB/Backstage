@@ -24,7 +24,12 @@ import {
   Strikethrough,
 } from 'lucide-react';
 import clsx from 'clsx';
-import type { AttachmentDto, MessageDto, SendMessageInput } from '@backstages/shared';
+import type {
+  AttachmentDto,
+  CommandResultDto,
+  MessageDto,
+  SendMessageInput,
+} from '@backstages/shared';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useAuthStore } from '@/stores/auth-store';
@@ -294,32 +299,19 @@ export function Composer({
     if (!text && ready.length === 0) return;
     if (uploads.some((u) => !u.attachment && !u.error)) return; // uploads still in flight
 
-    // Slash command: /incident <title> opens the declare-incident dialog.
-    const incident = /^\/incident\b\s*(.*)$/i.exec(text);
-    if (incident) {
-      editor.commands.clearContent();
-      setIncidentTitle(incident[1].trim());
-      return;
-    }
-
-    // Slash command: /jira create <summary> opens the create-issue dialog.
-    const jiraCreate = /^\/jira\s+create\b\s*(.*)$/i.exec(text);
-    if (jiraCreate && container.kind === 'channel') {
-      editor.commands.clearContent();
-      setJiraCreateSummary(jiraCreate[1].trim());
-      return;
-    }
-
-    // Slash command: /jira PROJ-123 posts an issue status card instead of a message.
-    const jiraMatch = /^\/jira\s+([A-Za-z][A-Za-z0-9]+-\d+)\s*$/.exec(text);
-    if (jiraMatch && container.kind === 'channel') {
+    // Slash commands are declared by the server's integration apps; the client
+    // only dispatches. A command either runs server-side or names a dialog for
+    // us to open with the remaining text.
+    if (text.startsWith('/') && container.kind === 'channel') {
       editor.commands.clearContent();
       try {
-        await api('POST', `/channels/${container.id}/jira/command`, {
-          issueKey: jiraMatch[1].toUpperCase(),
+        const result = await api<CommandResultDto>('POST', `/channels/${container.id}/commands`, {
+          text,
         });
+        if (result.dialog === 'jira-create') setJiraCreateSummary(result.args ?? '');
+        else if (result.dialog === 'incident') setIncidentTitle(result.args ?? '');
       } catch (err) {
-        window.alert(err instanceof Error ? err.message : 'Jira command failed');
+        window.alert(err instanceof Error ? err.message : 'Command failed');
       }
       return;
     }
