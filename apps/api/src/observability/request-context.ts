@@ -1,4 +1,4 @@
-import { Injectable, Logger, type NestMiddleware } from '@nestjs/common';
+import { ConsoleLogger, Injectable, type NestMiddleware } from '@nestjs/common';
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
@@ -44,7 +44,7 @@ export function tagContextUser(userId: string): void {
  * can parse it) and stays human-readable in development. Every line carries the
  * request id when there is one.
  */
-export class ContextLogger extends Logger {
+export class ContextLogger extends ConsoleLogger {
   private static readonly json = process.env.NODE_ENV === 'production';
 
   private emit(level: string, message: unknown, context?: string, trace?: string) {
