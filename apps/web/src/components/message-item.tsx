@@ -96,7 +96,7 @@ export function MessageItem({
     return (
       <div className={clsx('group relative flex gap-2.5 px-5 py-0.5', !grouped && 'mt-2')} data-message-id={message.id}>
         <span className="w-9 shrink-0" />
-        <p className="text-[14px] italic text-gray-400 dark:text-gray-500">This message was deleted</p>
+        <p className="text-[14px] italic text-gray-500 dark:text-gray-400">This message was deleted</p>
       </div>
     );
   }
@@ -114,7 +114,7 @@ export function MessageItem({
       onMouseLeave={() => setHovered(false)}
     >
       {grouped ? (
-        <span className="w-9 shrink-0 pt-0.5 text-right text-[10px] leading-5 text-gray-400 opacity-0 group-hover:opacity-100">
+        <span className="w-9 shrink-0 pt-0.5 text-right text-[10px] leading-5 text-gray-500 dark:text-gray-400 opacity-0 group-hover:opacity-100">
           {time}
         </span>
       ) : message.kind === 'INTEGRATION' ? (
@@ -141,7 +141,7 @@ export function MessageItem({
                 ? 'Jira'
                 : (message.user?.displayName ?? (message.pending ? me?.displayName : 'Unknown user'))}
             </span>
-            <span className="text-[11px] text-gray-400">{time}</span>
+            <span className="text-[11px] text-gray-500 dark:text-gray-400">{time}</span>
             {message.kind === 'INTEGRATION' && (
               <span className="rounded bg-gray-100 px-1 text-[10px] font-medium text-gray-500 dark:bg-gray-800">APP</span>
             )}
@@ -156,8 +156,8 @@ export function MessageItem({
         ) : (
           <>
             <MessageBody contentJson={message.contentJson} contentText={message.contentText} />
-            {message.isEdited && <span className="ml-1 text-[11px] text-gray-400">(edited)</span>}
-            {message.pending && <span className="ml-1 text-[11px] text-gray-400">sending…</span>}
+            {message.isEdited && <span className="ml-1 text-[11px] text-gray-500 dark:text-gray-400">(edited)</span>}
+            {message.pending && <span className="ml-1 text-[11px] text-gray-500 dark:text-gray-400">sending…</span>}
             {message.failed && (
               <button
                 className="ml-1 text-[11px] font-medium text-red-500 hover:underline"
@@ -193,7 +193,7 @@ export function MessageItem({
             ))}
             <button
               onClick={() => setEmojiOpen(true)}
-              className="flex items-center rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-gray-400 hover:border-gray-400 hover:text-gray-600 dark:border-gray-600"
+              className="flex items-center rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:border-gray-400 hover:text-gray-600 dark:border-gray-600"
               title="Add reaction"
             >
               <SmilePlus size={13} />
@@ -215,7 +215,7 @@ export function MessageItem({
             </span>
             {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}
             {message.lastReplyAt && (
-              <span className="font-normal text-gray-400">
+              <span className="font-normal text-gray-500 dark:text-gray-400">
                 · last {format(new Date(message.lastReplyAt), 'MMM d, HH:mm')}
               </span>
             )}

@@ -115,7 +115,7 @@ export function AtlassianDialog({
             Every member of the site is chattable here — unknown people appear as provisional
             members until they log in with Atlassian. Directory resyncs nightly.
           </p>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
             Last sync:{' '}
             {status.data.connection!.lastSyncAt
               ? new Date(status.data.connection!.lastSyncAt).toLocaleString()
@@ -228,7 +228,7 @@ export function AtlassianDialog({
               Connect Atlassian
             </button>
           ) : (
-            <p className="text-gray-400">Ask a workspace admin to connect Atlassian.</p>
+            <p className="text-gray-500 dark:text-gray-400">Ask a workspace admin to connect Atlassian.</p>
           )}
         </div>
       )}

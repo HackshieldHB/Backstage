@@ -58,7 +58,7 @@ export const SuggestionList = forwardRef<
           {item.icon}
           <span className="font-medium">{item.label}</span>
           {item.hint && (
-            <span className={clsx('ml-auto truncate text-xs', i === selected ? 'text-white/70' : 'text-gray-400')}>
+            <span className={clsx('ml-auto truncate text-xs', i === selected ? 'text-white/70' : 'text-gray-500 dark:text-gray-400')}>
               {item.hint}
             </span>
           )}

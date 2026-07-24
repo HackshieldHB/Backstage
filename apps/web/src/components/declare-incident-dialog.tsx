@@ -117,7 +117,7 @@ export function DeclareIncidentDialog({
       )}
 
       <label className="mb-1 block text-xs font-medium text-gray-500">
-        Postmortem space <span className="font-normal text-gray-400">(optional)</span>
+        Postmortem space <span className="font-normal text-gray-500 dark:text-gray-400">(optional)</span>
       </label>
       <select
         className={clsx(inputCls, 'mb-3')}
@@ -133,7 +133,7 @@ export function DeclareIncidentDialog({
         ))}
       </select>
 
-      <p className="mb-3 text-[11px] text-gray-400">
+      <p className="mb-3 text-[11px] text-gray-500 dark:text-gray-400">
         Creates a channel, a tracking issue, and a draft postmortem — each linking to the others.
       </p>
       <button

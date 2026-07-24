@@ -142,10 +142,10 @@ export function MessageList({
   return (
     <div ref={scrollRef} onScroll={onScroll} className="thin-scrollbar flex-1 overflow-y-auto pb-3" data-testid="message-list">
       {query.isFetchingNextPage && (
-        <p className="py-2 text-center text-xs text-gray-400">Loading older messages…</p>
+        <p className="py-2 text-center text-xs text-gray-500 dark:text-gray-400">Loading older messages…</p>
       )}
       {!query.hasNextPage && messages.length > 0 && (
-        <p className="px-5 pt-6 text-xs text-gray-400">This is the very beginning of the conversation.</p>
+        <p className="px-5 pt-6 text-xs text-gray-500 dark:text-gray-400">This is the very beginning of the conversation.</p>
       )}
       {messages.map((message, i) => {
         const prev = messages[i - 1];
@@ -186,7 +186,7 @@ export function MessageList({
         );
       })}
       {messages.length === 0 && query.isSuccess && (
-        <p className="px-5 pt-8 text-sm text-gray-400">No messages yet. Say hello!</p>
+        <p className="px-5 pt-8 text-sm text-gray-500 dark:text-gray-400">No messages yet. Say hello!</p>
       )}
     </div>
   );

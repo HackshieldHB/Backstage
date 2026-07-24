@@ -133,7 +133,7 @@ export function MainPane({
       <div className="shrink-0 px-4 pb-3">
         <TypingIndicator containerId={container.id} />
         <Composer workspaceId={workspaceId} container={container} placeholder={placeholder} />
-        <p className="mt-1 hidden text-[11px] text-gray-400 md:block">
+        <p className="mt-1 hidden text-[11px] text-gray-500 dark:text-gray-400 md:block">
           <strong>Enter</strong> to send · <strong>Shift+Enter</strong> for a new line
         </p>
       </div>

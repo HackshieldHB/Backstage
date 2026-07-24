@@ -418,7 +418,7 @@ export function Composer({
               ) : (
                 <span className="tabular-nums">{u.progress}%</span>
               )}
-              <button onClick={() => setUploads((list) => list.filter((x) => x.key !== u.key))} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setUploads((list) => list.filter((x) => x.key !== u.key))} className="text-gray-500 dark:text-gray-400 hover:text-gray-600">
                 ×
               </button>
             </span>
@@ -588,7 +588,7 @@ export function EditMessageEditor({ message, onDone }: { message: MessageDto; on
         <button onClick={onDone} className="rounded border border-gray-300 px-2 py-1 dark:border-gray-600">
           Cancel
         </button>
-        <span className="self-center text-gray-400">Enter to save · Esc to cancel</span>
+        <span className="self-center text-gray-500 dark:text-gray-400">Enter to save · Esc to cancel</span>
       </div>
     </div>
   );
@@ -605,7 +605,7 @@ export function TypingIndicator({ containerId }: { containerId: string }) {
         ? `${names[0]} and ${names[1]} are typing…`
         : 'Several people are typing…';
   return (
-    <div className="h-5 px-1 text-xs italic text-gray-400" data-testid="typing-indicator">
+    <div className="h-5 px-1 text-xs italic text-gray-500 dark:text-gray-400" data-testid="typing-indicator">
       {label}
     </div>
   );

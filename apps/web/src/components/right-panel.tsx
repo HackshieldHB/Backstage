@@ -85,7 +85,7 @@ function ThreadPanel({
   const [saveOpen, setSaveOpen] = useState(false);
 
   if (!thread.data) {
-    return <p className="p-4 text-sm text-gray-400">Loading thread…</p>;
+    return <p className="p-4 text-sm text-gray-500 dark:text-gray-400">Loading thread…</p>;
   }
 
   // Capturing a thread writes a page, so it needs the granular Confluence scopes.
@@ -100,7 +100,7 @@ function ThreadPanel({
         <div className="pt-3" data-testid="thread-parent">
           <MessageItem message={thread.data.parent} grouped={false} inThread />
         </div>
-        <div className="mx-5 my-2 flex items-center gap-2 text-xs text-gray-400">
+        <div className="mx-5 my-2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
           <span>{thread.data.replies.length} {thread.data.replies.length === 1 ? 'reply' : 'replies'}</span>
           <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
           {canSave && (
@@ -304,7 +304,7 @@ function DetailsPanel({
               <MessageBody contentJson={p.message.contentJson} contentText={p.message.contentText} />
             </button>
           ))}
-          {(pins.data ?? []).length === 0 && <p className="p-3 text-sm text-gray-400">Nothing pinned yet.</p>}
+          {(pins.data ?? []).length === 0 && <p className="p-3 text-sm text-gray-500 dark:text-gray-400">Nothing pinned yet.</p>}
         </div>
       )}
 
@@ -326,7 +326,7 @@ function DetailsPanel({
               </a>
             </li>
           ))}
-          {(files.data?.files ?? []).length === 0 && <p className="p-3 text-sm text-gray-400">No files yet.</p>}
+          {(files.data?.files ?? []).length === 0 && <p className="p-3 text-sm text-gray-500 dark:text-gray-400">No files yet.</p>}
         </ul>
       )}
     </div>
@@ -355,7 +355,7 @@ function iconForNotification(type: string, pl: NotifPayload) {
     : type === 'THREAD_REPLY' ? <Reply size={14} className="text-emerald-600" />
     : type === 'REACTION' ? <Smile size={14} className="text-amber-500" />
     : type === 'DM' ? <MessageSquareText size={14} className="text-blue-500" />
-    : <Bell size={14} className="text-gray-400" />;
+    : <Bell size={14} className="text-gray-500 dark:text-gray-400" />;
 }
 
 /** Main text line for a SYSTEM (integration) notification, else null. */
@@ -431,12 +431,12 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
                     {n.type === 'DM' && 'sent you a message'}
                   </>
                 )}
-                {n.channelName && <span className="text-gray-400"> in #{n.channelName}</span>}
+                {n.channelName && <span className="text-gray-500 dark:text-gray-400"> in #{n.channelName}</span>}
               </span>
               {(pl.summary || n.preview) && (
                 <span className="block truncate text-xs text-gray-500">{pl.summary ?? n.preview}</span>
               )}
-              <span className="block text-[11px] text-gray-400">
+              <span className="block text-[11px] text-gray-500 dark:text-gray-400">
                 {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true })}
               </span>
             </span>
@@ -445,7 +445,7 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
         );
       })}
       {(notifications.data?.notifications ?? []).length === 0 && (
-        <p className="p-3 text-sm text-gray-400">No activity yet.</p>
+        <p className="p-3 text-sm text-gray-500 dark:text-gray-400">No activity yet.</p>
       )}
     </div>
   );
@@ -479,7 +479,7 @@ function SavedPanel({
           <MessageBody contentJson={s.message.contentJson} contentText={s.message.contentText} />
         </button>
       ))}
-      {(saved.data ?? []).length === 0 && <p className="p-3 text-sm text-gray-400">Nothing saved yet.</p>}
+      {(saved.data ?? []).length === 0 && <p className="p-3 text-sm text-gray-500 dark:text-gray-400">Nothing saved yet.</p>}
     </div>
   );
 }

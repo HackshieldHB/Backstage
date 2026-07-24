@@ -38,7 +38,7 @@ export function AttachmentView({ attachments }: { attachments: AttachmentDto[] }
               <span className="block max-w-[180px] truncate text-sm font-medium">{a.filename}</span>
               <span className="block text-xs text-gray-500">{humanSize(a.sizeBytes)}</span>
             </span>
-            <Download size={14} className="ml-1 text-gray-400" />
+            <Download size={14} className="ml-1 text-gray-500 dark:text-gray-400" />
           </a>
         ),
       )}

@@ -57,7 +57,7 @@ export function SearchDialog({
     >
       <div className="w-full max-w-2xl animate-fade-in rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
         <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 dark:border-gray-800">
-          <Search size={16} className="text-gray-400" />
+          <Search size={16} className="text-gray-500 dark:text-gray-400" />
           <input
             ref={inputRef}
             value={q}
@@ -66,7 +66,7 @@ export function SearchDialog({
             className="flex-1 bg-transparent text-sm outline-none"
             data-testid="search-input"
           />
-          <kbd className="text-[10px] text-gray-400">Esc</kbd>
+          <kbd className="text-[10px] text-gray-500 dark:text-gray-400">Esc</kbd>
         </div>
 
         <div className="flex border-b border-gray-100 px-2 dark:border-gray-800">
@@ -80,14 +80,14 @@ export function SearchDialog({
               )}
               data-testid={`search-tab-${t}`}
             >
-              {t} {debounced && counts[t] > 0 && <span className="text-xs text-gray-400">({counts[t]})</span>}
+              {t} {debounced && counts[t] > 0 && <span className="text-xs text-gray-500 dark:text-gray-400">({counts[t]})</span>}
             </button>
           ))}
         </div>
 
         <div className="thin-scrollbar max-h-[50vh] overflow-y-auto p-2" data-testid="search-results">
           {!debounced && (
-            <p className="p-4 text-sm text-gray-400">
+            <p className="p-4 text-sm text-gray-500 dark:text-gray-400">
               Search across messages, files, channels and people. Modifiers:{' '}
               <code className="text-xs">from:</code> <code className="text-xs">in:</code>{' '}
               <code className="text-xs">before:</code> <code className="text-xs">after:</code>{' '}
@@ -145,7 +145,7 @@ export function SearchDialog({
               >
                 {c.isPrivate ? <Lock size={14} /> : <Hash size={14} />}
                 <span className="text-sm font-medium">{c.name}</span>
-                <span className="text-xs text-gray-400">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
                   {c.memberCount} members {c.topic ? `· ${c.topic}` : ''}
                 </span>
               </button>
@@ -156,12 +156,12 @@ export function SearchDialog({
               <div key={p.id} className="mb-1 flex items-center gap-2 rounded-lg p-3">
                 <Avatar user={p} size="sm" />
                 <span className="text-sm font-medium">{p.displayName}</span>
-                <span className="text-xs text-gray-400">{p.email}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">{p.email}</span>
               </div>
             ))}
 
           {debounced && results.isSuccess && counts[tab] === 0 && (
-            <p className="p-4 text-sm text-gray-400">No {tab} match “{debounced}”.</p>
+            <p className="p-4 text-sm text-gray-500 dark:text-gray-400">No {tab} match “{debounced}”.</p>
           )}
         </div>
       </div>

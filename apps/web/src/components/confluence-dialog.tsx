@@ -161,7 +161,7 @@ export function ConfluenceDialog({
                           href={p.url}
                           target="_blank"
                           rel="noreferrer noopener"
-                          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700"
+                          className="rounded p-1 text-gray-500 dark:text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700"
                           title="Open in Confluence"
                         >
                           <ExternalLink size={14} />
@@ -169,7 +169,7 @@ export function ConfluenceDialog({
                       )}
                       <button
                         onClick={() => void startEdit(p)}
-                        className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700"
+                        className="rounded p-1 text-gray-500 dark:text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700"
                         title="Edit"
                       >
                         <Pencil size={14} />
@@ -177,7 +177,7 @@ export function ConfluenceDialog({
                       <button
                         onClick={() => void del(p)}
                         disabled={busy}
-                        className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30"
+                        className="rounded p-1 text-gray-500 dark:text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30"
                         title="Delete"
                       >
                         <Trash2 size={14} />

@@ -17,7 +17,7 @@ function Row({ keys, desc }: { keys: string; desc: string }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="border-t border-gray-100 pt-2 first:border-t-0 first:pt-0 dark:border-gray-800">
-      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h3>
+      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</h3>
       {children}
     </div>
   );
@@ -39,12 +39,12 @@ export function CheatSheetDialog({
     <Dialog title="Tips & shortcuts" onClose={onClose}>
       <div className="space-y-3">
         <Section title="Slash commands">
-          {commands.isLoading && <p className="py-1.5 text-sm text-gray-400">Loading…</p>}
+          {commands.isLoading && <p className="py-1.5 text-sm text-gray-500 dark:text-gray-400">Loading…</p>}
           {commands.data?.map((c) => (
             <Row key={c.usage} keys={c.usage} desc={c.description} />
           ))}
           {commands.data?.length === 0 && (
-            <p className="py-1.5 text-sm text-gray-400">No commands available.</p>
+            <p className="py-1.5 text-sm text-gray-500 dark:text-gray-400">No commands available.</p>
           )}
         </Section>
 

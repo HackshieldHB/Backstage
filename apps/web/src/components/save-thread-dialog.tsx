@@ -78,7 +78,7 @@ export function SaveThreadDialog({
           <>
             <label className="block text-xs font-semibold uppercase text-gray-500">Space</label>
             {spaces.isLoading ? (
-              <p className="text-sm text-gray-400">Loading spaces…</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Loading spaces…</p>
             ) : spaces.data && spaces.data.length > 0 ? (
               <select
                 value={spaceKey}
@@ -94,7 +94,7 @@ export function SaveThreadDialog({
                 ))}
               </select>
             ) : (
-              <p className="text-sm text-gray-400">No Confluence spaces available.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">No Confluence spaces available.</p>
             )}
 
             <label className="block text-xs font-semibold uppercase text-gray-500">Title</label>

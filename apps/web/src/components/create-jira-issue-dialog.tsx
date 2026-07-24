@@ -114,7 +114,7 @@ export function CreateJiraIssueDialog({
         ))}
       </select>
 
-      <p className="mb-3 text-[11px] text-gray-400">
+      <p className="mb-3 text-[11px] text-gray-500 dark:text-gray-400">
         Reporter will be you when your Jira account is connected (otherwise the workspace connection).
       </p>
       <button
