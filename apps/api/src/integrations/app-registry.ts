@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import type { Message } from '@prisma/client';
 import type { CommandResultDto, SlashCommandDto } from '@backstages/shared';
 
 /** Everything a command handler needs to act. */
@@ -37,6 +38,12 @@ export interface IntegrationApp {
   unfurl?(workspaceId: string, contentText: string): Promise<unknown[] | null>;
   /** Slash commands this app contributes. */
   commands?(): SlashCommand[];
+  /**
+   * Called when a user ADDS a reaction to a message, letting an app turn an
+   * emoji on one of its cards into an action (e.g. ✅ on a Jira card → Done).
+   * Must never throw in a way that breaks the reaction itself.
+   */
+  onReaction?(userId: string, message: Message, emoji: string): Promise<void>;
 }
 
 /** Splits "/jira create fix the thing" into the command name and the rest. */
@@ -72,6 +79,18 @@ export class AppRegistry {
       }
     }
     return merged.length > 0 ? merged : null;
+  }
+
+  /** Fans a just-added reaction out to every app; one app failing never throws. */
+  async onReaction(userId: string, message: Message, emoji: string): Promise<void> {
+    for (const app of this.apps.values()) {
+      if (!app.onReaction) continue;
+      try {
+        await app.onReaction(userId, message, emoji);
+      } catch {
+        // An app's reaction handler must never break the reaction.
+      }
+    }
   }
 
   /** Every command every app contributes, for help and client dispatch. */

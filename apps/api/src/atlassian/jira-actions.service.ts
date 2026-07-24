@@ -20,6 +20,11 @@ import { hasGranularConfluence } from './scopes';
 
 const ISSUE_KEY_RE = /^[A-Z][A-Z0-9]+-\d+$/;
 
+/** Reaction shortcodes that grab a Jira issue (assign to the reactor). */
+const ASSIGN_ME_EMOJI = new Set(['eyes', 'raised_hand', 'raising_hand']);
+/** Reaction shortcodes that move a Jira issue toward Done. */
+const DONE_EMOJI = new Set(['white_check_mark', 'heavy_check_mark', 'ballot_box_with_check']);
+
 /**
  * Pulls the numeric page id out of the two URL shapes Confluence Cloud hands
  * out: `/wiki/spaces/DEV/pages/12345/Some+Title` and the legacy
@@ -71,6 +76,38 @@ export class JiraActionsService implements IntegrationApp, OnModuleInit {
 
   onModuleInit() {
     this.registry.register(this);
+  }
+
+  // ---------- reaction shortcuts (IntegrationApp) ----------
+
+  /**
+   * React on a Jira card to drive the issue: 👀 grabs it (assign to you), ✅
+   * moves it toward Done. Attributed to the reactor via their personal token
+   * (like every interactive action); a reactor who hasn't connected, or a
+   * workflow with no obvious Done transition, is a silent no-op — a reaction is
+   * a convenience, not a place to surface errors.
+   */
+  async onReaction(userId: string, message: Message, emoji: string): Promise<void> {
+    if (!message.channelId) return;
+    const unfurls = (message.unfurls as JiraUnfurl[] | null) ?? [];
+    const jira = unfurls.find((u) => u.type === 'jira' && u.key);
+    if (!jira?.key) return;
+
+    if (ASSIGN_ME_EMOJI.has(emoji)) {
+      await this.performAction(userId, message.id, { issueKey: jira.key, action: 'assign_me' });
+      return;
+    }
+    if (DONE_EMOJI.has(emoji)) {
+      const transitions = await this.listTransitions(userId, message.id, jira.key);
+      const done = transitions.find((t) => /\b(done|resolved?|closed?|complete)\b/i.test(t.name));
+      if (done) {
+        await this.performAction(userId, message.id, {
+          issueKey: jira.key,
+          action: 'transition',
+          transitionId: done.id,
+        });
+      }
+    }
   }
 
   // ---------- slash commands (IntegrationApp) ----------

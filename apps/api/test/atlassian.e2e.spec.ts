@@ -1037,6 +1037,43 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
         .expect(200);
       expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: ACC.linked });
     });
+
+    it('reacting 👀 on a Jira card assigns it to the reactor', async () => {
+      mock.assigned = [];
+      // Reaction handling is fire-and-forget, so poll for the effect.
+      await http().post(`/messages/${cardId}/reactions`).set(auth(owner)).send({ emoji: 'eyes' })
+        .expect(200);
+      for (let i = 0; i < 25 && mock.assigned.length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(mock.assigned.at(-1)).toEqual({ issueKey: 'PROJ-500', accountId: `acc-owner-${run}` });
+    });
+
+    it('reacting ✅ on a Jira card moves it toward Done', async () => {
+      mock.transitioned = [];
+      await http()
+        .post(`/messages/${cardId}/reactions`)
+        .set(auth(owner))
+        .send({ emoji: 'white_check_mark' })
+        .expect(200);
+      for (let i = 0; i < 25 && mock.transitioned.length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      // '31' is the mock's transition into a "Done" status.
+      expect(mock.transitioned.at(-1)).toEqual({ issueKey: 'PROJ-500', transitionId: '31' });
+    });
+
+    it('a reaction from a member who has not connected Atlassian does nothing', async () => {
+      mock.assigned = [];
+      // linkedUser is directory-linked but not personally connected.
+      await http()
+        .post(`/messages/${cardId}/reactions`)
+        .set(auth(linkedUser))
+        .send({ emoji: 'eyes' })
+        .expect(200);
+      await new Promise((r) => setTimeout(r, 400));
+      expect(mock.assigned).toHaveLength(0);
+    });
   });
 
   describe('my jira work queue', () => {

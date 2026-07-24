@@ -495,6 +495,10 @@ export class MessagesService {
     } else {
       await this.prisma.reaction.create({ data: { messageId, userId, emoji: input.emoji } });
       added = true;
+      // Let integrations turn a reaction on one of their cards into an action
+      // (e.g. ✅ on a Jira card → Done). Fire-and-forget: never block or fail
+      // the reaction on an integration's behalf.
+      void this.apps.onReaction(userId, message, input.emoji).catch(() => undefined);
       if (message.userId && message.userId !== userId) {
         const n = await this.prisma.notification.create({
           data: {
