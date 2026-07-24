@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
-import { FileText, Hash, Lock, Search } from 'lucide-react';
+import { FileText, Hash, Lock, MessageSquare, Search } from 'lucide-react';
 import { fileUrl } from '@/lib/api';
 import { useSearch, type Container } from '@/hooks/queries';
 import { Avatar } from './avatar';
@@ -153,11 +153,23 @@ export function SearchDialog({
 
           {debounced && tab === 'people' &&
             (results.data?.people ?? []).map((p) => (
-              <div key={p.id} className="mb-1 flex items-center gap-2 rounded-lg p-3">
+              <button
+                key={p.id}
+                onClick={() => {
+                  // Open (or create) a DM with this person — handled in the app shell.
+                  window.dispatchEvent(new CustomEvent('bs:open-dm', { detail: p.id }));
+                  onClose();
+                }}
+                className="mb-1 flex w-full items-center gap-2 rounded-lg p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
+                data-testid="search-result-person"
+              >
                 <Avatar user={p} size="sm" />
                 <span className="text-sm font-medium">{p.displayName}</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">{p.email}</span>
-              </div>
+                <span className="truncate text-xs text-gray-500 dark:text-gray-400">{p.email}</span>
+                <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-medium text-accent">
+                  <MessageSquare size={13} /> Message
+                </span>
+              </button>
             ))}
 
           {debounced && results.isSuccess && counts[tab] === 0 && (
