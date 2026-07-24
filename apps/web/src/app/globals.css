@@ -10,6 +10,58 @@
   color-scheme: dark;
 }
 
+/* ---- interactive polish: smooth, tactile, modern ---- */
+button,
+a,
+[role='button'],
+input,
+select,
+textarea {
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+}
+/* A gentle press on any tappable control. */
+button:not(:disabled):active,
+[role='button']:active {
+  transform: scale(0.97);
+}
+/* One consistent, on-brand focus ring everywhere. */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(109, 92, 245, 0.55);
+  border-radius: 6px;
+}
+::selection {
+  background: rgba(109, 92, 245, 0.25);
+}
+
+/* Reusable vibrant brand gradient for hero surfaces / CTAs. */
+.brand-gradient {
+  background-image: linear-gradient(135deg, #6d5cf5 0%, #a855f7 100%);
+}
+.brand-gradient-hover:hover {
+  background-image: linear-gradient(135deg, #5b47e0 0%, #9333ea 100%);
+}
+
+/* Soft entrance for lists/cards. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-pop-in {
+  animation: pop-in 160ms ease-out;
+}
+
 /* TipTap editor */
 .ProseMirror {
   outline: none;

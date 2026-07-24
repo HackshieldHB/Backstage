@@ -10,12 +10,13 @@ const config: Config = {
         sidebar: {
           DEFAULT: '#1A1D3A',
           hover: '#2C2F52',
-          active: '#4A4FB5',
+          active: '#6d5cf5',
           muted: '#9DA2C8',
         },
+        // Vibrant indigo-violet — cascades to every button, link and highlight.
         accent: {
-          DEFAULT: '#4A4FB5',
-          hover: '#3D42A0',
+          DEFAULT: '#6d5cf5',
+          hover: '#5b47e0',
         },
       },
       keyframes: {

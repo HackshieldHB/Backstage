@@ -22,17 +22,17 @@ export function WorkspaceRail({
   const qc = useQueryClient();
 
   return (
-    <nav className="flex w-14 shrink-0 flex-col items-center gap-2 bg-[#121430] py-3">
+    <nav className="flex w-14 shrink-0 flex-col items-center gap-2 bg-gradient-to-b from-[#2a1a5e] to-[#111027] py-3">
       {workspaces.map((ws) => (
         <button
           key={ws.id}
           title={ws.name}
           onClick={() => onSelect(ws.id)}
           className={clsx(
-            'flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold text-white transition-all',
+            'flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold text-white transition-all hover:scale-105',
             ws.id === activeId
-              ? 'bg-sidebar-active ring-2 ring-white/70'
-              : 'bg-white/15 hover:bg-white/25',
+              ? 'brand-gradient scale-105 shadow-lg shadow-violet-500/30'
+              : 'bg-white/10 hover:bg-white/20',
           )}
         >
           {ws.name.slice(0, 1).toUpperCase()}
