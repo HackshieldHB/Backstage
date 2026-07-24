@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Headphones, Mic, MicOff, MonitorUp, MonitorX, PhoneOff } from 'lucide-react';
+import { Headphones, Maximize2, Mic, MicOff, MonitorUp, MonitorX, PhoneOff } from 'lucide-react';
 import { Avatar } from './avatar';
 import type { HuddleController } from '@/hooks/use-huddle';
 
@@ -25,12 +25,29 @@ function ScreenTile({ stream, label }: { stream: MediaStream; label: string }) {
     el.srcObject = stream;
     el.play().catch(() => undefined);
   }, [stream]);
+  const enlarge = () => ref.current?.requestFullscreen?.().catch(() => undefined);
   return (
-    <div className="relative overflow-hidden rounded-md border border-gray-300 bg-black dark:border-gray-600">
-      <video ref={ref} autoPlay playsInline muted className="max-h-48 w-auto" />
-      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
+    <div className="group relative overflow-hidden rounded-md border border-gray-300 bg-black dark:border-gray-600">
+      {/* Click anywhere on the screen to go fullscreen. */}
+      <video
+        ref={ref}
+        autoPlay
+        playsInline
+        muted
+        onClick={enlarge}
+        className="max-h-48 w-auto cursor-zoom-in"
+      />
+      <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
         {label}
       </span>
+      <button
+        onClick={enlarge}
+        title="Enlarge (fullscreen)"
+        data-testid="screen-enlarge"
+        className="absolute right-1 top-1 rounded bg-black/50 p-1 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
+      >
+        <Maximize2 size={13} />
+      </button>
     </div>
   );
 }
