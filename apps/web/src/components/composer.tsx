@@ -15,6 +15,7 @@ import data from '@emoji-mart/data';
 import { init, SearchIndex } from 'emoji-mart';
 import {
   Bold as BoldIcon,
+  Clock,
   Code,
   Italic as ItalicIcon,
   Paperclip,
@@ -162,6 +163,8 @@ export function Composer({
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [jiraCreateSummary, setJiraCreateSummary] = useState<string | null>(null);
   const [incidentTitle, setIncidentTitle] = useState<string | null>(null);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleAt, setScheduleAt] = useState('');
   const [alsoSend, setAlsoSend] = useState(false);
   const typingRef = useRef<{ active: boolean; timer: ReturnType<typeof setTimeout> | null }>({ active: false, timer: null });
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -334,6 +337,33 @@ export function Composer({
   };
   submitRef.current = () => void submit();
 
+  const scheduleSend = async () => {
+    if (!editorRef.current) return;
+    const text = editorRef.current.getText().trim();
+    if (!text) return;
+    const when = new Date(scheduleAt);
+    if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) {
+      window.alert('Pick a time in the future.');
+      return;
+    }
+    const path =
+      container.kind === 'channel'
+        ? `/channels/${container.id}/scheduled`
+        : `/conversations/${container.id}/scheduled`;
+    try {
+      await api('POST', path, {
+        contentText: text,
+        contentJson: editorRef.current.getJSON(),
+        scheduledFor: when.toISOString(),
+      });
+      editorRef.current.commands.clearContent();
+      setScheduleOpen(false);
+      setScheduleAt('');
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not schedule the message.');
+    }
+  };
+
   // Retry failed optimistic sends (event fired from MessageItem's retry button).
   const qc = useQueryClient();
   useEffect(() => {
@@ -452,6 +482,38 @@ export function Composer({
             </label>
           )}
         </div>
+        {!parentId && (
+          <div className="relative">
+            <button
+              onClick={() => setScheduleOpen((v) => !v)}
+              title="Schedule for later"
+              data-testid="schedule-button"
+              className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+            >
+              <Clock size={15} />
+            </button>
+            {scheduleOpen && (
+              <div className="absolute bottom-full right-0 mb-2 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                <p className="mb-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300">Send later</p>
+                <input
+                  type="datetime-local"
+                  value={scheduleAt}
+                  onChange={(e) => setScheduleAt(e.target.value)}
+                  data-testid="schedule-at"
+                  className="mb-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800"
+                />
+                <button
+                  onClick={() => void scheduleSend()}
+                  disabled={!scheduleAt}
+                  data-testid="schedule-confirm"
+                  className="w-full rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-40"
+                >
+                  Schedule
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <button
           onClick={() => void submit()}
           disabled={uploadsInFlight}

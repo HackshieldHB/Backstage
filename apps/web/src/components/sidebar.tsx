@@ -14,6 +14,7 @@ import {
   Plus,
   Search,
   Smile,
+  Sparkles,
   Sun,
   UserPlus,
 } from 'lucide-react';
@@ -39,6 +40,7 @@ import { Dialog } from './dialog';
 import { EmojiPickerPopover } from './emoji-picker';
 import { AtlassianDialog, useAtlassianStatus } from './atlassian-dialog';
 import { ConfluenceDialog } from './confluence-dialog';
+import { CatchUpDialog } from './catch-up-dialog';
 import { JiraTree, ConfluenceTree } from './integration-tree';
 
 export function Sidebar({
@@ -65,7 +67,7 @@ export function Sidebar({
   const workspace = workspaces.data?.find((w) => w.id === workspaceId);
 
   const [dialog, setDialog] = useState<
-    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'atlassian' | 'confluence'
+    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'atlassian' | 'confluence' | 'catch-up'
   >('none');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
@@ -137,6 +139,12 @@ export function Sidebar({
           active={rightPanel.kind === 'saved'}
           onClick={() => setRightPanel({ kind: 'saved' })}
           testId="saved-button"
+        />
+        <SectionButton
+          icon={<Sparkles size={15} />}
+          label="Catch me up"
+          onClick={() => setDialog('catch-up')}
+          testId="catch-up-button"
         />
 
         {/* Channels */}
@@ -296,6 +304,9 @@ export function Sidebar({
       )}
       {dialog === 'confluence' && (
         <ConfluenceDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
+      )}
+      {dialog === 'catch-up' && (
+        <CatchUpDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
       )}
     </aside>
   );

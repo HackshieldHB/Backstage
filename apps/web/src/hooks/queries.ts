@@ -12,6 +12,7 @@ import type {
   ChannelDto,
   ConfluencePage,
   ConfluenceSpace,
+  CatchUpResponse,
   ConversationDto,
   JiraMyIssue,
   MessageDto,
@@ -182,6 +183,17 @@ export function useChannelMembers(channelId: string | null) {
     queryKey: keys.channelMembers(channelId ?? 'none'),
     queryFn: () => api<Array<UserDto & { joinedAt: string }>>('GET', `/channels/${channelId}/members`),
     enabled: !!channelId,
+  });
+}
+
+// ---------- catch me up ----------
+
+export function useCatchUp(workspaceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['catch-up', workspaceId],
+    queryFn: () => api<CatchUpResponse>('GET', `/workspaces/${workspaceId}/catch-up`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 15000,
   });
 }
 
