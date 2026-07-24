@@ -111,8 +111,8 @@ export class RealtimeGateway
   async handleDisconnect(socket: AuthedSocket) {
     if (socket.data.userId) {
       // Drop the socket from any huddles and refresh those rooms.
-      for (const channelId of this.huddle.removeSocket(socket.data.userId, socket.id)) {
-        await this.broadcastHuddle(channelId);
+      for (const key of this.huddle.removeSocket(socket.data.userId, socket.id)) {
+        await this.broadcastHuddle(key);
       }
       await this.presence.disconnected(socket.data.userId);
     }
@@ -120,49 +120,68 @@ export class RealtimeGateway
 
   // ---------- huddles (voice) ----------
 
+  /**
+   * A huddle runs in a channel OR a DM/group conversation. Both are identified
+   * by their socket-room name ("channel:X" / "conversation:Y"), which is also
+   * the membership gate — a socket is only in that room if it's a member.
+   */
+  private huddleKey(body: { channelId?: string; conversationId?: string }): string | null {
+    if (body.channelId) return roomForChannel(body.channelId);
+    if (body.conversationId) return roomForConversation(body.conversationId);
+    return null;
+  }
+
   @SubscribeMessage(CLIENT_EVENTS.HUDDLE_JOIN)
   async onHuddleJoin(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddlePayload) {
-    // Only channel members (who are in the channel room) may join its huddle.
-    if (!body?.channelId || !socket.rooms.has(roomForChannel(body.channelId))) return;
-    this.huddle.join(body.channelId, socket.data.userId, socket.id);
-    await this.broadcastHuddle(body.channelId);
+    const key = this.huddleKey(body);
+    // Only members of the channel/DM (who are in its room) may join its huddle.
+    if (!key || !socket.rooms.has(key)) return;
+    this.huddle.join(key, socket.data.userId, socket.id);
+    await this.broadcastHuddle(key);
   }
 
   @SubscribeMessage(CLIENT_EVENTS.HUDDLE_LEAVE)
   async onHuddleLeave(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddlePayload) {
-    if (!body?.channelId) return;
-    this.huddle.leave(body.channelId, socket.data.userId, socket.id);
-    await this.broadcastHuddle(body.channelId);
+    const key = this.huddleKey(body);
+    if (!key) return;
+    this.huddle.leave(key, socket.data.userId, socket.id);
+    await this.broadcastHuddle(key);
   }
 
   @SubscribeMessage(CLIENT_EVENTS.HUDDLE_SIGNAL)
   onHuddleSignal(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleSignalPayload) {
-    if (!body?.channelId || !body.toUserId) return;
-    // Relay the SDP/ICE payload straight to the target peer.
+    if ((!body?.channelId && !body?.conversationId) || !body.toUserId) return;
+    // Relay the SDP/ICE payload straight to the target peer, echoing which
+    // channel/DM it belongs to so the client can route it to the right huddle.
     this.realtime.emitToUser(body.toUserId, SOCKET_EVENTS.HUDDLE_SIGNAL, {
-      channelId: body.channelId,
+      ...(body.channelId ? { channelId: body.channelId } : { conversationId: body.conversationId }),
       fromUserId: socket.data.userId,
       data: body.data,
     });
   }
 
-  /** Pushes the current participant list (with names/avatars) to the whole channel. */
-  private async broadcastHuddle(channelId: string) {
-    const userIds = this.huddle.userIds(channelId);
+  /** Pushes the current participant list (with names/avatars) to the huddle's room. */
+  private async broadcastHuddle(key: string) {
+    const userIds = this.huddle.userIds(key);
     const users = userIds.length
       ? await this.prisma.user.findMany({
           where: { id: { in: userIds } },
           select: { id: true, displayName: true, avatarUrl: true },
         })
       : [];
-    this.realtime.emitToChannel(channelId, SOCKET_EVENTS.HUDDLE_PARTICIPANTS, {
-      channelId,
-      participants: users.map((u) => ({
-        userId: u.id,
-        displayName: u.displayName,
-        avatarUrl: u.avatarUrl,
-      })),
-    });
+    const participants = users.map((u) => ({
+      userId: u.id,
+      displayName: u.displayName,
+      avatarUrl: u.avatarUrl,
+    }));
+    const event = SOCKET_EVENTS.HUDDLE_PARTICIPANTS;
+    if (key.startsWith('channel:')) {
+      const channelId = key.slice('channel:'.length);
+      this.realtime.emitToChannel(channelId, event, { channelId, participants });
+    } else {
+      const conversationId = key.slice('conversation:'.length);
+      this.realtime.emitToConversation(conversationId, event, { conversationId, participants });
+    }
   }
 
   @SubscribeMessage('presence:heartbeat')

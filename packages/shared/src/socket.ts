@@ -98,21 +98,24 @@ export interface MemberChangedPayload {
   user: UserDto;
 }
 
-/** A participant currently in a channel's huddle. */
+/** A participant currently in a huddle. */
 export interface HuddleParticipant {
   userId: string;
   displayName: string;
   avatarUrl: string | null;
 }
 
+/** A huddle runs in a channel OR a DM/group conversation — exactly one id is set. */
 export interface HuddleParticipantsPayload {
-  channelId: string;
+  channelId?: string;
+  conversationId?: string;
   participants: HuddleParticipant[];
 }
 
 /** A WebRTC signaling message (offer/answer/ICE) relayed between two peers. */
 export interface HuddleSignalPayload {
-  channelId: string;
+  channelId?: string;
+  conversationId?: string;
   fromUserId: string;
   data: unknown;
 }
@@ -132,11 +135,13 @@ export interface ClientTypingPayload {
 }
 
 export interface ClientHuddlePayload {
-  channelId: string;
+  channelId?: string;
+  conversationId?: string;
 }
 
 export interface ClientHuddleSignalPayload {
-  channelId: string;
+  channelId?: string;
+  conversationId?: string;
   toUserId: string;
   data: unknown;
 }

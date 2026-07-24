@@ -37,7 +37,7 @@ export function MainPane({
     enabled: container.kind === 'channel',
   });
 
-  const huddle = useHuddle(container.kind === 'channel' ? container.id : null);
+  const huddle = useHuddle(container);
 
   const dm = conversations.data?.find((c) => c.id === container.id);
   const dmOthers = dm?.members.filter((m) => m.id !== me?.id) ?? [];
@@ -67,7 +67,7 @@ export function MainPane({
           <span className="hidden truncate text-[13px] text-gray-500 md:inline">{channel.data.topic}</span>
         )}
         <span className="flex-1" />
-        {container.kind === 'channel' && !huddle.joined && (
+        {!huddle.joined && (
           <button
             title="Start or join a huddle"
             onClick={() => void huddle.join()}
@@ -120,7 +120,7 @@ export function MainPane({
         <CheatSheetDialog workspaceId={workspaceId} onClose={() => setTipsOpen(false)} />
       )}
 
-      {container.kind === 'channel' && <HuddleBar huddle={huddle} />}
+      <HuddleBar huddle={huddle} />
 
       <MessageList
         workspaceId={workspaceId}

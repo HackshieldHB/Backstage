@@ -10,6 +10,7 @@ import {
 } from '@backstages/shared';
 import { getSocket } from '@/lib/socket';
 import { useAuthStore } from '@/stores/auth-store';
+import type { Container } from '@/hooks/queries';
 
 const ICE: RTCConfiguration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -33,7 +34,14 @@ export interface HuddleController {
  * relayed peer-to-peer through the Socket.IO gateway; the deterministic
  * "lower userId offers" rule avoids offer glare.
  */
-export function useHuddle(channelId: string | null): HuddleController {
+export function useHuddle(target: Container | null): HuddleController {
+  // A huddle can run in a channel or a DM/group conversation.
+  const targetId = target?.id ?? null;
+  const isChannel = target?.kind === 'channel';
+  const targetBody = useCallback(
+    () => (isChannel ? { channelId: targetId! } : { conversationId: targetId! }),
+    [isChannel, targetId],
+  );
   const me = useAuthStore((s) => s.user);
   const myId = me?.id ?? '';
   const [joined, setJoined] = useState(false);
@@ -50,10 +58,10 @@ export function useHuddle(channelId: string | null): HuddleController {
 
   const sendSignal = useCallback(
     (toUserId: string, data: SignalData) => {
-      if (!channelId) return;
-      getSocket().emit(CLIENT_EVENTS.HUDDLE_SIGNAL, { channelId, toUserId, data });
+      if (!targetId) return;
+      getSocket().emit(CLIENT_EVENTS.HUDDLE_SIGNAL, { ...targetBody(), toUserId, data });
     },
-    [channelId],
+    [targetId, targetBody],
   );
 
   const closePeer = useCallback((peerId: string) => {
@@ -131,13 +139,14 @@ export function useHuddle(channelId: string | null): HuddleController {
 
   // Socket listeners for participant lists and relayed signaling.
   useEffect(() => {
-    if (!channelId) return;
+    if (!targetId) return;
     const socket = getSocket();
+    // The server echoes whichever id applies (channelId or conversationId).
     const onParticipants = (p: HuddleParticipantsPayload) => {
-      if (p.channelId === channelId) setParticipants(p.participants);
+      if ((p.channelId ?? p.conversationId) === targetId) setParticipants(p.participants);
     };
     const onSignal = (p: HuddleSignalPayload) => {
-      if (p.channelId === channelId && joinedRef.current) {
+      if ((p.channelId ?? p.conversationId) === targetId && joinedRef.current) {
         void handleSignal(p.fromUserId, p.data as SignalData);
       }
     };
@@ -147,7 +156,7 @@ export function useHuddle(channelId: string | null): HuddleController {
       socket.off(SOCKET_EVENTS.HUDDLE_PARTICIPANTS, onParticipants);
       socket.off(SOCKET_EVENTS.HUDDLE_SIGNAL, onSignal);
     };
-  }, [channelId, handleSignal]);
+  }, [targetId, handleSignal]);
 
   // Reconcile the mesh whenever the participant set changes (while joined).
   useEffect(() => {
@@ -163,21 +172,21 @@ export function useHuddle(channelId: string | null): HuddleController {
   }, [participants, myId, createPeer, closePeer]);
 
   const join = useCallback(async () => {
-    if (!channelId || joinedRef.current) return;
+    if (!targetId || joinedRef.current) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStream.current = stream;
       joinedRef.current = true;
       setJoined(true);
       setMuted(false);
-      getSocket().emit(CLIENT_EVENTS.HUDDLE_JOIN, { channelId });
+      getSocket().emit(CLIENT_EVENTS.HUDDLE_JOIN, targetBody());
     } catch {
       window.alert('Could not access your microphone. Check browser permissions.');
     }
-  }, [channelId]);
+  }, [targetId, targetBody]);
 
   const leave = useCallback(() => {
-    if (channelId) getSocket().emit(CLIENT_EVENTS.HUDDLE_LEAVE, { channelId });
+    if (targetId) getSocket().emit(CLIENT_EVENTS.HUDDLE_LEAVE, targetBody());
     for (const peerId of [...peers.current.keys()]) closePeer(peerId);
     pendingIce.current.clear();
     localStream.current?.getTracks().forEach((t) => t.stop());
@@ -185,7 +194,7 @@ export function useHuddle(channelId: string | null): HuddleController {
     joinedRef.current = false;
     setJoined(false);
     setRemoteStreams({});
-  }, [channelId, closePeer]);
+  }, [targetId, targetBody, closePeer]);
 
   const toggleMute = useCallback(() => {
     setMuted((m) => {
@@ -195,13 +204,13 @@ export function useHuddle(channelId: string | null): HuddleController {
     });
   }, []);
 
-  // Leave automatically when the channel changes or the pane unmounts.
+  // Leave automatically when the channel/DM changes or the pane unmounts.
   useEffect(() => {
     return () => {
       if (joinedRef.current) leave();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channelId]);
+  }, [targetId]);
 
   return { joined, participants, muted, remoteStreams, join, leave, toggleMute };
 }

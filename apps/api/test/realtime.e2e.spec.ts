@@ -71,6 +71,14 @@ describe('realtime (two-socket e2e)', () => {
   const http = () => request(app.getHttpServer());
   const auth = (a: Actor) => ({ Authorization: `Bearer ${a.token}` });
 
+  // Resolves once the server has emitted READY (rooms joined), not just connected.
+  const connectSocket = (a: Actor) =>
+    new Promise<Socket>((resolve, reject) => {
+      const s = io(baseUrl, { auth: { token: a.token }, transports: ['websocket'] });
+      s.once(SOCKET_EVENTS.READY, () => resolve(s));
+      s.once('connect_error', reject);
+    });
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
@@ -142,12 +150,6 @@ describe('realtime (two-socket e2e)', () => {
 
   it('accepts valid tokens and connects both clients', async () => {
     // Wait for the server's 'ready' (rooms joined), not the transport-level 'connect'.
-    const connectSocket = (a: Actor) =>
-      new Promise<Socket>((resolve, reject) => {
-        const s = io(baseUrl, { auth: { token: a.token }, transports: ['websocket'] });
-        s.once(SOCKET_EVENTS.READY, () => resolve(s));
-        s.once('connect_error', reject);
-      });
     alice.socket = await connectSocket(alice);
     bob.socket = await connectSocket(bob);
     expect(alice.socket.connected).toBe(true);
@@ -354,5 +356,55 @@ describe('realtime (two-socket e2e)', () => {
     );
     bob.socket!.disconnect();
     expect((await gone).participants).toHaveLength(0);
+  });
+
+  it('huddle: works in a DM conversation, not just a channel', async () => {
+    // Reconnect bob (the previous test disconnected him) and open a DM.
+    bob.socket = await connectSocket(bob);
+    const conv = await http()
+      .post(`/workspaces/${workspaceId}/conversations`)
+      .set(auth(alice))
+      .send({ memberIds: [bob.id] })
+      .expect(201);
+    const conversationId = conv.body.data.id as string;
+
+    // Opening the DM subscribes both members' live sockets to its room, so bob
+    // hears the huddle without reconnecting.
+    const parts = until<HuddleParticipantsPayload>(
+      bob.socket!,
+      SOCKET_EVENTS.HUDDLE_PARTICIPANTS,
+      (p) => p.conversationId === conversationId && p.participants.length === 1,
+    );
+    alice.socket!.emit(CLIENT_EVENTS.HUDDLE_JOIN, { conversationId });
+    const got = await parts;
+    expect(got.channelId).toBeUndefined();
+    expect(got.conversationId).toBe(conversationId);
+    expect(got.participants.map((p) => p.userId)).toEqual([alice.id]);
+  });
+
+  it('huddle: a non-member cannot join a DM huddle', async () => {
+    // carol is in the workspace but not in alice+bob's DM.
+    const carolRes = await http()
+      .post('/auth/signup')
+      .send({ email: `rt-carol-${run}@test.local`, password: 'password123!', displayName: 'carol rt' })
+      .expect(201);
+    const carol: Actor = { id: carolRes.body.data.user.id, token: carolRes.body.data.accessToken };
+    const invite = await http().post(`/workspaces/${workspaceId}/invites`).set(auth(alice)).send({}).expect(201);
+    await http().post('/invites/accept').set(auth(carol)).send({ token: invite.body.data.token }).expect(200);
+    carol.socket = await connectSocket(carol);
+
+    const conv = await http()
+      .post(`/workspaces/${workspaceId}/conversations`)
+      .set(auth(alice))
+      .send({ memberIds: [bob.id] })
+      .expect(201);
+    const conversationId = conv.body.data.id as string;
+
+    // carol is not in the DM's room, so her join is ignored: no broadcast reaches alice.
+    const aliceHeard = collect<HuddleParticipantsPayload>(alice.socket!, SOCKET_EVENTS.HUDDLE_PARTICIPANTS);
+    carol.socket!.emit(CLIENT_EVENTS.HUDDLE_JOIN, { conversationId });
+    await new Promise((r) => setTimeout(r, 250));
+    expect(aliceHeard.filter((p) => p.conversationId === conversationId)).toHaveLength(0);
+    carol.socket!.disconnect();
   });
 });
