@@ -17,6 +17,7 @@ import { RateLimit } from '../common/rate-limit.guard';
 /** Spec: at most 10 messages per 10 seconds per user. */
 const SEND_RATE_LIMIT = { limit: 10, windowSeconds: 10, bucket: 'messages' };
 import { UnreadService } from './unread.service';
+import { CatchUpService } from './catch-up.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 
@@ -25,6 +26,7 @@ export class MessagesController {
   constructor(
     private readonly messages: MessagesService,
     private readonly unread: UnreadService,
+    private readonly catchUpService: CatchUpService,
   ) {}
 
   // ----- channels -----
@@ -125,5 +127,10 @@ export class MessagesController {
   @Get('workspaces/:id/unreads')
   unreads(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
     return this.unread.workspaceUnreads(user.id, workspaceId);
+  }
+
+  @Get('workspaces/:id/catch-up')
+  catchUp(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
+    return this.catchUpService.catchUp(user.id, workspaceId);
   }
 }

@@ -127,6 +127,30 @@ export interface JiraMyIssue {
   url: string;
 }
 
+/** One unread message preview in a catch-up digest. */
+export interface CatchUpPreview {
+  author: string;
+  snippet: string;
+  at: string;
+}
+
+/** One channel/DM the caller has unread activity in. */
+export interface CatchUpItem {
+  channelId: string | null;
+  conversationId: string | null;
+  title: string;
+  unread: number;
+  mentions: number;
+  /** Up to a few of the most recent unread messages, oldest-first. */
+  previews: CatchUpPreview[];
+}
+
+/** "Catch me up": everything the caller missed, most important first. */
+export interface CatchUpResponse {
+  items: CatchUpItem[];
+  totalUnread: number;
+}
+
 /** Interactive action fired from a Jira card. */
 export const JiraActionSchema = z.object({
   issueKey: z.string().min(3).max(30),

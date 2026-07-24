@@ -408,4 +408,49 @@ describe('messages (e2e)', () => {
       expect(notificationRows).toBe(1);
     });
   });
+
+  describe('catch me up', () => {
+    it('summarizes an unread channel with message previews', async () => {
+      const c = await http()
+        .post(`/workspaces/${workspaceId}/channels`)
+        .set(auth(alice))
+        .send({ name: 'catchup-test' })
+        .expect(201);
+      const cid = c.body.data.id;
+      await http().post(`/channels/${cid}/join`).set(auth(bob)).expect(200);
+      await http().post(`/channels/${cid}/messages`).set(auth(bob)).send(sendBody('deploy is broken')).expect(201);
+      await http().post(`/channels/${cid}/messages`).set(auth(bob)).send(sendBody('rolling back now')).expect(201);
+
+      const res = await http().get(`/workspaces/${workspaceId}/catch-up`).set(auth(alice)).expect(200);
+      const item = res.body.data.items.find((i: { channelId: string }) => i.channelId === cid);
+      expect(item).toBeTruthy();
+      expect(item.title).toBe('#catchup-test');
+      expect(item.unread).toBe(2);
+      // Previews are oldest-first and don't include alice's own messages.
+      expect(item.previews.map((p: { snippet: string }) => p.snippet)).toEqual([
+        'deploy is broken',
+        'rolling back now',
+      ]);
+      expect(item.previews[0].author).toBeTruthy();
+      expect(res.body.data.totalUnread).toBeGreaterThanOrEqual(2);
+    });
+
+    it('drops a channel from the digest once it has been read', async () => {
+      const c = await http()
+        .post(`/workspaces/${workspaceId}/channels`)
+        .set(auth(alice))
+        .send({ name: 'catchup-read' })
+        .expect(201);
+      const cid = c.body.data.id;
+      await http().post(`/channels/${cid}/join`).set(auth(bob)).expect(200);
+      const sent = await http().post(`/channels/${cid}/messages`).set(auth(bob)).send(sendBody('hi there')).expect(201);
+
+      const before = await http().get(`/workspaces/${workspaceId}/catch-up`).set(auth(alice)).expect(200);
+      expect(before.body.data.items.some((i: { channelId: string }) => i.channelId === cid)).toBe(true);
+
+      await http().post(`/channels/${cid}/read`).set(auth(alice)).send({ messageId: sent.body.data.id }).expect(200);
+      const after = await http().get(`/workspaces/${workspaceId}/catch-up`).set(auth(alice)).expect(200);
+      expect(after.body.data.items.some((i: { channelId: string }) => i.channelId === cid)).toBe(false);
+    });
+  });
 });
