@@ -74,6 +74,7 @@ model User {
   passwordResetTokens     PasswordResetToken[]
   atlassianLink           AtlassianAccountLink?
   atlassianConnections    AtlassianConnection[] @relation("AtlassianConnector")
+  scheduledMessages       ScheduledMessage[]
 }
 
 model Workspace {
@@ -93,6 +94,7 @@ model Workspace {
   atlassianConnection AtlassianConnection?
 
   bitbucketSubscriptions BitbucketSubscription[]
+  scheduledMessages      ScheduledMessage[]
 }
 
 model WorkspaceMember {
@@ -160,6 +162,7 @@ model Channel {
 
   bitbucketSubscriptions BitbucketSubscription[]
   bitbucketPrCards       BitbucketPrCard[]
+  scheduledMessages      ScheduledMessage[]
 
   @@unique([workspaceId, name])
 }
@@ -191,10 +194,11 @@ model Conversation {
   title       String?
   createdAt   DateTime @default(now())
 
-  workspace     Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  members       ConversationMember[]
-  messages      Message[]
-  notifications Notification[]
+  workspace         Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members           ConversationMember[]
+  messages          Message[]
+  notifications     Notification[]
+  scheduledMessages ScheduledMessage[]
 
   @@unique([workspaceId, memberKey])
 }
@@ -499,4 +503,28 @@ model BitbucketPrCard {
   message      Message               @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([channelId, prId])
+}
+
+/// A message queued for later delivery. With a channel/conversation target it
+/// is a scheduled send; with neither it is a personal reminder (/remind),
+/// delivered as a notification to `userId`.
+model ScheduledMessage {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  /// Author of a scheduled send; recipient of a reminder.
+  userId         String
+  channelId      String?
+  conversationId String?
+  contentJson    Json
+  contentText    String
+  scheduledFor   DateTime
+  createdAt      DateTime @default(now())
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel      Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([scheduledFor])
+  @@index([userId])
 }

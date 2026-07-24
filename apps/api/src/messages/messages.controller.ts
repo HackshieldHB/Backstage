@@ -6,6 +6,8 @@ import {
   ListMessagesQuerySchema,
   MarkReadInput,
   MarkReadSchema,
+  ScheduleMessageInput,
+  ScheduleMessageSchema,
   SendMessageInput,
   SendMessageSchema,
   ToggleReactionInput,
@@ -18,6 +20,7 @@ import { RateLimit } from '../common/rate-limit.guard';
 const SEND_RATE_LIMIT = { limit: 10, windowSeconds: 10, bucket: 'messages' };
 import { UnreadService } from './unread.service';
 import { CatchUpService } from './catch-up.service';
+import { ScheduledMessagesService } from './scheduled-messages.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 
@@ -27,6 +30,7 @@ export class MessagesController {
     private readonly messages: MessagesService,
     private readonly unread: UnreadService,
     private readonly catchUpService: CatchUpService,
+    private readonly scheduled: ScheduledMessagesService,
   ) {}
 
   // ----- channels -----
@@ -132,5 +136,35 @@ export class MessagesController {
   @Get('workspaces/:id/catch-up')
   catchUp(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
     return this.catchUpService.catchUp(user.id, workspaceId);
+  }
+
+  // ----- scheduled messages / reminders -----
+
+  @Post('channels/:id/scheduled')
+  scheduleChannel(
+    @CurrentUser() user: AuthUser,
+    @Param('id') channelId: string,
+    @Body(new ZodValidationPipe(ScheduleMessageSchema)) body: ScheduleMessageInput,
+  ) {
+    return this.scheduled.scheduleForChannel(user.id, channelId, body);
+  }
+
+  @Post('conversations/:id/scheduled')
+  scheduleConversation(
+    @CurrentUser() user: AuthUser,
+    @Param('id') conversationId: string,
+    @Body(new ZodValidationPipe(ScheduleMessageSchema)) body: ScheduleMessageInput,
+  ) {
+    return this.scheduled.scheduleForConversation(user.id, conversationId, body);
+  }
+
+  @Get('workspaces/:id/scheduled')
+  listScheduled(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
+    return this.scheduled.listMine(user.id, workspaceId);
+  }
+
+  @Delete('scheduled/:id')
+  cancelScheduled(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.scheduled.cancel(user.id, id);
   }
 }

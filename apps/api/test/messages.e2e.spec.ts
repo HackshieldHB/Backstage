@@ -4,6 +4,7 @@ import request from 'supertest';
 import { randomUUID } from 'crypto';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { ScheduledMessagesService, parseRemind } from '../src/messages/scheduled-messages.service';
 
 describe('messages (e2e)', () => {
   let app: INestApplication;
@@ -451,6 +452,73 @@ describe('messages (e2e)', () => {
       await http().post(`/channels/${cid}/read`).set(auth(alice)).send({ messageId: sent.body.data.id }).expect(200);
       const after = await http().get(`/workspaces/${workspaceId}/catch-up`).set(auth(alice)).expect(200);
       expect(after.body.data.items.some((i: { channelId: string }) => i.channelId === cid)).toBe(false);
+    });
+  });
+
+  describe('scheduled messages & reminders', () => {
+    it('parseRemind understands relative, absolute and tomorrow times', () => {
+      const now = new Date('2026-07-24T10:00:00Z');
+      expect(parseRemind('me in 30m deploy', now)?.text).toBe('deploy');
+      expect(parseRemind('in 2 hours check CI', now)?.at.getTime()).toBe(now.getTime() + 2 * 3600000);
+      expect(parseRemind('tomorrow write notes', now)?.text).toBe('write notes');
+      expect(parseRemind('at 15:30 standup', now)?.text).toBe('standup');
+      // No text, or an unparseable time, is rejected.
+      expect(parseRemind('in 5m', now)).toBeNull();
+      expect(parseRemind('sometime soon do it', now)).toBeNull();
+    });
+
+    it('delivers a scheduled channel message only once it is due', async () => {
+      const when = new Date(Date.now() + 60_000).toISOString();
+      const res = await http()
+        .post(`/channels/${channelId}/scheduled`)
+        .set(auth(alice))
+        .send({ contentText: 'scheduled ship it', contentJson: doc('scheduled ship it'), scheduledFor: when })
+        .expect(201);
+      expect(res.body.data.isReminder).toBe(false);
+      expect(await prisma.message.count({ where: { channelId, contentText: 'scheduled ship it' } })).toBe(0);
+
+      const scheduled = app.get(ScheduledMessagesService);
+      const delivered = await scheduled.deliverDue(new Date(Date.now() + 120_000));
+      expect(delivered).toBeGreaterThanOrEqual(1);
+      expect(await prisma.message.count({ where: { channelId, contentText: 'scheduled ship it' } })).toBe(1);
+    });
+
+    it('/remind schedules a personal reminder delivered as a notification', async () => {
+      const run = await http()
+        .post(`/channels/${channelId}/commands`)
+        .set(auth(bob))
+        .send({ text: '/remind me in 1m stand up' })
+        .expect(200);
+      expect(run.body.data.handled).toBe(true);
+
+      const listed = await http().get(`/workspaces/${workspaceId}/scheduled`).set(auth(bob)).expect(200);
+      const reminder = listed.body.data.find((r: { contentText: string }) => r.contentText === 'stand up');
+      expect(reminder).toBeTruthy();
+      expect(reminder.isReminder).toBe(true);
+
+      const before = await prisma.notification.count({ where: { userId: bob.id, type: 'SYSTEM' } });
+      const scheduled = app.get(ScheduledMessagesService);
+      await scheduled.deliverDue(new Date(Date.now() + 120_000));
+      expect(await prisma.notification.count({ where: { userId: bob.id, type: 'SYSTEM' } })).toBe(before + 1);
+    });
+
+    it('rejects a schedule in the past and lets the owner cancel a pending one', async () => {
+      await http()
+        .post(`/channels/${channelId}/scheduled`)
+        .set(auth(alice))
+        .send({ contentText: 'too late', contentJson: doc('too late'), scheduledFor: new Date(Date.now() - 1000).toISOString() })
+        .expect(400);
+
+      const created = await http()
+        .post(`/channels/${channelId}/scheduled`)
+        .set(auth(alice))
+        .send({ contentText: 'cancel me', contentJson: doc('cancel me'), scheduledFor: new Date(Date.now() + 60_000).toISOString() })
+        .expect(201);
+      await http().delete(`/scheduled/${created.body.data.id}`).set(auth(alice)).expect(200);
+
+      const scheduled = app.get(ScheduledMessagesService);
+      await scheduled.deliverDue(new Date(Date.now() + 120_000));
+      expect(await prisma.message.count({ where: { channelId, contentText: 'cancel me' } })).toBe(0);
     });
   });
 });
