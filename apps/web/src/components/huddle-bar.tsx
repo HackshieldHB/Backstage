@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Headphones, Mic, MicOff, PhoneOff } from 'lucide-react';
+import { Headphones, Mic, MicOff, MonitorUp, MonitorX, PhoneOff } from 'lucide-react';
 import { Avatar } from './avatar';
 import type { HuddleController } from '@/hooks/use-huddle';
 
@@ -17,13 +17,34 @@ function RemoteAudio({ stream }: { stream: MediaStream }) {
   return <audio ref={ref} autoPlay playsInline />;
 }
 
+function ScreenTile({ stream, label }: { stream: MediaStream; label: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.srcObject = stream;
+    el.play().catch(() => undefined);
+  }, [stream]);
+  return (
+    <div className="relative overflow-hidden rounded-md border border-gray-300 bg-black dark:border-gray-600">
+      <video ref={ref} autoPlay playsInline muted className="max-h-48 w-auto" />
+      <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 export function HuddleBar({ huddle }: { huddle: HuddleController }) {
-  const { joined, participants, muted, remoteStreams } = huddle;
+  const { joined, participants, muted, remoteStreams, screenSharing, remoteScreens } = huddle;
   if (!joined && participants.length === 0) return null;
 
+  const screenEntries = Object.entries(remoteScreens);
+
   return (
+    <div className="border-b border-gray-200 dark:border-gray-700">
     <div
-      className="flex items-center gap-3 border-b border-gray-200 bg-indigo-50 px-4 py-2 dark:border-gray-700 dark:bg-indigo-950/40"
+      className="flex items-center gap-3 bg-indigo-50 px-4 py-2 dark:bg-indigo-950/40"
       data-testid="huddle-bar"
     >
       <span className="flex items-center gap-1.5 text-[13px] font-semibold text-indigo-700 dark:text-indigo-300">
@@ -56,6 +77,14 @@ export function HuddleBar({ huddle }: { huddle: HuddleController }) {
             {muted ? <MicOff size={16} /> : <Mic size={16} />}
           </button>
           <button
+            onClick={() => (screenSharing ? huddle.stopScreenShare() : void huddle.startScreenShare())}
+            title={screenSharing ? 'Stop sharing your screen' : 'Share your screen'}
+            className={`rounded-md p-1.5 ${screenSharing ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'}`}
+            data-testid="huddle-screenshare"
+          >
+            {screenSharing ? <MonitorX size={16} /> : <MonitorUp size={16} />}
+          </button>
+          <button
             onClick={huddle.leave}
             className="flex items-center gap-1 rounded-md bg-red-500 px-2.5 py-1.5 text-[12px] font-semibold text-white hover:bg-red-600"
             data-testid="huddle-leave"
@@ -76,6 +105,21 @@ export function HuddleBar({ huddle }: { huddle: HuddleController }) {
       {Object.entries(remoteStreams).map(([id, stream]) => (
         <RemoteAudio key={id} stream={stream} />
       ))}
+    </div>
+
+    {(screenSharing || screenEntries.length > 0) && (
+      <div className="flex flex-wrap gap-2 bg-indigo-50 px-4 pb-3 dark:bg-indigo-950/40" data-testid="huddle-screens">
+        {screenEntries.map(([id, stream]) => {
+          const who = participants.find((p) => p.userId === id)?.displayName ?? 'Someone';
+          return <ScreenTile key={id} stream={stream} label={`${who}'s screen`} />;
+        })}
+        {screenSharing && (
+          <span className="flex items-center rounded-md border border-dashed border-indigo-400 px-3 py-2 text-[12px] font-medium text-indigo-600 dark:text-indigo-300">
+            You're sharing your screen
+          </span>
+        )}
+      </div>
+    )}
     </div>
   );
 }
