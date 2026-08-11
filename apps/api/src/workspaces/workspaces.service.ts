@@ -15,6 +15,7 @@ import {
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
+import { AuditService } from '../admin/audit.service';
 import { EmailService } from '../email/email.service';
 import { sha256 } from '../auth/token.service';
 import { toUserDto } from '../auth/auth.service';
@@ -26,6 +27,7 @@ export class WorkspacesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
+    private readonly audit: AuditService,
     private readonly email: EmailService,
   ) {}
 
@@ -109,10 +111,16 @@ export class WorkspacesService {
     if (target.role === 'ADMIN' && actor.role !== 'OWNER') {
       throw new ForbiddenException('Only the owner can change an admin');
     }
-    return this.prisma.workspaceMember.update({
+    const updated = await this.prisma.workspaceMember.update({
       where: { id: target.id },
       data: { role: input.role },
     });
+    this.audit.record(workspaceId, actorId, 'member.role_change', {
+      targetType: 'user',
+      targetId: targetUserId,
+      meta: { from: target.role, to: input.role },
+    });
+    return updated;
   }
 
   async removeMember(actorId: string, workspaceId: string, targetUserId: string) {
@@ -136,6 +144,10 @@ export class WorkspacesService {
         where: { userId: targetUserId, channel: { workspaceId } },
       });
       await tx.workspaceMember.delete({ where: { id: target.id } });
+    });
+    this.audit.record(workspaceId, actorId, isSelf ? 'member.leave' : 'member.remove', {
+      targetType: 'user',
+      targetId: targetUserId,
     });
     return { ok: true };
   }

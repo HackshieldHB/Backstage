@@ -1,4 +1,11 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  forwardRef,
+} from '@nestjs/common';
 import {
   EditMessageInput,
   ListMessagesQuery,
@@ -9,6 +16,7 @@ import {
   ToggleReactionInput,
 } from '@backstages/shared';
 import { MentionType, NotificationType, Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -17,6 +25,8 @@ import { messageInclude, toMessageDto, groupReactions } from './message-serializ
 import { extractMentions } from './mentions';
 import { toUserDto } from '../auth/auth.service';
 import { AppRegistry } from '../integrations/app-registry';
+import { WorkflowsService } from '../workflows/workflows.service';
+import { ActivityService } from '../timesheet/activity.service';
 
 export type Container =
   | { channelId: string; conversationId: null }
@@ -46,6 +56,9 @@ export class MessagesService {
     private readonly realtime: RealtimeService,
     private readonly unread: UnreadService,
     private readonly apps: AppRegistry,
+    @Inject(forwardRef(() => WorkflowsService))
+    private readonly workflows: WorkflowsService,
+    private readonly activity: ActivityService,
   ) {}
 
   // ---------- access helpers ----------
@@ -112,9 +125,25 @@ export class MessagesService {
     const memberIds = await this.containerMemberIds(container);
     const mentions = extractMentions(input.contentJson);
 
+    // @user-group mentions carry an id like "group:<id>" — expand them to their
+    // members so everyone in the group gets notified (scoped to this workspace).
+    const groupIds = mentions.userIds
+      .filter((id) => id.startsWith('group:'))
+      .map((id) => id.slice('group:'.length));
+    const directUserIds = mentions.userIds.filter((id) => !id.startsWith('group:'));
+    let groupMemberIds: string[] = [];
+    if (groupIds.length > 0) {
+      const rows = await this.prisma.userGroupMember.findMany({
+        where: { groupId: { in: groupIds }, group: { workspaceId } },
+        select: { userId: true },
+      });
+      groupMemberIds = rows.map((r) => r.userId);
+    }
+
     // Resolve mention targets to container members only (never leak beyond access).
     const memberSet = new Set(memberIds);
-    const explicitTargets = mentions.userIds.filter((id) => memberSet.has(id) && id !== userId);
+    const mentionedUserIds = [...new Set([...directUserIds, ...groupMemberIds])];
+    const explicitTargets = mentionedUserIds.filter((id) => memberSet.has(id) && id !== userId);
     const broadcastTargets =
       mentions.channel || mentions.here ? memberIds.filter((id) => id !== userId) : [];
 
@@ -260,6 +289,19 @@ export class MessagesService {
     // registered integration app.
     void this.applyUnfurls(message.id, workspaceId, input.contentText, containerIds);
 
+    // Fire-and-forget workflow rules ("when a message is posted in #X …").
+    void this.workflows.onMessagePosted(dto);
+
+    // Fire-and-forget timeline signal: authoring a real message is COLLABORATION.
+    // Coalesced into a rolling window so a burst of messages is one block.
+    void this.activity.touch({
+      workspaceId,
+      userId,
+      kind: 'COLLABORATION',
+      source: 'MESSAGE',
+      windowSec: 10 * 60,
+    });
+
     // Push fresh unread counts to every other member (and reset for the author).
     const pushTargets = memberIds;
     await Promise.all(
@@ -329,6 +371,165 @@ export class MessagesService {
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     return { parent: toMessageDto(parent), replies: replies.map(toMessageDto) };
+  }
+
+  /**
+   * Threads the user is a participant in across a workspace — i.e. root messages
+   * they started (that have replies) or replied to — newest activity first. This
+   * backs the sidebar "Threads" view (Slack's all-threads inbox).
+   */
+  async myThreads(userId: string, workspaceId: string) {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+
+    const [channelMembers, conversationMembers] = await Promise.all([
+      this.prisma.channelMember.findMany({
+        where: { userId, channel: { workspaceId } },
+        select: { channelId: true, channel: { select: { name: true } } },
+      }),
+      this.prisma.conversationMember.findMany({
+        where: { userId, conversation: { workspaceId } },
+        select: {
+          conversationId: true,
+          conversation: {
+            select: { members: { select: { user: { select: { id: true, displayName: true } } } } },
+          },
+        },
+      }),
+    ]);
+
+    const channelIds = channelMembers.map((m) => m.channelId);
+    const conversationIds = conversationMembers.map((m) => m.conversationId);
+    if (channelIds.length === 0 && conversationIds.length === 0) return { threads: [] };
+
+    // Restrict everything to containers the caller can actually read.
+    const containerFilter = {
+      OR: [
+        ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
+        ...(conversationIds.length ? [{ conversationId: { in: conversationIds } }] : []),
+      ],
+    };
+
+    // Root messages the caller has replied to.
+    const repliedRows = await this.prisma.message.findMany({
+      where: { userId, parentId: { not: null }, deletedAt: null, ...containerFilter },
+      select: { parentId: true },
+      distinct: ['parentId'],
+    });
+    const repliedParentIds = repliedRows
+      .map((r) => r.parentId)
+      .filter((id): id is string => id !== null);
+
+    // Fetch the thread roots: authored by me OR replied to by me, with ≥1 reply.
+    const roots = await this.prisma.message.findMany({
+      where: {
+        parentId: null,
+        deletedAt: null,
+        replies: { some: {} },
+        AND: [containerFilter, { OR: [{ userId }, { id: { in: repliedParentIds } }] }],
+      },
+      include: messageInclude,
+      take: 100,
+    });
+
+    const channelLabel = new Map(channelMembers.map((m) => [m.channelId, `#${m.channel.name}`]));
+    const conversationLabel = new Map(
+      conversationMembers.map((m) => {
+        const others = m.conversation.members
+          .filter((cm) => cm.user.id !== userId)
+          .map((cm) => cm.user.displayName);
+        return [m.conversationId, others.length ? others.join(', ') : 'You'] as const;
+      }),
+    );
+
+    const threads = roots
+      .map((r) => ({
+        message: toMessageDto(r),
+        containerLabel: r.channelId
+          ? (channelLabel.get(r.channelId) ?? 'channel')
+          : (conversationLabel.get(r.conversationId!) ?? 'Direct message'),
+      }))
+      // Newest activity (last reply, else the root's own time) first.
+      .sort((a, b) =>
+        (b.message.lastReplyAt ?? b.message.createdAt).localeCompare(
+          a.message.lastReplyAt ?? a.message.createdAt,
+        ),
+      );
+
+    return { threads };
+  }
+
+  /**
+   * Per-member read positions for a container, so the client can render "seen
+   * by" receipts. Returns each member's last-read timestamp (null if they have
+   * never read). Derived from the same markers that drive unread counts — no
+   * extra storage.
+   */
+  async readState(userId: string, container: Container) {
+    await this.requireContainerAccess(userId, container);
+    if (container.channelId !== null) {
+      const rows = await this.prisma.channelMember.findMany({
+        where: { channelId: container.channelId },
+        select: { userId: true, lastReadMessage: { select: { createdAt: true } } },
+      });
+      return rows.map((r) => ({
+        userId: r.userId,
+        lastReadAt: r.lastReadMessage?.createdAt.toISOString() ?? null,
+      }));
+    }
+    const rows = await this.prisma.conversationMember.findMany({
+      where: { conversationId: container.conversationId },
+      select: { userId: true, lastReadMessage: { select: { createdAt: true } } },
+    });
+    return rows.map((r) => ({
+      userId: r.userId,
+      lastReadAt: r.lastReadMessage?.createdAt.toISOString() ?? null,
+    }));
+  }
+
+  /** Forward a message into another channel/DM as a quoted copy. */
+  async forward(
+    userId: string,
+    messageId: string,
+    target: { channelId?: string; conversationId?: string },
+  ): Promise<MessageDto> {
+    const original = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!original || original.deletedAt) throw new NotFoundException('Message not found');
+    await this.requireContainerAccess(userId, containerOf(original));
+
+    const targetContainer: Container = target.channelId
+      ? channelContainer(target.channelId)
+      : conversationContainer(target.conversationId!);
+
+    let sourceLabel = 'a direct message';
+    if (original.channelId) {
+      const ch = await this.prisma.channel.findUnique({
+        where: { id: original.channelId },
+        select: { name: true },
+      });
+      sourceLabel = ch ? `#${ch.name}` : 'a channel';
+    }
+    const author = original.userId
+      ? await this.prisma.user.findUnique({
+          where: { id: original.userId },
+          select: { displayName: true },
+        })
+      : null;
+
+    const note = `Forwarded from ${sourceLabel}${author ? ` · ${author.displayName}` : ''}`;
+    const contentJson = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: note, marks: [{ type: 'italic' }] }] },
+        { type: 'paragraph', content: [{ type: 'text', text: original.contentText }] },
+      ],
+    };
+
+    return this.send(userId, targetContainer, {
+      clientMsgId: randomUUID(),
+      contentJson,
+      contentText: original.contentText,
+      attachmentIds: [],
+    });
   }
 
   async markRead(userId: string, container: Container, messageId: string) {

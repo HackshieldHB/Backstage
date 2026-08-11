@@ -4,6 +4,7 @@ import { SOCKET_EVENTS, type JiraUnfurl } from '@backstages/shared';
 import type { AtlassianConnection } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { ActivityService } from '../timesheet/activity.service';
 import { UnreadService } from '../messages/unread.service';
 import {
   IntegrationMessagesService,
@@ -73,6 +74,7 @@ export class JiraEventsService {
     private readonly integrationMessages: IntegrationMessagesService,
     private readonly realtime: RealtimeService,
     private readonly unread: UnreadService,
+    private readonly activity: ActivityService,
   ) {}
 
   async handleWebhook(connectionId: string, secret: string | undefined, body: JiraWebhookBody) {
@@ -196,7 +198,48 @@ export class JiraEventsService {
       }
     }
 
+    // 3) Timeline: an assignee moving an issue into/out of active work opens or
+    //    closes an IMPLEMENTATION block for them.
+    if (event === 'status_changed') {
+      await this.trackImplementation(connection, body);
+    }
+
     return { event, dm: dmUserId !== null, cards };
+  }
+
+  /** Whether a Jira status name represents work actively in progress. */
+  private isActiveWork(status: string): boolean {
+    return /progress|doing|develop|review|testing|implement/i.test(status);
+  }
+
+  private async trackImplementation(connection: AtlassianConnection, body: JiraWebhookBody) {
+    const issueKey = body.issue?.key;
+    const accountId = body.issue?.fields?.assignee?.accountId;
+    if (!issueKey || !accountId) return; // only track when we know who is doing it
+    const link = await this.prisma.atlassianAccountLink.findUnique({
+      where: { atlassianAccountId: String(accountId) },
+    });
+    if (!link) return;
+
+    const change = body.changelog?.items?.find((i) => i.field === 'status');
+    const toStatus = change?.toString ?? body.issue?.fields?.status?.name ?? '';
+    if (this.isActiveWork(toStatus)) {
+      await this.activity.open({
+        workspaceId: connection.workspaceId,
+        userId: link.userId,
+        kind: 'IMPLEMENTATION',
+        source: 'JIRA_STATUS',
+        refId: issueKey,
+        meta: { issueKey, status: toStatus },
+      });
+    } else {
+      await this.activity.close({
+        userId: link.userId,
+        source: 'JIRA_STATUS',
+        kind: 'IMPLEMENTATION',
+        refId: issueKey,
+      });
+    }
   }
 
   /** Personal "Jira" inbox conversation (single-member, integration-titled). */

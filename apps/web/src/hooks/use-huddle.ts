@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CLIENT_EVENTS,
   SOCKET_EVENTS,
@@ -10,6 +10,7 @@ import {
 } from '@backstages/shared';
 import { getSocket } from '@/lib/socket';
 import { useAuthStore } from '@/stores/auth-store';
+import { useUiStore } from '@/stores/ui-store';
 import type { Container } from '@/hooks/queries';
 
 const ICE: RTCConfiguration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -19,15 +20,23 @@ type SignalData =
   | { kind: 'ice'; candidate: RTCIceCandidateInit };
 
 export interface HuddleController {
+  /** The channel/DM the local user is currently in a huddle in, or null. */
+  activeTarget: Container | null;
   joined: boolean;
   participants: HuddleParticipant[];
+  /** Live participant lists for every container, so a channel can advertise an
+   *  ongoing huddle even when it is not the one you are in. Keyed by container id. */
+  participantsByContainer: Record<string, HuddleParticipant[]>;
   muted: boolean;
   remoteStreams: Record<string, MediaStream>;
   /** True while THIS client is sharing its screen. */
   screenSharing: boolean;
+  /** The local screen-share stream, for the sharer's own self-preview. */
+  localScreen: MediaStream | null;
   /** Remote peers' screen-share streams, keyed by userId. */
   remoteScreens: Record<string, MediaStream>;
-  join: () => Promise<void>;
+  /** Start (or join) a huddle in the given channel/DM. */
+  join: (target: Container) => Promise<void>;
   leave: () => void;
   toggleMute: () => void;
   startScreenShare: () => Promise<void>;
@@ -35,28 +44,36 @@ export interface HuddleController {
 }
 
 /**
- * Slack-style audio huddle for a channel: a full WebRTC mesh where every
- * participant holds a peer connection to every other. Signaling (SDP + ICE) is
- * relayed peer-to-peer through the Socket.IO gateway; the deterministic
- * "lower userId offers" rule avoids offer glare.
+ * Slack-style audio huddle: a full WebRTC mesh where every participant holds a
+ * peer connection to every other. Signaling (SDP + ICE) is relayed peer-to-peer
+ * through the Socket.IO gateway; the deterministic "lower userId offers" rule
+ * avoids offer glare.
+ *
+ * This controller is mounted **once at the app shell** and is intentionally
+ * decoupled from whatever channel/DM is being viewed: the huddle is bound to the
+ * `activeTarget` the user explicitly joined, so navigating to another channel or
+ * DM no longer tears it down. Participant lists for *all* containers are tracked
+ * in parallel (the server broadcasts them to every room a member is in) so any
+ * channel can still surface "N people are in a huddle — Join".
  */
-export function useHuddle(target: Container | null): HuddleController {
-  // A huddle can run in a channel or a DM/group conversation.
-  const targetId = target?.id ?? null;
-  const isChannel = target?.kind === 'channel';
-  const targetBody = useCallback(
-    () => (isChannel ? { channelId: targetId! } : { conversationId: targetId! }),
-    [isChannel, targetId],
-  );
+export function useHuddle(): HuddleController {
   const me = useAuthStore((s) => s.user);
   const myId = me?.id ?? '';
+
+  const [activeTarget, setActiveTarget] = useState<Container | null>(null);
   const [joined, setJoined] = useState(false);
-  const [participants, setParticipants] = useState<HuddleParticipant[]>([]);
+  const [participantsByContainer, setParticipantsByContainer] = useState<
+    Record<string, HuddleParticipant[]>
+  >({});
   const [muted, setMuted] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [screenSharing, setScreenSharing] = useState(false);
+  const [localScreen, setLocalScreen] = useState<MediaStream | null>(null);
   const [remoteScreens, setRemoteScreens] = useState<Record<string, MediaStream>>({});
 
+  // The target the user is actually huddling in, mirrored in a ref so socket
+  // handlers (which close over a stable identity) can read the latest value.
+  const activeTargetRef = useRef<Container | null>(null);
   const localStream = useRef<MediaStream | null>(null);
   const peers = useRef<Map<string, RTCPeerConnection>>(new Map());
   // ICE candidates that arrive before the remote description is set must be
@@ -67,12 +84,19 @@ export function useHuddle(target: Container | null): HuddleController {
   const screenSenders = useRef<Map<string, RTCRtpSender>>(new Map());
   const joinedRef = useRef(false);
 
+  const bodyFor = useCallback(
+    (target: Container) =>
+      target.kind === 'channel' ? { channelId: target.id } : { conversationId: target.id },
+    [],
+  );
+
   const sendSignal = useCallback(
     (toUserId: string, data: SignalData) => {
-      if (!targetId) return;
-      getSocket().emit(CLIENT_EVENTS.HUDDLE_SIGNAL, { ...targetBody(), toUserId, data });
+      const target = activeTargetRef.current;
+      if (!target) return;
+      getSocket().emit(CLIENT_EVENTS.HUDDLE_SIGNAL, { ...bodyFor(target), toUserId, data });
     },
-    [targetId, targetBody],
+    [bodyFor],
   );
 
   const closePeer = useCallback((peerId: string) => {
@@ -177,16 +201,28 @@ export function useHuddle(target: Container | null): HuddleController {
     [createPeer, sendSignal],
   );
 
-  // Socket listeners for participant lists and relayed signaling.
+  // Socket listeners: participant lists for ALL containers, plus relayed
+  // signaling that belongs to the huddle we are actually in.
   useEffect(() => {
-    if (!targetId) return;
+    if (!me) return;
     const socket = getSocket();
-    // The server echoes whichever id applies (channelId or conversationId).
     const onParticipants = (p: HuddleParticipantsPayload) => {
-      if ((p.channelId ?? p.conversationId) === targetId) setParticipants(p.participants);
+      const containerId = p.channelId ?? p.conversationId;
+      if (!containerId) return;
+      setParticipantsByContainer((s) => {
+        if (p.participants.length === 0) {
+          if (!(containerId in s)) return s;
+          const next = { ...s };
+          delete next[containerId];
+          return next;
+        }
+        return { ...s, [containerId]: p.participants };
+      });
     };
     const onSignal = (p: HuddleSignalPayload) => {
-      if ((p.channelId ?? p.conversationId) === targetId && joinedRef.current) {
+      const target = activeTargetRef.current;
+      const containerId = p.channelId ?? p.conversationId;
+      if (target && containerId === target.id && joinedRef.current) {
         void handleSignal(p.fromUserId, p.data as SignalData);
       }
     };
@@ -196,9 +232,14 @@ export function useHuddle(target: Container | null): HuddleController {
       socket.off(SOCKET_EVENTS.HUDDLE_PARTICIPANTS, onParticipants);
       socket.off(SOCKET_EVENTS.HUDDLE_SIGNAL, onSignal);
     };
-  }, [targetId, handleSignal]);
+  }, [me, handleSignal]);
 
-  // Reconcile the mesh whenever the participant set changes (while joined).
+  const participants = useMemo(
+    () => (activeTarget ? (participantsByContainer[activeTarget.id] ?? []) : []),
+    [activeTarget, participantsByContainer],
+  );
+
+  // Reconcile the mesh whenever the active huddle's participant set changes.
   useEffect(() => {
     if (!joinedRef.current) return;
     const present = new Set(participants.map((p) => p.userId));
@@ -241,6 +282,7 @@ export function useHuddle(target: Container | null): HuddleController {
     screenSenders.current.clear();
     stream.getTracks().forEach((t) => t.stop());
     screenStream.current = null;
+    setLocalScreen(null);
     setScreenSharing(false);
   }, [renegotiate]);
 
@@ -253,6 +295,7 @@ export function useHuddle(target: Container | null): HuddleController {
       return; // user dismissed the picker
     }
     screenStream.current = stream;
+    setLocalScreen(stream);
     setScreenSharing(true);
     const track = stream.getVideoTracks()[0];
     // Ending the share from the browser's own "Stop sharing" bar cleans up too.
@@ -263,32 +306,52 @@ export function useHuddle(target: Container | null): HuddleController {
     }
   }, [renegotiate, stopScreenShare]);
 
-  const join = useCallback(async () => {
-    if (!targetId || joinedRef.current) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStream.current = stream;
-      joinedRef.current = true;
-      setJoined(true);
-      setMuted(false);
-      getSocket().emit(CLIENT_EVENTS.HUDDLE_JOIN, targetBody());
-    } catch {
-      window.alert('Could not access your microphone. Check browser permissions.');
-    }
-  }, [targetId, targetBody]);
-
-  const leave = useCallback(() => {
-    if (targetId) getSocket().emit(CLIENT_EVENTS.HUDDLE_LEAVE, targetBody());
+  // Tear down the mesh + local media without touching the active-target React
+  // state, so it can be called from `join` (switching huddles) and from `leave`.
+  const leaveInternal = useCallback(() => {
+    const target = activeTargetRef.current;
+    if (target) getSocket().emit(CLIENT_EVENTS.HUDDLE_LEAVE, bodyFor(target));
     stopScreenShare();
     for (const peerId of [...peers.current.keys()]) closePeer(peerId);
     pendingIce.current.clear();
     localStream.current?.getTracks().forEach((t) => t.stop());
     localStream.current = null;
     joinedRef.current = false;
-    setJoined(false);
+    activeTargetRef.current = null;
     setRemoteStreams({});
     setRemoteScreens({});
-  }, [targetId, targetBody, closePeer, stopScreenShare]);
+  }, [bodyFor, closePeer, stopScreenShare]);
+
+  const join = useCallback(
+    async (target: Container) => {
+      if (joinedRef.current) {
+        // Already in a huddle. Only re-join if it's a different container.
+        if (activeTargetRef.current?.id === target.id) return;
+        leaveInternal();
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        localStream.current = stream;
+        joinedRef.current = true;
+        activeTargetRef.current = target;
+        setActiveTarget(target);
+        setJoined(true);
+        setMuted(false);
+        getSocket().emit(CLIENT_EVENTS.HUDDLE_JOIN, bodyFor(target));
+      } catch {
+        useUiStore
+          .getState()
+          .pushToast('Could not access your microphone. Check browser permissions.', 'error');
+      }
+    },
+    [bodyFor, leaveInternal],
+  );
+
+  const leave = useCallback(() => {
+    leaveInternal();
+    setActiveTarget(null);
+    setJoined(false);
+  }, [leaveInternal]);
 
   const toggleMute = useCallback(() => {
     setMuted((m) => {
@@ -298,20 +361,23 @@ export function useHuddle(target: Container | null): HuddleController {
     });
   }, []);
 
-  // Leave automatically when the channel/DM changes or the pane unmounts.
+  // Only tears down on app-shell unmount (i.e. logout / full navigation away).
   useEffect(() => {
     return () => {
-      if (joinedRef.current) leave();
+      if (joinedRef.current) leaveInternal();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetId]);
+  }, []);
 
   return {
+    activeTarget,
     joined,
     participants,
+    participantsByContainer,
     muted,
     remoteStreams,
     screenSharing,
+    localScreen,
     remoteScreens,
     join,
     leave,

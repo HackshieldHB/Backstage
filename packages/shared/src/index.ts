@@ -8,5 +8,7 @@ export * from './schemas/confluence';
 export * from './schemas/message';
 export * from './schemas/scheduled';
 export * from './schemas/search';
+export * from './schemas/standup';
+export * from './schemas/timesheet';
 export * from './schemas/user-status';
 export * from './socket';

@@ -3,17 +3,21 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
-import { AtSign, Bell, BellOff, FileText, Hash, MessageSquareText, Reply, Smile, SquareKanban, X } from 'lucide-react';
+import { ArrowLeft, AtSign, Bell, BellOff, Clock, FileText, Hash, Link2, MessageSquareText, Reply, Smile, Sparkles, SquareKanban, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, fileUrl } from '@/lib/api';
 import { useUiStore, type RightPanel } from '@/stores/ui-store';
 import {
   keys,
   useChannelMembers,
+  useAiStatus,
+  useCanvas,
+  useMyThreads,
   useNotifications,
   usePins,
   usePresence,
   useSaved,
+  useScheduledMessages,
   useSearch,
   useThread,
   useWorkspaces,
@@ -26,8 +30,25 @@ import { Avatar } from './avatar';
 import { MessageBody } from './message-body';
 import { UserProfileDialog } from './user-profile-dialog';
 import { SaveThreadDialog } from './save-thread-dialog';
+import { ConfirmDialog } from './confirm-dialog';
 import { useAtlassianStatus } from './atlassian-dialog';
 import type { UserDto } from '@backstages/shared';
+
+/** Create (or reuse) a public share link for a channel/thread and copy it. */
+async function shareAndCopy(
+  workspaceId: string,
+  body: { channelId?: string; messageId?: string },
+  pushToast: (m: string, k?: 'info' | 'success' | 'error') => void,
+) {
+  try {
+    const { url } = await api<{ url: string }>('POST', `/workspaces/${workspaceId}/share`, body);
+    const full = `${window.location.origin}${url}`;
+    await navigator.clipboard.writeText(full).catch(() => undefined);
+    pushToast('Public link copied to clipboard', 'success');
+  } catch (err) {
+    pushToast(err instanceof Error ? err.message : 'Could not create share link', 'error');
+  }
+}
 
 export function RightPanelView({
   workspaceId,
@@ -41,15 +62,28 @@ export function RightPanelView({
   onNavigate: (c: Container, highlight?: string) => void;
 }) {
   const setRightPanel = useUiStore((s) => s.setRightPanel);
+  const fromThreads = panel.kind === 'thread' && panel.from === 'threads';
 
   return (
     <aside className="flex w-full max-w-md shrink-0 flex-col border-l border-gray-200 bg-white md:w-96 dark:border-gray-700 dark:bg-gray-900 absolute inset-y-0 right-0 z-30 md:static">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4 dark:border-gray-700">
-        <h2 className="text-[15px] font-bold">
+        <h2 className="flex items-center gap-1.5 text-[15px] font-bold">
+          {fromThreads && (
+            <button
+              onClick={() => setRightPanel({ kind: 'threads' })}
+              className="-ml-1 rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+              aria-label="Back to threads"
+              data-testid="thread-back"
+            >
+              <ArrowLeft size={16} />
+            </button>
+          )}
           {panel.kind === 'thread' && 'Thread'}
+          {panel.kind === 'threads' && 'Threads'}
+          {panel.kind === 'canvas' && 'Canvas'}
           {panel.kind === 'details' && 'Details'}
           {panel.kind === 'activity' && 'Activity'}
-          {panel.kind === 'saved' && 'Saved items'}
+          {panel.kind === 'saved' && 'Later'}
         </h2>
         <button onClick={() => setRightPanel({ kind: 'none' })} className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close panel">
           <X size={16} />
@@ -57,7 +91,11 @@ export function RightPanelView({
       </header>
       <div className="thin-scrollbar flex-1 overflow-y-auto">
         {panel.kind === 'thread' && (
-          <ThreadPanel workspaceId={workspaceId} container={container} messageId={panel.messageId} />
+          <ThreadPanel workspaceId={workspaceId} messageId={panel.messageId} />
+        )}
+        {panel.kind === 'threads' && <ThreadsPanel workspaceId={workspaceId} />}
+        {panel.kind === 'canvas' && container.kind === 'channel' && (
+          <CanvasPanel channelId={container.id} />
         )}
         {panel.kind === 'details' && container.kind === 'channel' && (
           <DetailsPanel workspaceId={workspaceId} channelId={container.id} onNavigate={onNavigate} />
@@ -69,28 +107,90 @@ export function RightPanelView({
   );
 }
 
+// ---------- threads inbox ----------
+
+function ThreadsPanel({ workspaceId }: { workspaceId: string }) {
+  const threads = useMyThreads(workspaceId);
+  const setRightPanel = useUiStore((s) => s.setRightPanel);
+
+  if (threads.isLoading) {
+    return <p className="p-4 text-sm text-gray-500 dark:text-gray-400">Loading threads…</p>;
+  }
+  if (!threads.data || threads.data.threads.length === 0) {
+    return (
+      <p className="p-4 text-sm text-gray-500 dark:text-gray-400">
+        No threads yet. Reply in a thread and it will show up here.
+      </p>
+    );
+  }
+
+  return (
+    <div className="p-2" data-testid="threads-list">
+      {threads.data.threads.map(({ message, containerLabel }) => (
+        <button
+          key={message.id}
+          onClick={() => setRightPanel({ kind: 'thread', messageId: message.id, from: 'threads' })}
+          className="mb-2 block w-full rounded-lg border border-gray-200 p-3 text-left hover:border-accent dark:border-gray-700"
+          data-testid="thread-row"
+        >
+          <div className="mb-1 flex items-center gap-2 text-xs text-gray-500">
+            <span className="font-semibold text-gray-700 dark:text-gray-300">{containerLabel}</span>
+            {message.lastReplyAt && (
+              <span>· last {formatDistanceToNow(new Date(message.lastReplyAt), { addSuffix: true })}</span>
+            )}
+          </div>
+          <div className="mb-1.5 flex items-center gap-2 text-xs text-gray-500">
+            <Avatar user={message.user} size="xs" />
+            <span className="font-medium text-gray-800 dark:text-gray-100">
+              {message.user?.displayName ?? 'Unknown'}
+            </span>
+          </div>
+          <MessageBody contentJson={message.contentJson} contentText={message.contentText} />
+          <div className="mt-1.5 flex items-center gap-1.5 text-[12px] font-medium text-accent">
+            <span className="flex -space-x-1">
+              {message.threadParticipants.slice(0, 3).map((p) => (
+                <Avatar key={p.id} user={p} size="xs" />
+              ))}
+            </span>
+            {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ---------- thread ----------
 
 function ThreadPanel({
   workspaceId,
-  container,
   messageId,
 }: {
   workspaceId: string;
-  container: Container;
   messageId: string;
 }) {
   const thread = useThread(messageId);
   const atlassian = useAtlassianStatus(workspaceId);
+  const ai = useAiStatus();
   const [saveOpen, setSaveOpen] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const pushToast = useUiStore((s) => s.pushToast);
 
   if (!thread.data) {
     return <p className="p-4 text-sm text-gray-500 dark:text-gray-400">Loading thread…</p>;
   }
 
+  // Derive the thread's OWN container from its parent message, not the pane
+  // that's currently in view — the Threads inbox can open a thread that lives in
+  // a different channel/DM than the one on screen.
+  const parent = thread.data.parent;
+  const threadContainer: Container = parent.channelId
+    ? { kind: 'channel', id: parent.channelId }
+    : { kind: 'conversation', id: parent.conversationId! };
+
   // Capturing a thread writes a page, so it needs the granular Confluence scopes.
   const canSave =
-    container.kind === 'channel' &&
+    threadContainer.kind === 'channel' &&
     Boolean(atlassian.data?.connected) &&
     Boolean(atlassian.data?.confluenceReady);
 
@@ -113,7 +213,45 @@ function ThreadPanel({
               <FileText size={12} /> Save to Confluence
             </button>
           )}
+          {threadContainer.kind === 'channel' && (
+            <button
+              type="button"
+              onClick={() => void shareAndCopy(workspaceId, { messageId }, pushToast)}
+              data-testid="share-thread-button"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+            >
+              <Link2 size={12} /> Share
+            </button>
+          )}
+          {ai.data?.enabled && (
+            <button
+              type="button"
+              onClick={async () => {
+                setSummary('…');
+                try {
+                  const r = await api<{ summary: string }>(
+                    'POST',
+                    `/ai/threads/${messageId}/summarize`,
+                  );
+                  setSummary(r.summary);
+                } catch (err) {
+                  setSummary(null);
+                  pushToast(err instanceof Error ? err.message : 'Summary failed', 'error');
+                }
+              }}
+              data-testid="summarize-thread"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+            >
+              <Sparkles size={12} /> Summarize
+            </button>
+          )}
         </div>
+        {summary && (
+          <div className="mx-5 mb-2 rounded-md border border-accent/30 bg-accent/5 p-2.5 text-[13px] whitespace-pre-wrap">
+            <span className="mb-1 block text-[11px] font-semibold uppercase text-accent">AI summary</span>
+            {summary}
+          </div>
+        )}
         {saveOpen && (
           <SaveThreadDialog
             workspaceId={workspaceId}
@@ -140,11 +278,68 @@ function ThreadPanel({
       <div className="shrink-0 p-3">
         <Composer
           workspaceId={workspaceId}
-          container={container}
+          container={threadContainer}
           placeholder="Reply in thread…"
           parentId={messageId}
         />
       </div>
+    </div>
+  );
+}
+
+// ---------- canvas ----------
+
+function CanvasPanel({ channelId }: { channelId: string }) {
+  const canvas = useCanvas(channelId);
+  const qc = useQueryClient();
+  const pushToast = useUiStore((s) => s.pushToast);
+  const [text, setText] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  // Initialise the editor from the loaded canvas once.
+  const value = text ?? canvas.data?.contentText ?? '';
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api('PUT', `/channels/${channelId}/canvas`, {
+        contentText: value,
+        contentJson: {
+          type: 'doc',
+          content: value
+            .split('\n')
+            .map((line) => ({ type: 'paragraph', content: line ? [{ type: 'text', text: line }] : [] })),
+        },
+      });
+      await qc.invalidateQueries({ queryKey: ['canvas', channelId] });
+      pushToast('Canvas saved.', 'success');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Could not save', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex h-full flex-col p-3">
+      <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+        Shared notes for this channel — everyone can edit.
+        {canvas.data?.updatedBy && ` Last edited by ${canvas.data.updatedBy}.`}
+      </p>
+      <textarea
+        value={value}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Write meeting notes, decisions, links…"
+        className="thin-scrollbar flex-1 resize-none rounded-lg border border-gray-200 p-3 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+        data-testid="canvas-editor"
+      />
+      <button
+        onClick={() => void save()}
+        disabled={saving}
+        className="mt-3 shrink-0 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+        data-testid="canvas-save"
+      >
+        {saving ? 'Saving…' : 'Save canvas'}
+      </button>
     </div>
   );
 }
@@ -162,6 +357,8 @@ function DetailsPanel({
 }) {
   const [tab, setTab] = useState<'about' | 'members' | 'pinned' | 'files'>('about');
   const [profileUser, setProfileUser] = useState<UserDto | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const pushToast = useUiStore((s) => s.pushToast);
   const qc = useQueryClient();
   const workspaces = useWorkspaces();
   const myRole = workspaces.data?.find((w) => w.id === workspaceId)?.myRole;
@@ -223,6 +420,19 @@ function DetailsPanel({
               <option value="MUTED">Muted</option>
             </select>
           </div>
+          <div>
+            <h3 className="mb-1 font-semibold">Share externally</h3>
+            <button
+              onClick={() => void shareAndCopy(workspaceId, { channelId }, pushToast)}
+              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-[13px] font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+              data-testid="share-channel-button"
+            >
+              <Link2 size={14} /> Create public link
+            </button>
+            <p className="mt-1 text-[11px] text-gray-400">
+              Anyone with the link sees a read-only view of this channel&apos;s recent messages.
+            </p>
+          </div>
           {!channel.data.isDefault && (
             <div className="flex items-center gap-4">
               <button
@@ -237,17 +447,7 @@ function DetailsPanel({
               </button>
               {isAdmin && (
                 <button
-                  onClick={async () => {
-                    if (!window.confirm(`Delete #${channel.data!.name}? This permanently removes the channel and its messages for everyone.`))
-                      return;
-                    try {
-                      await api('DELETE', `/channels/${channelId}`);
-                      await qc.invalidateQueries({ queryKey: keys.channels(workspaceId) });
-                      window.location.href = `/app?ws=${workspaceId}`;
-                    } catch (err) {
-                      window.alert(err instanceof Error ? err.message : 'Failed to delete channel');
-                    }
-                  }}
+                  onClick={() => setConfirmDelete(true)}
                   className="text-sm font-medium text-red-600 hover:underline"
                   data-testid="delete-channel"
                 >
@@ -257,6 +457,25 @@ function DetailsPanel({
             </div>
           )}
         </div>
+      )}
+
+      {confirmDelete && channel.data && (
+        <ConfirmDialog
+          title={`Delete #${channel.data.name}`}
+          body="This permanently removes the channel and its messages for everyone. This can't be undone."
+          confirmLabel="Delete channel"
+          danger
+          onConfirm={async () => {
+            try {
+              await api('DELETE', `/channels/${channelId}`);
+              await qc.invalidateQueries({ queryKey: keys.channels(workspaceId) });
+              window.location.href = `/app?ws=${workspaceId}`;
+            } catch (err) {
+              pushToast(err instanceof Error ? err.message : 'Failed to delete channel', 'error');
+            }
+          }}
+          onClose={() => setConfirmDelete(false)}
+        />
       )}
 
       {tab === 'members' && (
@@ -461,8 +680,56 @@ function SavedPanel({
   onNavigate: (c: Container, highlight?: string) => void;
 }) {
   const saved = useSaved(workspaceId);
+  const scheduled = useScheduledMessages(workspaceId);
+  const qc = useQueryClient();
+  const pushToast = useUiStore((s) => s.pushToast);
+  const reminders = (scheduled.data ?? []).filter((s) => s.isReminder);
+
+  const cancelReminder = async (id: string) => {
+    try {
+      await api('DELETE', `/scheduled/${id}`);
+      await qc.invalidateQueries({ queryKey: keys.scheduled(workspaceId) });
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Could not cancel reminder.', 'error');
+    }
+  };
+
   return (
     <div className="p-2" data-testid="saved-list">
+      {reminders.length > 0 && (
+        <div className="mb-3">
+          <h3 className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Upcoming reminders
+          </h3>
+          {reminders.map((r) => (
+            <div
+              key={r.id}
+              className="mb-1.5 flex items-start gap-2 rounded-lg border border-gray-200 p-2.5 dark:border-gray-700"
+              data-testid="reminder-row"
+            >
+              <Clock size={14} className="mt-0.5 shrink-0 text-accent" />
+              <div className="min-w-0 flex-1">
+                <span className="block text-[13px] text-gray-700 dark:text-gray-200">{r.contentText}</span>
+                <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                  {format(new Date(r.scheduledFor), 'EEE, MMM d · HH:mm')}
+                </span>
+              </div>
+              <button
+                onClick={() => void cancelReminder(r.id)}
+                title="Cancel reminder"
+                className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {(saved.data ?? []).length > 0 && (
+        <h3 className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Saved messages
+        </h3>
+      )}
       {(saved.data ?? []).map((s) => (
         <button
           key={s.message.id}
@@ -479,7 +746,12 @@ function SavedPanel({
           <MessageBody contentJson={s.message.contentJson} contentText={s.message.contentText} />
         </button>
       ))}
-      {(saved.data ?? []).length === 0 && <p className="p-3 text-sm text-gray-500 dark:text-gray-400">Nothing saved yet.</p>}
+      {(saved.data ?? []).length === 0 && reminders.length === 0 && (
+        <p className="p-3 text-sm text-gray-500 dark:text-gray-400">
+          Nothing here yet. Save a message for later, or set a reminder with{' '}
+          <code className="rounded bg-gray-100 px-1 dark:bg-gray-800">/remind</code>.
+        </p>
+      )}
     </div>
   );
 }

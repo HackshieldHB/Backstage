@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -40,6 +41,8 @@ interface OAuthState {
 
 @Injectable()
 export class AtlassianService {
+  private readonly logger = new Logger(AtlassianService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
@@ -204,6 +207,14 @@ export class AtlassianService {
     }
     if (!user) {
       if (!profile.email || !profile.emailVerified) {
+        // Common cause of "some teammates can't log in": Atlassian returns no
+        // shareable email, or an unverified one, so we can't safely match/create.
+        this.logger.warn(
+          `SSO rejected: account ${profile.accountId} has ` +
+            `${profile.email ? 'an unverified email' : 'no shareable email'} ` +
+            `(email_verified=${profile.emailVerified}). User must sign up with email/password ` +
+            `or make their Atlassian email public + verified.`,
+        );
         return { redirect: `${web}/login?error=atlassian-email-unverified` };
       }
       user = await this.prisma.user.create({

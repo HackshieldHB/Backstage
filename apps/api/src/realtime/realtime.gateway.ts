@@ -28,6 +28,7 @@ import {
   roomForWorkspace,
 } from './realtime.service';
 import { HuddleService } from './huddle.service';
+import { HuddleSessionService } from '../timesheet/huddle-session.service';
 import { PresenceService } from '../presence/presence.service';
 import type { AccessTokenPayload } from '../auth/jwt-auth.guard';
 
@@ -50,6 +51,7 @@ export class RealtimeGateway
     private readonly realtime: RealtimeService,
     private readonly presence: PresenceService,
     private readonly huddle: HuddleService,
+    private readonly huddleSession: HuddleSessionService,
   ) {}
 
   afterInit(server: Server) {
@@ -112,6 +114,7 @@ export class RealtimeGateway
     if (socket.data.userId) {
       // Drop the socket from any huddles and refresh those rooms.
       for (const key of this.huddle.removeSocket(socket.data.userId, socket.id)) {
+        await this.huddleSession.leave(key, socket.data.userId);
         await this.broadcastHuddle(key);
       }
       await this.presence.disconnected(socket.data.userId);
@@ -137,6 +140,7 @@ export class RealtimeGateway
     // Only members of the channel/DM (who are in its room) may join its huddle.
     if (!key || !socket.rooms.has(key)) return;
     this.huddle.join(key, socket.data.userId, socket.id);
+    await this.huddleSession.join(key, socket.data.userId);
     await this.broadcastHuddle(key);
   }
 
@@ -144,7 +148,9 @@ export class RealtimeGateway
   async onHuddleLeave(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddlePayload) {
     const key = this.huddleKey(body);
     if (!key) return;
-    this.huddle.leave(key, socket.data.userId, socket.id);
+    // Only persist the "left" when the user has no other socket still in the huddle.
+    const fullyLeft = this.huddle.leave(key, socket.data.userId, socket.id);
+    if (fullyLeft) await this.huddleSession.leave(key, socket.data.userId);
     await this.broadcastHuddle(key);
   }
 

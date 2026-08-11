@@ -76,6 +76,15 @@ export const AttachmentDtoSchema = z.object({
 });
 export type AttachmentDto = z.infer<typeof AttachmentDtoSchema>;
 
+export const PollDtoSchema = z.object({
+  id: z.string(),
+  question: z.string(),
+  options: z.array(z.string()),
+  allowMultiple: z.boolean(),
+  votes: z.array(z.object({ optionIndex: z.number(), userId: z.string() })),
+});
+export type PollDto = z.infer<typeof PollDtoSchema>;
+
 export const MessageDtoSchema = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -99,6 +108,9 @@ export const MessageDtoSchema = z.object({
   lastReplyAt: z.string().nullable(),
   /** Link previews, e.g. Jira issue status cards. */
   unfurls: z.unknown().nullable(),
+  /** Present when this message is a poll. Votes carry userIds so the client can
+   *  compute counts and highlight the viewer's own choices. */
+  poll: PollDtoSchema.nullable().optional(),
 });
 export type MessageDto = z.infer<typeof MessageDtoSchema>;
 

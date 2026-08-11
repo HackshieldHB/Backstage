@@ -15,13 +15,20 @@ import type {
   CatchUpResponse,
   ConversationDto,
   JiraMyIssue,
+  LogTimeInput,
   MessageDto,
   MessagePage,
+  ScheduledMessageDto,
   SearchResponse,
   SendMessageInput,
+  StandupDto,
+  StandupResponseDto,
   SlashCommandDto,
+  TimelineResponse,
+  TimesheetEntryDto,
   UnreadUpdatedPayload,
   UserDto,
+  UtilizationResponse,
   WorkspaceDto,
   WorkspaceMemberDto,
 } from '@backstages/shared';
@@ -54,16 +61,41 @@ export const keys = {
   presence: (ws: string) => ['presence', ws] as const,
   messages: (containerId: string) => ['messages', containerId] as const,
   thread: (messageId: string) => ['thread', messageId] as const,
+  myThreads: (ws: string) => ['my-threads', ws] as const,
+  scheduled: (ws: string) => ['scheduled', ws] as const,
+  customEmoji: (ws: string) => ['custom-emoji', ws] as const,
+  workflows: (ws: string) => ['workflows', ws] as const,
+  standups: (ws: string) => ['standups', ws] as const,
+  standupResponses: (id: string, date: string) => ['standup-responses', id, date] as const,
   pins: (channelId: string) => ['pins', channelId] as const,
   saved: (ws: string) => ['saved', ws] as const,
   notifications: ['notifications'] as const,
   channelMembers: (channelId: string) => ['channel-members', channelId] as const,
+  timeline: (ws: string, from: string, to: string) => ['timeline', ws, from, to] as const,
+  utilization: (ws: string, from: string, to: string) => ['utilization', ws, from, to] as const,
+  timesheet: (ws: string) => ['timesheet', ws] as const,
 };
 
 export function useWorkspaces() {
   return useQuery({
     queryKey: keys.workspaces,
     queryFn: () => api<WorkspaceWithRole[]>('GET', '/workspaces'),
+  });
+}
+
+export function useStandups(workspaceId: string) {
+  return useQuery({
+    queryKey: keys.standups(workspaceId),
+    queryFn: () => api<StandupDto[]>('GET', `/workspaces/${workspaceId}/standups`),
+    enabled: !!workspaceId,
+  });
+}
+
+export function useStandupResponses(standupId: string | null, date: string) {
+  return useQuery({
+    queryKey: keys.standupResponses(standupId ?? '', date),
+    queryFn: () => api<StandupResponseDto[]>('GET', `/standups/${standupId}/responses`),
+    enabled: !!standupId,
   });
 }
 
@@ -141,6 +173,149 @@ export function useThread(messageId: string | null) {
     queryKey: keys.thread(messageId ?? 'none'),
     queryFn: () => api<{ parent: MessageDto; replies: MessageDto[] }>('GET', `/messages/${messageId}/thread`),
     enabled: !!messageId,
+  });
+}
+
+export interface ThreadSummary {
+  message: MessageDto;
+  containerLabel: string;
+}
+
+export interface CustomEmojiView {
+  id: string;
+  name: string;
+  url: string;
+}
+
+export interface UserGroupView {
+  id: string;
+  name: string;
+  handle: string;
+  memberIds: string[];
+}
+export function useUserGroups(workspaceId: string) {
+  return useQuery({
+    queryKey: ['user-groups', workspaceId],
+    queryFn: () => api<UserGroupView[]>('GET', `/workspaces/${workspaceId}/user-groups`),
+    enabled: !!workspaceId,
+    staleTime: 120000,
+  });
+}
+
+export interface WorkspaceAnalytics {
+  totalMessages: number;
+  memberCount: number;
+  activeUsers7d: number;
+  messagesByDay: { date: string; count: number }[];
+  topChannels: { name: string; count: number }[];
+}
+export function useAnalytics(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['analytics', workspaceId],
+    queryFn: () => api<WorkspaceAnalytics>('GET', `/workspaces/${workspaceId}/analytics`),
+    enabled: enabled && !!workspaceId,
+  });
+}
+
+export interface AuditEntry {
+  id: string;
+  action: string;
+  actor: { id: string; displayName: string; avatarUrl: string | null } | null;
+  targetType: string | null;
+  targetId: string | null;
+  createdAt: string;
+}
+export function useAuditLog(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['audit', workspaceId],
+    queryFn: () => api<AuditEntry[]>('GET', `/workspaces/${workspaceId}/audit`),
+    enabled: enabled && !!workspaceId,
+  });
+}
+
+export function useCanvas(channelId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['canvas', channelId],
+    queryFn: () =>
+      api<{ contentJson: unknown; contentText: string; updatedBy: string | null; updatedAt: string | null }>(
+        'GET',
+        `/channels/${channelId}/canvas`,
+      ),
+    enabled: enabled && !!channelId,
+  });
+}
+
+export function useAiStatus() {
+  return useQuery({
+    queryKey: ['ai-status'],
+    queryFn: () => api<{ enabled: boolean }>('GET', '/ai/status'),
+    staleTime: 600000,
+  });
+}
+
+export function useSfuStatus() {
+  return useQuery({
+    queryKey: ['sfu-status'],
+    queryFn: () => api<{ enabled: boolean }>('GET', '/huddles/sfu/status'),
+    staleTime: 600000,
+  });
+}
+
+export function useCustomEmoji(workspaceId: string) {
+  return useQuery({
+    queryKey: keys.customEmoji(workspaceId),
+    queryFn: () => api<CustomEmojiView[]>('GET', `/workspaces/${workspaceId}/emoji`),
+    enabled: !!workspaceId,
+    staleTime: 300000,
+  });
+}
+
+export interface WorkflowView {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger: string;
+  config: { channelId: string; keyword?: string; actionChannelId: string; actionText: string };
+  createdAt: string;
+}
+
+export function useWorkflows(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.workflows(workspaceId),
+    queryFn: () => api<WorkflowView[]>('GET', `/workspaces/${workspaceId}/workflows`),
+    enabled: enabled && !!workspaceId,
+  });
+}
+
+export function useScheduledMessages(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.scheduled(workspaceId),
+    queryFn: () =>
+      api<ScheduledMessageDto[]>('GET', `/workspaces/${workspaceId}/scheduled`),
+    enabled: enabled && !!workspaceId,
+  });
+}
+
+export function useMyThreads(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.myThreads(workspaceId),
+    queryFn: () => api<{ threads: ThreadSummary[] }>('GET', `/workspaces/${workspaceId}/threads`),
+    enabled: enabled && !!workspaceId,
+  });
+}
+
+export interface ReadState {
+  userId: string;
+  lastReadAt: string | null;
+}
+
+export function useReadState(container: Container) {
+  return useQuery({
+    queryKey: ['read-state', container.id],
+    queryFn: () => api<ReadState[]>('GET', `${containerPath(container)}/read-state`),
+    // Others' read markers arrive via polling; cheap and eventually-consistent.
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -436,6 +611,53 @@ export function useUploadFile(workspaceId: string) {
         xhr.onerror = () => reject(new Error('Upload failed'));
         xhr.send(form);
       });
+    },
+  });
+}
+
+// ---------- timesheet & team timeline ----------
+
+export function useTeamTimeline(workspaceId: string, from: string, to: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.timeline(workspaceId, from, to),
+    queryFn: () =>
+      api<TimelineResponse>(
+        'GET',
+        `/workspaces/${workspaceId}/timeline?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      ),
+    enabled: !!workspaceId && enabled,
+  });
+}
+
+export function useUtilization(workspaceId: string, from: string, to: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.utilization(workspaceId, from, to),
+    queryFn: () =>
+      api<UtilizationResponse>(
+        'GET',
+        `/workspaces/${workspaceId}/utilization?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      ),
+    enabled: !!workspaceId && enabled,
+  });
+}
+
+export function useMyTimesheet(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.timesheet(workspaceId),
+    queryFn: () => api<TimesheetEntryDto[]>('GET', `/workspaces/${workspaceId}/timesheet/entries`),
+    enabled: !!workspaceId && enabled,
+  });
+}
+
+export function useLogTime(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: LogTimeInput) =>
+      api<TimesheetEntryDto>('POST', `/workspaces/${workspaceId}/timesheet/entries`, input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.timesheet(workspaceId) });
+      void qc.invalidateQueries({ queryKey: ['timeline', workspaceId] });
+      void qc.invalidateQueries({ queryKey: ['utilization', workspaceId] });
     },
   });
 }

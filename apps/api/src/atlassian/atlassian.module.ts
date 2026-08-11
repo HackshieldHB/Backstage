@@ -36,6 +36,6 @@ import { AuthModule } from '../auth/auth.module';
     ConfluenceApiService,
     ConfluenceService,
   ],
-  exports: [AtlassianService, AtlassianSyncService],
+  exports: [AtlassianService, AtlassianSyncService, AtlassianApiService],
 })
 export class AtlassianModule {}

@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
+import { WorkflowsModule } from '../workflows/workflows.module';
 import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
 import { UnreadService } from './unread.service';
@@ -10,6 +11,7 @@ import { SavedItemsService } from './saved-items.service';
 import { IntegrationMessagesService } from './integration-messages.service';
 
 @Module({
+  imports: [forwardRef(() => WorkflowsModule)],
   controllers: [MessagesController, SavedItemsController],
   providers: [
     MessagesService,

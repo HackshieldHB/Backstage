@@ -1,32 +1,39 @@
 'use client';
 
-import { Hash, Headphones, Info, Lightbulb, Lock, Menu, Pin, Users } from 'lucide-react';
+import { Hash, Headphones, Info, Lightbulb, Lock, Menu, NotebookPen, Pin, Sparkles, Users } from 'lucide-react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
-import { useChannelMembers, useConversations, usePins, type Container } from '@/hooks/queries';
-import { useHuddle } from '@/hooks/use-huddle';
+import { useAiStatus, useChannelMembers, useConversations, usePins, type Container } from '@/hooks/queries';
+import type { HuddleController } from '@/hooks/use-huddle';
 import { MessageList } from './message-list';
-import { HuddleBar } from './huddle-bar';
 import { Composer, TypingIndicator } from './composer';
 import { CheatSheetDialog } from './cheat-sheet-dialog';
+import { Tooltip } from './tooltip';
+import { Dialog } from './dialog';
 
 export function MainPane({
   workspaceId,
   container,
+  huddle,
   highlightMessageId,
   clearHighlight,
 }: {
   workspaceId: string;
   container: Container;
+  huddle: HuddleController;
   highlightMessageId: string | null;
   clearHighlight: () => void;
 }) {
   const me = useAuthStore((s) => s.user);
   const { setRightPanel, toggleSidebar } = useUiStore();
+  const pushToast = useUiStore((s) => s.pushToast);
+  const ai = useAiStatus();
   const [tipsOpen, setTipsOpen] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
   const pins = usePins(container.kind === 'channel' ? container.id : null);
   const channelMembers = useChannelMembers(container.kind === 'channel' ? container.id : null);
   const conversations = useConversations(workspaceId);
@@ -37,7 +44,10 @@ export function MainPane({
     enabled: container.kind === 'channel',
   });
 
-  const huddle = useHuddle(container);
+  // Huddle state relative to *this* container (the huddle itself lives at the
+  // app shell, so it survives navigating between channels/DMs).
+  const activeHere = huddle.activeTarget?.id === container.id;
+  const ongoingHere = (huddle.participantsByContainer[container.id]?.length ?? 0) > 0;
 
   const dm = conversations.data?.find((c) => c.id === container.id);
   const dmOthers = dm?.members.filter((m) => m.id !== me?.id) ?? [];
@@ -67,60 +77,127 @@ export function MainPane({
           <span className="hidden truncate text-[13px] text-gray-500 md:inline">{channel.data.topic}</span>
         )}
         <span className="flex-1" />
-        {!huddle.joined && (
-          <button
-            title="Start or join a huddle"
-            onClick={() => void huddle.join()}
-            className="flex items-center gap-1 rounded p-1.5 text-[12px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-            data-testid="start-huddle"
-          >
-            <Headphones size={15} />
-          </button>
-        )}
+        {/* When a huddle is already running here, the persistent huddle bar shows
+            the controls — so the header button only offers to start or join. */}
+        {!activeHere &&
+          (ongoingHere ? (
+            <button
+              onClick={() => void huddle.join(container)}
+              className="flex items-center gap-1 rounded-md bg-indigo-600 px-2 py-1 text-[12px] font-semibold text-white hover:bg-indigo-700"
+              data-testid="join-huddle"
+            >
+              <Headphones size={14} /> Join huddle
+            </button>
+          ) : (
+            <Tooltip label="Start a huddle">
+              <button
+                onClick={() => void huddle.join(container)}
+                className="flex items-center gap-1 rounded p-1.5 text-[12px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                data-testid="start-huddle"
+                aria-label="Start a huddle"
+              >
+                <Headphones size={15} />
+              </button>
+            </Tooltip>
+          ))}
         {container.kind === 'channel' && (
           <>
             {(pins.data?.length ?? 0) > 0 && (
+              <Tooltip label="Pinned messages">
+                <button
+                  onClick={() => setRightPanel({ kind: 'details' })}
+                  className="flex items-center gap-1 rounded p-1.5 text-[12px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  aria-label="Pinned messages"
+                >
+                  <Pin size={14} /> {pins.data?.length}
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip label="Members">
               <button
-                title="Pinned messages"
                 onClick={() => setRightPanel({ kind: 'details' })}
                 className="flex items-center gap-1 rounded p-1.5 text-[12px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                data-testid="member-count"
+                aria-label="Members"
               >
-                <Pin size={14} /> {pins.data?.length}
+                <Users size={14} /> {channelMembers.data?.length ?? ''}
               </button>
-            )}
-            <button
-              title="Members"
-              onClick={() => setRightPanel({ kind: 'details' })}
-              className="flex items-center gap-1 rounded p-1.5 text-[12px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-              data-testid="member-count"
-            >
-              <Users size={14} /> {channelMembers.data?.length ?? ''}
-            </button>
+            </Tooltip>
           </>
         )}
-        <button
-          title="Tips & shortcuts"
-          onClick={() => setTipsOpen(true)}
-          className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-          data-testid="tips-button"
-        >
-          <Lightbulb size={16} />
-        </button>
-        <button
-          title="Details"
-          onClick={() => setRightPanel({ kind: 'details' })}
-          className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-          data-testid="details-button"
-        >
-          <Info size={16} />
-        </button>
+        {container.kind === 'channel' && (
+          <Tooltip label="Channel canvas (shared notes)">
+            <button
+              onClick={() => setRightPanel({ kind: 'canvas' })}
+              className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+              data-testid="canvas-button"
+              aria-label="Channel canvas"
+            >
+              <NotebookPen size={16} />
+            </button>
+          </Tooltip>
+        )}
+        {ai.data?.enabled && container.kind === 'channel' && (
+          <Tooltip label="Summarize this channel (AI)">
+            <button
+              onClick={async () => {
+                setSummarizing(true);
+                setSummary(null);
+                try {
+                  const r = await api<{ summary: string }>(
+                    'POST',
+                    `/ai/channels/${container.id}/summarize`,
+                  );
+                  setSummary(r.summary);
+                } catch (err) {
+                  pushToast(err instanceof Error ? err.message : 'Summary failed', 'error');
+                } finally {
+                  setSummarizing(false);
+                }
+              }}
+              className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+              data-testid="ai-summarize"
+              aria-label="Summarize channel"
+            >
+              <Sparkles size={16} className={summarizing ? 'animate-pulse text-accent' : undefined} />
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip label="Tips & shortcuts">
+          <button
+            onClick={() => setTipsOpen(true)}
+            className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+            data-testid="tips-button"
+            aria-label="Tips & shortcuts"
+          >
+            <Lightbulb size={16} />
+          </button>
+        </Tooltip>
+        <Tooltip label="Details">
+          <button
+            onClick={() => setRightPanel({ kind: 'details' })}
+            className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+            data-testid="details-button"
+            aria-label="Details"
+          >
+            <Info size={16} />
+          </button>
+        </Tooltip>
       </header>
 
       {tipsOpen && (
         <CheatSheetDialog workspaceId={workspaceId} onClose={() => setTipsOpen(false)} />
       )}
 
-      <HuddleBar huddle={huddle} />
+      {(summary !== null || summarizing) && (
+        <Dialog title="Channel summary" onClose={() => setSummary(null)}>
+          {summarizing ? (
+            <p className="text-sm text-gray-500">Summarizing…</p>
+          ) : (
+            <p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{summary}</p>
+          )}
+        </Dialog>
+      )}
 
       <MessageList
         workspaceId={workspaceId}

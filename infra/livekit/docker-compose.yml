@@ -1,0 +1,20 @@
+# Self-hosted LiveKit SFU for Backstages huddles.
+#
+# Usage:
+#   1. Edit livekit.yaml: set a real api key/secret pair under `keys:`.
+#   2. docker compose -f infra/livekit/docker-compose.yml up -d
+#   3. In apps/api/.env set:
+#        LIVEKIT_URL=ws://localhost:7880          # wss://… behind TLS in prod
+#        LIVEKIT_API_KEY=<same key as livekit.yaml>
+#        LIVEKIT_API_SECRET=<same secret as livekit.yaml>
+#   4. Restart the API. GET /huddles/sfu/status should return { enabled: true }.
+#
+# Ports: 7880 (signaling/HTTP), 7881 (TCP fallback), 50000-50100/udp (media).
+services:
+  livekit:
+    image: livekit/livekit-server:v1.7
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro

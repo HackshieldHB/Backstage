@@ -54,6 +54,11 @@ export class MessagesController {
     return this.messages.list(user.id, channelContainer(channelId), query);
   }
 
+  @Get('channels/:id/read-state')
+  channelReadState(@CurrentUser() user: AuthUser, @Param('id') channelId: string) {
+    return this.messages.readState(user.id, channelContainer(channelId));
+  }
+
   @HttpCode(200)
   @Post('channels/:id/read')
   markChannelRead(
@@ -85,6 +90,11 @@ export class MessagesController {
     return this.messages.list(user.id, conversationContainer(conversationId), query);
   }
 
+  @Get('conversations/:id/read-state')
+  conversationReadState(@CurrentUser() user: AuthUser, @Param('id') conversationId: string) {
+    return this.messages.readState(user.id, conversationContainer(conversationId));
+  }
+
   @HttpCode(200)
   @Post('conversations/:id/read')
   markConversationRead(
@@ -100,6 +110,20 @@ export class MessagesController {
   @Get('messages/:id/thread')
   thread(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.messages.thread(user.id, id);
+  }
+
+  @Get('workspaces/:id/threads')
+  myThreads(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
+    return this.messages.myThreads(user.id, workspaceId);
+  }
+
+  @Post('messages/:id/forward')
+  forward(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: { channelId?: string; conversationId?: string },
+  ) {
+    return this.messages.forward(user.id, id, body);
   }
 
   @Patch('messages/:id')

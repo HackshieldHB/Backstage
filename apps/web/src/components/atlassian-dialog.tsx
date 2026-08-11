@@ -23,6 +23,8 @@ export function useAtlassianStatus(workspaceId: string) {
   });
 }
 
+/** Thin dialog wrapper kept for any caller that still wants the standalone
+ *  modal; the workspace settings surface embeds {@link AtlassianSettings}. */
 export function AtlassianDialog({
   workspaceId,
   isAdmin,
@@ -32,6 +34,24 @@ export function AtlassianDialog({
   workspaceId: string;
   isAdmin: boolean;
   onClose: () => void;
+  onOpenConfluence?: () => void;
+}) {
+  return (
+    <Dialog title="Atlassian integration" onClose={onClose}>
+      <AtlassianSettings workspaceId={workspaceId} isAdmin={isAdmin} onOpenConfluence={onOpenConfluence} />
+    </Dialog>
+  );
+}
+
+/** The Atlassian integration settings body (no dialog chrome) — connect, sync,
+ *  Jira project channels, Confluence access, and per-user account linking. */
+export function AtlassianSettings({
+  workspaceId,
+  isAdmin,
+  onOpenConfluence,
+}: {
+  workspaceId: string;
+  isAdmin: boolean;
   onOpenConfluence?: () => void;
 }) {
   const qc = useQueryClient();
@@ -104,7 +124,7 @@ export function AtlassianDialog({
   };
 
   return (
-    <Dialog title="Atlassian integration" onClose={onClose}>
+    <>
       {status.data?.connected ? (
         <div className="space-y-3 text-sm">
           <p>
@@ -232,6 +252,6 @@ export function AtlassianDialog({
           )}
         </div>
       )}
-    </Dialog>
+    </>
   );
 }

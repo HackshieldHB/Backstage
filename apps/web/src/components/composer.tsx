@@ -14,6 +14,7 @@ import { Extension } from '@tiptap/core';
 import data from '@emoji-mart/data';
 import { init, SearchIndex } from 'emoji-mart';
 import {
+  BarChart3,
   Bold as BoldIcon,
   Clock,
   Code,
@@ -39,21 +40,39 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   keys,
   useChannelMembers,
+  useCommands,
   useConversations,
   useSendMessage,
   useUploadFile,
+  useUserGroups,
   type Container,
   type MessagesData,
   type PendingMessage,
 } from '@/hooks/queries';
+import type { SlashCommandDto } from '@backstages/shared';
 import { SuggestionList, type SuggestionItem, type SuggestionListHandle } from './suggestion-popup';
 import { EmojiPickerPopover } from './emoji-picker';
 import { CreateJiraIssueDialog } from './create-jira-issue-dialog';
 import { DeclareIncidentDialog } from './declare-incident-dialog';
+import { CreatePollDialog } from './poll-dialog';
 import { Avatar } from './avatar';
 
 const lowlight = createLowlight(common);
 void init({ data });
+
+/** Draft persistence: unsent composer content is kept per channel/DM/thread. */
+function draftKeyFor(containerId: string, parentId?: string) {
+  return `bs.draft.${containerId}${parentId ? `:${parentId}` : ''}`;
+}
+function loadDraft(key: string): object | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as object) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // ---------- suggestion plumbing (shared by @mentions and :emoji:) ----------
 
@@ -157,6 +176,7 @@ export function Composer({
   onSent?: () => void;
 }) {
   const me = useAuthStore((s) => s.user);
+  const pushToast = useUiStore((s) => s.pushToast);
   const sendMessage = useSendMessage(container);
   const upload = useUploadFile(workspaceId);
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
@@ -165,6 +185,7 @@ export function Composer({
   const [incidentTitle, setIncidentTitle] = useState<string | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
+  const [pollOpen, setPollOpen] = useState(false);
   const [alsoSend, setAlsoSend] = useState(false);
   const typingRef = useRef<{ active: boolean; timer: ReturnType<typeof setTimeout> | null }>({ active: false, timer: null });
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -174,9 +195,37 @@ export function Composer({
   const editorRef = useRef<Editor | null>(null);
   const containerIdRef = useRef(container.id);
   containerIdRef.current = container.id;
+  const draftKey = draftKeyFor(container.id, parentId);
 
   const channelMembers = useChannelMembers(container.kind === 'channel' ? container.id : null);
   const conversations = useConversations(workspaceId);
+  const userGroups = useUserGroups(workspaceId);
+  const commands = useCommands(workspaceId);
+
+  // ----- slash-command palette -----
+  // Shown while the user is typing the command name (a leading "/", no space
+  // yet). Selecting a command drops its trigger into the composer; the existing
+  // submit path dispatches it to the server on Enter.
+  const [cmdQuery, setCmdQuery] = useState<string | null>(null);
+  const [cmdIndex, setCmdIndex] = useState(0);
+  const cmdMatches = (() => {
+    if (cmdQuery === null) return [];
+    const token = cmdQuery.toLowerCase();
+    return (commands.data ?? [])
+      .filter((c) => container.kind === 'channel' || !c.channelOnly)
+      .filter((c) => `${c.name} ${c.subcommand ?? ''} ${c.usage}`.toLowerCase().includes(token))
+      .slice(0, 8);
+  })();
+  const cmdOpen = cmdMatches.length > 0;
+  // Mirror palette state into refs so the editor's key handler (bound once) sees
+  // the latest values.
+  const cmdOpenRef = useRef(false);
+  const cmdMatchesRef = useRef<SlashCommandDto[]>([]);
+  const cmdIndexRef = useRef(0);
+  cmdOpenRef.current = cmdOpen;
+  cmdMatchesRef.current = cmdMatches;
+  cmdIndexRef.current = cmdIndex;
+  const pickCommandRef = useRef<(cmd: SlashCommandDto) => void>(() => undefined);
   const dmMembers =
     container.kind === 'conversation'
       ? (conversations.data?.find((c) => c.id === container.id)?.members ?? [])
@@ -189,11 +238,16 @@ export function Composer({
         : dmMembers;
     const items: SuggestionItem[] = users.map((u) => ({ id: u.id, label: u.displayName }));
     if (container.kind === 'channel') {
+      // @user-groups: the id is "group:<id>", the label is the handle (so it
+      // renders as @handle and the server can expand it to the members).
+      for (const g of userGroups.data ?? []) {
+        items.push({ id: `group:${g.id}`, label: g.handle, hint: `${g.name} · ${g.memberIds.length} people` });
+      }
       items.push({ id: 'channel', label: 'channel', hint: 'Notify everyone in this channel' });
       items.push({ id: 'here', label: 'here', hint: 'Notify active members' });
     }
     return items;
-  }, [channelMembers.data, dmMembers, container.kind]);
+  }, [channelMembers.data, dmMembers, container.kind, userGroups.data]);
 
   const typingPayload =
     container.kind === 'channel' ? { channelId: container.id } : { conversationId: container.id };
@@ -232,6 +286,32 @@ export function Composer({
     editorProps: {
       attributes: { class: 'px-3 py-2 text-[14px]', 'data-testid': 'composer' },
       handleKeyDown: (_view, event) => {
+        // Slash-command palette navigation takes priority when it's open.
+        if (cmdOpenRef.current) {
+          const items = cmdMatchesRef.current;
+          if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setCmdIndex((i) => (i + 1) % items.length);
+            return true;
+          }
+          if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setCmdIndex((i) => (i - 1 + items.length) % items.length);
+            return true;
+          }
+          if (event.key === 'Enter' || event.key === 'Tab') {
+            const cmd = items[cmdIndexRef.current];
+            if (cmd) {
+              event.preventDefault();
+              pickCommandRef.current(cmd);
+              return true;
+            }
+          }
+          if (event.key === 'Escape') {
+            setCmdQuery(null);
+            return true;
+          }
+        }
         // Inside a code block, Enter and Shift+Enter add a newline (never send),
         // so multi-line snippets can be written normally.
         if (event.key === 'Enter' && editorRef.current?.isActive('codeBlock')) {
@@ -272,7 +352,17 @@ export function Composer({
         return false;
       },
     },
+    content: loadDraft(draftKey),
     onUpdate: ({ editor }) => {
+      if (typeof window !== 'undefined') {
+        if (editor.isEmpty) window.localStorage.removeItem(draftKey);
+        else window.localStorage.setItem(draftKey, JSON.stringify(editor.getJSON()));
+      }
+      // Slash-command palette: active only while typing the command name.
+      const text = editor.getText();
+      const slashMatch = /^\/([^\s]*)$/.exec(text);
+      setCmdQuery(slashMatch ? slashMatch[1] : null);
+      setCmdIndex(0);
       if (!editor.isEmpty) signalTyping();
     },
     // Recreate when the channel (and thus placeholder / mention pool) changes.
@@ -307,14 +397,16 @@ export function Composer({
     // us to open with the remaining text.
     if (text.startsWith('/') && container.kind === 'channel') {
       editor.commands.clearContent();
+      if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey);
       try {
         const result = await api<CommandResultDto>('POST', `/channels/${container.id}/commands`, {
           text,
         });
         if (result.dialog === 'jira-create') setJiraCreateSummary(result.args ?? '');
         else if (result.dialog === 'incident') setIncidentTitle(result.args ?? '');
+        else if (result.message) pushToast(result.message, 'success');
       } catch (err) {
-        window.alert(err instanceof Error ? err.message : 'Command failed');
+        pushToast(err instanceof Error ? err.message : 'Command failed', 'error');
       }
       return;
     }
@@ -327,6 +419,7 @@ export function Composer({
       ...(parentId ? { parentId, alsoSendToChannel: alsoSend } : {}),
     };
     editor.commands.clearContent();
+    if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey);
     setUploads([]);
     setAlsoSend(false);
     if (typingRef.current.active) {
@@ -337,13 +430,25 @@ export function Composer({
   };
   submitRef.current = () => void submit();
 
+  // Selecting a command drops its trigger into the composer. Commands that need
+  // no further input (no dialog) are dispatched immediately; the rest leave the
+  // cursor ready for arguments.
+  const pickCommand = (cmd: SlashCommandDto) => {
+    if (!editorRef.current) return;
+    const trigger = `/${cmd.name}${cmd.subcommand ? ` ${cmd.subcommand}` : ''} `;
+    editorRef.current.chain().focus().clearContent().insertContent(trigger).run();
+    setCmdQuery(null);
+    if (!cmd.dialog) void submit();
+  };
+  pickCommandRef.current = pickCommand;
+
   const scheduleSend = async () => {
     if (!editorRef.current) return;
     const text = editorRef.current.getText().trim();
     if (!text) return;
     const when = new Date(scheduleAt);
     if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) {
-      window.alert('Pick a time in the future.');
+      pushToast('Pick a time in the future.', 'error');
       return;
     }
     const path =
@@ -357,10 +462,12 @@ export function Composer({
         scheduledFor: when.toISOString(),
       });
       editorRef.current.commands.clearContent();
+      if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey);
       setScheduleOpen(false);
       setScheduleAt('');
+      pushToast('Message scheduled.', 'success');
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Could not schedule the message.');
+      pushToast(err instanceof Error ? err.message : 'Could not schedule the message.', 'error');
     }
   };
 
@@ -407,6 +514,42 @@ export function Composer({
 
   return (
     <div className="relative rounded-lg border border-gray-300 bg-white focus-within:border-accent dark:border-gray-600 dark:bg-gray-800">
+      {/* slash-command palette */}
+      {cmdOpen && (
+        <div
+          className="absolute bottom-full left-0 mb-2 w-full max-w-md overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+          data-testid="command-palette"
+        >
+          <div className="border-b border-gray-100 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700">
+            Commands
+          </div>
+          <ul>
+            {cmdMatches.map((c, i) => (
+              <li key={`${c.name}-${c.subcommand ?? ''}-${c.usage}`}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pickCommand(c);
+                  }}
+                  onMouseEnter={() => setCmdIndex(i)}
+                  className={clsx(
+                    'flex w-full flex-col px-3 py-1.5 text-left',
+                    i === cmdIndex ? 'bg-accent/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50',
+                  )}
+                  data-testid="command-option"
+                >
+                  <span className="font-mono text-[13px] font-medium text-gray-800 dark:text-gray-100">
+                    {c.usage}
+                  </span>
+                  <span className="truncate text-[12px] text-gray-500">{c.description}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* formatting toolbar */}
       <div className="flex items-center gap-0.5 border-b border-gray-100 px-2 py-1 dark:border-gray-700">
         <FormatButton active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()} title="Bold">
@@ -475,6 +618,11 @@ export function Composer({
           <FormatButton onClick={() => setEmojiOpen((v) => !v)} title="Emoji">
             <Smile size={15} />
           </FormatButton>
+          {container.kind === 'channel' && !parentId && (
+            <FormatButton onClick={() => setPollOpen(true)} title="Create poll">
+              <BarChart3 size={15} />
+            </FormatButton>
+          )}
           {parentId && (
             <label className="ml-2 flex items-center gap-1.5 text-xs text-gray-500">
               <input type="checkbox" checked={alsoSend} onChange={(e) => setAlsoSend(e.target.checked)} data-testid="also-send" />
@@ -544,6 +692,10 @@ export function Composer({
           }
           onClose={() => setJiraCreateSummary(null)}
         />
+      )}
+
+      {pollOpen && container.kind === 'channel' && (
+        <CreatePollDialog channelId={container.id} onClose={() => setPollOpen(false)} />
       )}
 
       {incidentTitle !== null && (

@@ -14,6 +14,7 @@ export const messageInclude = {
     orderBy: { createdAt: 'desc' as const },
     take: 8,
   },
+  poll: { include: { votes: { select: { optionIndex: true, userId: true } } } },
 } satisfies Prisma.MessageInclude;
 
 export type MessageWithRelations = Prisma.MessageGetPayload<{ include: typeof messageInclude }>;
@@ -74,5 +75,14 @@ export function toMessageDto(message: MessageWithRelations): MessageDto {
     threadParticipants: [...participantsById.values()].slice(0, 5),
     lastReplyAt: message.replies[0]?.createdAt.toISOString() ?? null,
     unfurls: isDeleted ? null : (message.unfurls ?? null),
+    poll: message.poll
+      ? {
+          id: message.poll.id,
+          question: message.poll.question,
+          options: (message.poll.options as string[]) ?? [],
+          allowMultiple: message.poll.allowMultiple,
+          votes: message.poll.votes.map((v) => ({ optionIndex: v.optionIndex, userId: v.userId })),
+        }
+      : null,
   };
 }

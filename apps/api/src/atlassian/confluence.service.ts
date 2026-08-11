@@ -15,6 +15,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { IntegrationMessagesService } from '../messages/integration-messages.service';
 import { channelContainer } from '../messages/messages.service';
+import { ActivityService } from '../timesheet/activity.service';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -88,7 +89,21 @@ export class ConfluenceService {
     private readonly notifications: NotificationsService,
     private readonly prisma: PrismaService,
     private readonly integrationMessages: IntegrationMessagesService,
+    private readonly activity: ActivityService,
   ) {}
+
+  /** A page create/edit is instantaneous; coalesce consecutive edits into a
+   * rolling DOCUMENTATION block (~15 min window). */
+  private trackDoc(workspaceId: string, userId: string, pageId: string) {
+    return this.activity.touch({
+      workspaceId,
+      userId,
+      kind: 'DOCUMENTATION',
+      source: 'CONFLUENCE',
+      refId: pageId,
+      windowSec: 15 * 60,
+    });
+  }
 
   private async ctx(userId: string, workspaceId: string) {
     await this.policy.requireWorkspaceMember(userId, workspaceId);
@@ -159,6 +174,7 @@ export class ConfluenceService {
       body: toStorage(input.body),
     });
     const dto = this.toDto(connection, page);
+    await this.trackDoc(workspaceId, userId, dto.id);
     await this.notifications.notify({
       userId,
       type: 'SYSTEM',
@@ -216,6 +232,7 @@ export class ConfluenceService {
       body: threadToStorage({ channelName: channel.name, threadUrl, entries }),
     });
     const dto = this.toDto(connection, page);
+    await this.trackDoc(channel.workspaceId, userId, dto.id);
 
     const text = `Saved this thread to Confluence: ${title}`;
     await this.integrationMessages.post(channelContainer(message.channelId), {
@@ -262,6 +279,7 @@ export class ConfluenceService {
       body: toStorage(input.body),
       version: input.version,
     });
+    await this.trackDoc(workspaceId, userId, pageId);
     return this.toDto(connection, page);
   }
 

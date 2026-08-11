@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { toUserDto } from '../auth/auth.service';
 import { RealtimeService, roomForChannel } from '../realtime/realtime.service';
+import { AuditService } from '../admin/audit.service';
 
 @Injectable()
 export class ChannelsService {
@@ -17,6 +18,7 @@ export class ChannelsService {
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
     private readonly realtime: RealtimeService,
+    private readonly audit: AuditService,
   ) {}
 
   async create(userId: string, workspaceId: string, input: CreateChannelInput) {
@@ -48,6 +50,11 @@ export class ChannelsService {
     if (!channel.isPrivate) {
       this.realtime.emitToWorkspace(workspaceId, SOCKET_EVENTS.CHANNEL_CREATED, { channelId: channel.id });
     }
+    this.audit.record(workspaceId, userId, 'channel.create', {
+      targetType: 'channel',
+      targetId: channel.id,
+      meta: { name: channel.name, isPrivate: channel.isPrivate },
+    });
     return channel;
   }
 
@@ -135,6 +142,11 @@ export class ChannelsService {
     const { channel } = await this.policy.requireChannelAdmin(userId, channelId);
     if (channel.isDefault) throw new ForbiddenException('The default channel cannot be deleted');
     await this.prisma.channel.delete({ where: { id: channelId } });
+    this.audit.record(channel.workspaceId, userId, 'channel.delete', {
+      targetType: 'channel',
+      targetId: channelId,
+      meta: { name: channel.name },
+    });
     return { ok: true };
   }
 

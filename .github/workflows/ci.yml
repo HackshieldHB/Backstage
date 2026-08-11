@@ -69,6 +69,36 @@ jobs:
         working-directory: apps/api
         run: pnpm test
 
+  web:
+    name: Web lint + unit tests
+    runs-on: ubuntu-latest
+    # No database/redis needed — these are pure component/unit tests (Vitest).
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The web typecheck resolves @backstages/shared from its emitted .d.ts.
+      - name: Build shared
+        run: pnpm --filter @backstages/shared build
+
+      - name: Typecheck
+        working-directory: apps/web
+        run: pnpm lint
+
+      - name: Unit tests
+        working-directory: apps/web
+        run: pnpm test
+
   e2e:
     name: Browser e2e
     runs-on: ubuntu-latest
@@ -129,4 +159,4 @@ jobs:
 
       - name: Playwright
         working-directory: apps/web
-        run: pnpm test
+        run: pnpm test:e2e

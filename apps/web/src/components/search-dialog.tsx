@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 import { FileText, Hash, Lock, MessageSquare, Search } from 'lucide-react';
 import { fileUrl } from '@/lib/api';
 import { useSearch, type Container } from '@/hooks/queries';
+import { useAuthStore } from '@/stores/auth-store';
 import { Avatar } from './avatar';
 import { MessageBody } from './message-body';
 
@@ -26,6 +27,17 @@ export function SearchDialog({
   const [tab, setTab] = useState<Tab>('messages');
   const inputRef = useRef<HTMLInputElement>(null);
   const results = useSearch(workspaceId, debounced);
+  const me = useAuthStore((s) => s.user);
+
+  // Quick-filter chips build the same modifiers the server already parses.
+  const hasToken = (tok: string) => q.includes(tok);
+  const toggleToken = (tok: string) => {
+    setQ((cur) =>
+      cur.includes(tok) ? cur.replace(tok, '').replace(/\s+/g, ' ').trim() : `${cur} ${tok}`.trim(),
+    );
+    inputRef.current?.focus();
+  };
+  const fromMeToken = me ? `from:${me.email}` : null;
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(q), 250);
@@ -62,11 +74,53 @@ export function SearchDialog({
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search — try: report from:alice in:general before:2026-07-01 has:file"
+            onKeyDown={(e) => {
+              // Quick-switch: Enter jumps straight to the top result of the tab.
+              if (e.key !== 'Enter' || !results.data) return;
+              if (tab === 'messages' && results.data.messages[0]) {
+                const m = results.data.messages[0];
+                onJump(m.channelId ? { kind: 'channel', id: m.channelId } : { kind: 'conversation', id: m.conversationId! }, m.id);
+              } else if (tab === 'channels' && results.data.channels[0]) {
+                onJump({ kind: 'channel', id: results.data.channels[0].id });
+              } else if (tab === 'people' && results.data.people[0]) {
+                window.dispatchEvent(new CustomEvent('bs:open-dm', { detail: results.data.people[0].id }));
+                onClose();
+              }
+            }}
+            placeholder="Jump to or search — try: report from:alice in:general has:file"
             className="flex-1 bg-transparent text-sm outline-none"
             data-testid="search-input"
           />
           <kbd className="text-[10px] text-gray-500 dark:text-gray-400">Esc</kbd>
+        </div>
+
+        {/* quick filters */}
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-100 px-4 py-2 dark:border-gray-800">
+          <FilterChip active={hasToken('has:file')} onClick={() => toggleToken('has:file')}>
+            Has file
+          </FilterChip>
+          <FilterChip active={hasToken('has:link')} onClick={() => toggleToken('has:link')}>
+            Has link
+          </FilterChip>
+          {fromMeToken && (
+            <FilterChip active={hasToken(fromMeToken)} onClick={() => toggleToken(fromMeToken)}>
+              From me
+            </FilterChip>
+          )}
+          <label className="ml-auto flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+            After
+            <input
+              type="date"
+              onChange={(e) => {
+                setQ((cur) => {
+                  const stripped = cur.replace(/(^|\s)after:\S+/g, '').trim();
+                  return e.target.value ? `${stripped} after:${e.target.value}`.trim() : stripped;
+                });
+              }}
+              className="rounded border border-gray-300 bg-transparent px-1 py-0.5 text-[11px] dark:border-gray-600"
+              data-testid="search-after"
+            />
+          </label>
         </div>
 
         <div className="flex border-b border-gray-100 px-2 dark:border-gray-800">
@@ -178,5 +232,30 @@ export function SearchDialog({
         </div>
       </div>
     </div>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid="search-filter-chip"
+      className={clsx(
+        'rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors',
+        active
+          ? 'border-accent bg-accent/10 text-accent'
+          : 'border-gray-300 text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800',
+      )}
+    >
+      {children}
+    </button>
   );
 }

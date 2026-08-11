@@ -5,6 +5,8 @@ import clsx from 'clsx';
 import { format } from 'date-fns';
 import {
   Bookmark,
+  Forward,
+  Languages,
   MessageSquareText,
   Pencil,
   Pin,
@@ -22,7 +24,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
-import { keys, usePresence, type PendingMessage } from '@/hooks/queries';
+import { keys, useAiStatus, usePresence, type PendingMessage } from '@/hooks/queries';
 import { emojiChar } from '@/lib/emoji';
 import { Avatar } from './avatar';
 import { UserProfileDialog } from './user-profile-dialog';
@@ -31,7 +33,12 @@ import { AttachmentView } from './attachment-view';
 import { EmojiPickerPopover } from './emoji-picker';
 import { EditMessageEditor } from './composer';
 import { CreateJiraIssueDialog } from './create-jira-issue-dialog';
+import { LogTimeDialog } from './log-time-dialog';
 import { useAtlassianStatus } from './atlassian-dialog';
+import { Tooltip } from './tooltip';
+import { ConfirmDialog, PromptDialog } from './confirm-dialog';
+import { Emoji } from './custom-emoji';
+import { ForwardDialog } from './forward-dialog';
 
 const QUICK_EMOJI = ['thumbsup', 'heart', 'joy', 'eyes', 'tada'];
 
@@ -58,6 +65,11 @@ export function MessageItem({
   const [jiraOpen, setJiraOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [localEditing, setLocalEditing] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [translation, setTranslation] = useState<string | null>(null);
+  const ai = useAiStatus();
+  const pushToast = useUiStore((s) => s.pushToast);
   const presence = usePresence(message.workspaceId);
   const editingMessageId = useUiStore((s) => s.editingMessageId);
   const setEditingMessageId = useUiStore((s) => s.setEditingMessageId);
@@ -156,6 +168,19 @@ export function MessageItem({
         ) : (
           <>
             <MessageBody contentJson={message.contentJson} contentText={message.contentText} />
+            {message.poll && <PollCard poll={message.poll} meId={me?.id} />}
+            {translation !== null && (
+              <div className="mt-1 rounded-md border-l-2 border-accent bg-accent/5 px-2 py-1 text-[13px]">
+                <span className="mr-1 text-[11px] font-semibold uppercase text-accent">Translated</span>
+                {translation}
+                <button
+                  onClick={() => setTranslation(null)}
+                  className="ml-2 text-[11px] text-gray-400 hover:underline"
+                >
+                  hide
+                </button>
+              </div>
+            )}
             {message.isEdited && <span className="ml-1 text-[11px] text-gray-500 dark:text-gray-400">(edited)</span>}
             {message.pending && <span className="ml-1 text-[11px] text-gray-500 dark:text-gray-400">sending…</span>}
             {message.failed && (
@@ -187,7 +212,7 @@ export function MessageItem({
                     : 'border-gray-200 bg-gray-50 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800',
                 )}
               >
-                <span>{emojiChar(r.emoji)}</span>
+                <Emoji code={r.emoji} workspaceId={message.workspaceId} />
                 <span className="font-semibold">{r.count}</span>
               </button>
             ))}
@@ -247,6 +272,29 @@ export function MessageItem({
           <ToolbarButton title="Save for later" onClick={() => void save()} testId="save-message">
             <Bookmark size={15} />
           </ToolbarButton>
+          <ToolbarButton title="Forward" onClick={() => setForwardOpen(true)} testId="forward-message">
+            <Forward size={15} />
+          </ToolbarButton>
+          {ai.data?.enabled && (
+            <ToolbarButton
+              title="Translate to English"
+              onClick={async () => {
+                try {
+                  const r = await api<{ translation: string }>(
+                    'POST',
+                    `/ai/messages/${message.id}/translate`,
+                    { targetLanguage: 'English' },
+                  );
+                  setTranslation(r.translation);
+                } catch (err) {
+                  pushToast(err instanceof Error ? err.message : 'Translation failed', 'error');
+                }
+              }}
+              testId="translate-message"
+            >
+              <Languages size={15} />
+            </ToolbarButton>
+          )}
           {message.channelId && atlassian.data?.connected && (
             <ToolbarButton
               title="Create Jira issue from message"
@@ -261,7 +309,7 @@ export function MessageItem({
               <ToolbarButton title="Edit message" onClick={() => setEditing(true)} testId="edit-message">
                 <Pencil size={15} />
               </ToolbarButton>
-              <ToolbarButton title="Delete message" onClick={() => void remove()} testId="delete-message">
+              <ToolbarButton title="Delete message" onClick={() => setDeleteOpen(true)} testId="delete-message">
                 <Trash2 size={15} className="text-red-500" />
               </ToolbarButton>
             </>
@@ -270,7 +318,11 @@ export function MessageItem({
       )}
 
       {emojiOpen && (
-        <EmojiPickerPopover onPick={(code) => void toggleReaction(code)} onClose={() => setEmojiOpen(false)} />
+        <EmojiPickerPopover
+          onPick={(code) => void toggleReaction(code)}
+          onClose={() => setEmojiOpen(false)}
+          workspaceId={message.workspaceId}
+        />
       )}
 
       {jiraOpen && (
@@ -291,6 +343,76 @@ export function MessageItem({
           onClose={() => setProfileOpen(false)}
         />
       )}
+
+      {forwardOpen && (
+        <ForwardDialog
+          workspaceId={message.workspaceId}
+          messageId={message.id}
+          onClose={() => setForwardOpen(false)}
+        />
+      )}
+
+      {deleteOpen && (
+        <ConfirmDialog
+          title="Delete message"
+          body="This message will be permanently removed for everyone. This can't be undone."
+          confirmLabel="Delete"
+          danger
+          onConfirm={remove}
+          onClose={() => setDeleteOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function PollCard({
+  poll,
+  meId,
+}: {
+  poll: NonNullable<MessageDto['poll']>;
+  meId: string | undefined;
+}) {
+  const total = poll.votes.length;
+  const vote = (optionIndex: number) =>
+    api('POST', `/polls/${poll.id}/vote`, { optionIndex }).catch(() => undefined);
+  return (
+    <div className="mt-1.5 max-w-md rounded-lg border border-gray-200 p-3 dark:border-gray-700" data-testid="poll-card">
+      <div className="mb-2 text-[13px] font-semibold">{poll.question}</div>
+      <div className="space-y-1.5">
+        {poll.options.map((opt, i) => {
+          const votes = poll.votes.filter((v) => v.optionIndex === i);
+          const mine = meId ? votes.some((v) => v.userId === meId) : false;
+          const pct = total > 0 ? Math.round((votes.length / total) * 100) : 0;
+          return (
+            <button
+              key={i}
+              onClick={() => void vote(i)}
+              className={clsx(
+                'relative block w-full overflow-hidden rounded-md border px-2.5 py-1.5 text-left text-[13px]',
+                mine ? 'border-accent' : 'border-gray-200 dark:border-gray-700',
+              )}
+              data-testid="poll-option"
+            >
+              <span
+                className="absolute inset-y-0 left-0 bg-accent/10"
+                style={{ width: `${pct}%` }}
+              />
+              <span className="relative flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  {mine && <span className="text-accent">✓</span>}
+                  {opt}
+                </span>
+                <span className="text-[11px] text-gray-500">{votes.length}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-1.5 text-[11px] text-gray-500">
+        {total} vote{total === 1 ? '' : 's'}
+        {poll.allowMultiple ? ' · multiple choice' : ''}
+      </div>
     </div>
   );
 }
@@ -362,7 +484,11 @@ function UnfurlCards({ message }: { message: MessageDto }) {
             )}
           </a>
           {card.type === 'jira' && card.key && canAct && (
-            <JiraCardActions messageId={message.id} issueKey={card.key} />
+            <JiraCardActions
+              messageId={message.id}
+              issueKey={card.key}
+              workspaceId={message.workspaceId}
+            />
           )}
         </div>
       ))}
@@ -391,10 +517,21 @@ function JiraActionChip({
   );
 }
 
-function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey: string }) {
+function JiraCardActions({
+  messageId,
+  issueKey,
+  workspaceId,
+}: {
+  messageId: string;
+  issueKey: string;
+  workspaceId: string;
+}) {
   const [busy, setBusy] = useState(false);
   const [transitions, setTransitions] = useState<JiraTransition[] | null>(null);
   const [assignees, setAssignees] = useState<JiraAssignableUser[] | null>(null);
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const pushToast = useUiStore((s) => s.pushToast);
 
   const act = async (body: JiraActionInput) => {
     setBusy(true);
@@ -402,8 +539,9 @@ function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey:
       await api('POST', `/messages/${messageId}/jira/action`, body);
       setTransitions(null);
       setAssignees(null);
+      pushToast(`${issueKey} updated.`, 'success');
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Action failed');
+      pushToast(err instanceof Error ? err.message : 'Action failed', 'error');
     } finally {
       setBusy(false);
     }
@@ -419,7 +557,7 @@ function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey:
       );
       setTransitions(list);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Could not load statuses');
+      pushToast(err instanceof Error ? err.message : 'Could not load statuses', 'error');
     } finally {
       setBusy(false);
     }
@@ -435,15 +573,10 @@ function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey:
       );
       setAssignees(list);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Could not load members');
+      pushToast(err instanceof Error ? err.message : 'Could not load members', 'error');
     } finally {
       setBusy(false);
     }
-  };
-
-  const comment = () => {
-    const text = window.prompt(`Comment on ${issueKey}:`)?.trim();
-    if (text) void act({ issueKey, action: 'comment', text });
   };
 
   return (
@@ -457,9 +590,25 @@ function JiraCardActions({ messageId, issueKey }: { messageId: string; issueKey:
       <JiraActionChip disabled={busy} onClick={() => void openMove()}>
         Move
       </JiraActionChip>
-      <JiraActionChip disabled={busy} onClick={comment}>
+      <JiraActionChip disabled={busy} onClick={() => setCommentOpen(true)}>
         Comment
       </JiraActionChip>
+      <JiraActionChip disabled={busy} onClick={() => setLogOpen(true)}>
+        Log time
+      </JiraActionChip>
+      {logOpen && (
+        <LogTimeDialog workspaceId={workspaceId} issueKey={issueKey} onClose={() => setLogOpen(false)} />
+      )}
+      {commentOpen && (
+        <PromptDialog
+          title={`Comment on ${issueKey}`}
+          placeholder="Your comment…"
+          confirmLabel="Add comment"
+          multiline
+          onSubmit={(text) => act({ issueKey, action: 'comment', text })}
+          onClose={() => setCommentOpen(false)}
+        />
+      )}
       {transitions && (
         <div className="flex basis-full flex-wrap items-center gap-1.5 pt-1">
           {transitions.length === 0 ? (
@@ -510,13 +659,15 @@ function ToolbarButton({
   testId?: string;
 }) {
   return (
-    <button
-      title={title}
-      data-testid={testId}
-      onClick={onClick}
-      className="p-1.5 text-gray-500 first:rounded-l-md last:rounded-r-md hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
-    >
-      {children}
-    </button>
+    <Tooltip label={title}>
+      <button
+        aria-label={title}
+        data-testid={testId}
+        onClick={onClick}
+        className="p-1.5 text-gray-500 first:rounded-l-md last:rounded-r-md hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }

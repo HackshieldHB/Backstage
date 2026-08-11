@@ -7,13 +7,18 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import {
   containerPath,
+  useChannelMembers,
+  useConversations,
   useMessages,
   usePins,
+  useReadState,
   useUnreads,
   type Container,
   type PendingMessage,
 } from '@/hooks/queries';
+import type { UserDto } from '@backstages/shared';
 import { MessageItem } from './message-item';
+import { Avatar } from './avatar';
 
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
@@ -34,6 +39,9 @@ export function MessageList({
   const query = useMessages(container);
   const pins = usePins(container.kind === 'channel' ? container.id : null);
   const unreads = useUnreads(workspaceId);
+  const readState = useReadState(container);
+  const channelMembers = useChannelMembers(container.kind === 'channel' ? container.id : null);
+  const conversations = useConversations(workspaceId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const lastMarkedRef = useRef<string | null>(null);
@@ -44,6 +52,33 @@ export function MessageList({
   );
 
   const pinnedIds = useMemo(() => new Set((pins.data ?? []).map((p) => p.message.id)), [pins.data]);
+
+  // "Seen by" receipts: who has read up to my most recent message. Resolved
+  // against the container's member list for names/avatars.
+  const memberById = useMemo(() => {
+    const map = new Map<string, UserDto>();
+    if (container.kind === 'channel') for (const m of channelMembers.data ?? []) map.set(m.id, m);
+    else {
+      const dm = conversations.data?.find((c) => c.id === container.id);
+      for (const m of dm?.members ?? []) map.set(m.id, m);
+    }
+    return map;
+  }, [container, channelMembers.data, conversations.data]);
+
+  const lastOwnMessage = useMemo(
+    () => [...messages].reverse().find((m) => m.user?.id === me?.id && !m.pending && !m.failed && !m.isDeleted),
+    [messages, me?.id],
+  );
+  const seenBy = useMemo(() => {
+    if (!lastOwnMessage) return [];
+    const at = new Date(lastOwnMessage.createdAt).getTime();
+    return (readState.data ?? [])
+      .filter(
+        (r) => r.userId !== me?.id && r.lastReadAt && new Date(r.lastReadAt).getTime() >= at,
+      )
+      .map((r) => memberById.get(r.userId))
+      .filter((u): u is UserDto => Boolean(u));
+  }, [readState.data, lastOwnMessage, me?.id, memberById]);
 
   const unreadCount =
     unreads.data?.find((u) => (u.channelId ?? u.conversationId) === container.id)?.unread ?? 0;
@@ -185,6 +220,21 @@ export function MessageList({
           </div>
         );
       })}
+      {seenBy.length > 0 && (
+        <div className="flex items-center justify-end gap-1 px-5 pt-1" data-testid="seen-by">
+          <span className="text-[11px] text-gray-400 dark:text-gray-500">Seen by</span>
+          <span className="flex -space-x-1">
+            {seenBy.slice(0, 5).map((u) => (
+              <span key={u.id} className="ring-1 ring-white dark:ring-gray-900" title={u.displayName}>
+                <Avatar user={u} size="xs" />
+              </span>
+            ))}
+          </span>
+          {seenBy.length > 5 && (
+            <span className="text-[11px] text-gray-400">+{seenBy.length - 5}</span>
+          )}
+        </div>
+      )}
       {messages.length === 0 && query.isSuccess && (
         <p className="px-5 pt-8 text-sm text-gray-500 dark:text-gray-400">No messages yet. Say hello!</p>
       )}

@@ -1,11 +1,18 @@
 'use client';
 
-import { useMemo, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import clsx from 'clsx';
 import {
+  BarChart3,
   Bell,
   Bookmark,
+  CalendarClock,
   ChevronDown,
+  Clock,
+  FileText,
+  ScrollText,
+  SquareKanban,
+  UsersRound,
   Hash,
   Lock,
   LogOut,
@@ -16,7 +23,9 @@ import {
   Smile,
   Sparkles,
   Sun,
+  Timer,
   UserPlus,
+  Zap,
 } from 'lucide-react';
 import type { ChannelDto, ConversationDto } from '@backstages/shared';
 import { useQueryClient } from '@tanstack/react-query';
@@ -35,13 +44,19 @@ import {
   type Container,
 } from '@/hooks/queries';
 import { emojiChar } from '@/lib/emoji';
+import { useT } from '@/lib/i18n';
 import { Avatar } from './avatar';
 import { Dialog } from './dialog';
 import { EmojiPickerPopover } from './emoji-picker';
-import { AtlassianDialog, useAtlassianStatus } from './atlassian-dialog';
-import { ConfluenceDialog } from './confluence-dialog';
+import { useAtlassianStatus } from './atlassian-dialog';
+import { WorkspaceSettingsDialog } from './workspace-settings-dialog';
 import { CatchUpDialog } from './catch-up-dialog';
-import { JiraTree, ConfluenceTree } from './integration-tree';
+import { ScheduledDialog } from './scheduled-dialog';
+import { StandupsDialog } from './standups-dialog';
+import { WorkflowsDialog } from './workflows-dialog';
+import { UserGroupsDialog, AnalyticsDialog, AuditDialog } from './workspace-admin';
+import { Tooltip } from './tooltip';
+import { GuidedTour, type TourStep } from './guided-tour';
 
 export function Sidebar({
   workspaceId,
@@ -58,7 +73,7 @@ export function Sidebar({
 }) {
   const me = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const { theme, setTheme, setRightPanel, rightPanel, setSearchOpen } = useUiStore();
+  const { theme, setTheme, setRightPanel, rightPanel, setSearchOpen, mainView, setMainView, lang } = useUiStore();
   const unreads = useUnreads(workspaceId);
   const presence = usePresence(workspaceId);
   const notifications = useNotifications();
@@ -67,9 +82,52 @@ export function Sidebar({
   const workspace = workspaces.data?.find((w) => w.id === workspaceId);
 
   const [dialog, setDialog] = useState<
-    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'atlassian' | 'confluence' | 'catch-up'
+    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'settings' | 'catch-up' | 'scheduled' | 'workflows' | 'user-groups' | 'analytics' | 'audit' | 'standups'
   >('none');
+  const isAdmin = workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN';
+
+  // Let other surfaces (e.g. the getting-started checklist in the main pane)
+  // open one of the sidebar's dialogs by name via a window event.
+  useEffect(() => {
+    const onOpenDialog = (e: Event) => {
+      const name = (e as CustomEvent<string>).detail;
+      setDialog(name as Parameters<typeof setDialog>[0]);
+    };
+    window.addEventListener('bs:open-dialog', onOpenDialog);
+    return () => window.removeEventListener('bs:open-dialog', onOpenDialog);
+  }, []);
+
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  // The secondary "Tools" group is collapsible so the sidebar isn't a wall of
+  // buttons for new members. Defaults open; the choice is remembered per browser.
+  const [toolsOpen, setToolsOpen] = useState(true);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setToolsOpen(window.localStorage.getItem('bs.sidebar.toolsOpen') !== '0');
+    }
+  }, []);
+  const toggleTools = () =>
+    setToolsOpen((v) => {
+      const next = !v;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('bs.sidebar.toolsOpen', next ? '1' : '0');
+      }
+      return next;
+    });
+  // Platform-aware search shortcut hint (⌘K on Mac, Ctrl K elsewhere). Resolved
+  // after mount to keep SSR output stable and avoid a hydration mismatch.
+  const [modKey, setModKey] = useState('⌘K');
+  useEffect(() => {
+    const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+    setModKey(mac ? '⌘K' : 'Ctrl K');
+  }, []);
+  const catchUpRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLButtonElement>(null);
+  const threadsRef = useRef<HTMLButtonElement>(null);
+  const activityRef = useRef<HTMLButtonElement>(null);
+  const timelineRef = useRef<HTMLButtonElement>(null);
+  const channelsRef = useRef<HTMLDivElement>(null);
+  const t = useT();
 
   const unreadFor = (id: string) =>
     unreads.data?.find((u) => (u.channelId ?? u.conversationId) === id) ?? { unread: 0, mentions: 0 };
@@ -84,14 +142,70 @@ export function Sidebar({
   }, [channels]);
   const groupKeys = useMemo(() => Object.keys(groupedChannels).sort(), [groupedChannels]);
 
+  // First-run walkthrough of the left menu. Each step spotlights a real button,
+  // so the copy points at exactly what the user is looking at. Anchors chosen
+  // are always present (never behind an integration/admin flag) so no step is
+  // ever skipped for a plain member.
+  const id = lang === 'id';
+  const tourSteps: TourStep[] = [
+    {
+      title: id ? 'Selamat datang di Backstages 👋' : 'Welcome to Backstages 👋',
+      body: id
+        ? 'Kenalan sebentar yuk dengan menu di kiri — 30 detik, sekali saja. Bisa dilewati kapan pun.'
+        : "Let's take 30 seconds to meet the left menu — just once. You can skip anytime.",
+    },
+    {
+      anchorRef: searchRef,
+      title: id ? 'Cari apa saja' : 'Find anything',
+      body: id
+        ? 'Cari pesan, orang, channel, dan file dari satu tempat. Tekan ⌘K / Ctrl+K kapan saja.'
+        : 'Search messages, people, channels and files from one place. Hit ⌘K / Ctrl+K anytime.',
+    },
+    {
+      anchorRef: threadsRef,
+      title: id ? 'Utas' : 'Threads',
+      body: id
+        ? 'Semua balasan utas yang kamu ikuti berkumpul di sini — jadi tidak ada diskusi yang terlewat.'
+        : 'Every threaded reply you follow collects here, so no side conversation slips past you.',
+    },
+    {
+      anchorRef: activityRef,
+      title: id ? 'Aktivitas' : 'Activity',
+      body: id
+        ? 'Mention, reaksi, dan update Jira yang ditujukan ke kamu — lencana merah menandai yang belum dibaca.'
+        : 'Mentions, reactions and Jira updates aimed at you — the red badge counts what is unread.',
+    },
+    {
+      anchorRef: catchUpRef,
+      title: id ? 'Rangkum untukku' : 'Catch me up',
+      body: id
+        ? 'Baru kembali? Dapatkan ringkasan sekali klik — mention dulu, lalu channel & DM tersibuk.'
+        : 'Been away? Get a one-click digest — mentions first, then your busiest channels and DMs.',
+    },
+    {
+      anchorRef: timelineRef,
+      title: id ? 'Timeline tim' : 'Team timeline',
+      body: id
+        ? 'Di grup "Alat": lini masa transparan berisi huddle, aktivitas Jira/Confluence, dan kehadiran tim — plus dashboard utilisasi.'
+        : 'Under "Tools": a transparent feed of huddles, Jira/Confluence activity and presence — plus a utilization dashboard.',
+    },
+    {
+      anchorRef: channelsRef,
+      title: id ? 'Channel & DM' : 'Channels & DMs',
+      body: id
+        ? 'Percakapanmu tinggal di sini. Tekan + untuk buat channel atau mulai DM. Selamat menjelajah!'
+        : 'Your conversations live here. Use + to create a channel or start a DM. Enjoy exploring!',
+    },
+  ];
+
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col bg-sidebar text-gray-200">
       {/* Workspace header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
           className="flex items-center gap-1 text-[15px] font-bold text-white"
-          onClick={() => setDialog('atlassian')}
-          title="Workspace settings (Atlassian)"
+          onClick={() => setDialog('settings')}
+          title="Workspace settings"
           data-testid="workspace-menu"
         >
           {workspace?.name ?? 'Workspace'} <ChevronDown size={14} className="opacity-70" />
@@ -110,46 +224,135 @@ export function Sidebar({
 
       {/* Search trigger */}
       <button
+        ref={searchRef}
         onClick={() => setSearchOpen(true)}
         className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 text-[13px] text-sidebar-muted hover:bg-white/10"
         data-testid="search-trigger"
       >
-        <Search size={14} /> Search… <kbd className="ml-auto text-[10px] opacity-70">⌘K</kbd>
+        <Search size={14} /> Search… <kbd className="ml-auto text-[10px] opacity-70">{modKey}</kbd>
       </button>
 
       <div className="thin-scrollbar flex-1 overflow-y-auto px-2 pb-2">
-        {/* Fixed sections */}
+        {/* Primary quick-access */}
         <SectionButton
           icon={<MessageSquare size={15} />}
-          label="Threads"
-          active={rightPanel.kind === 'thread'}
-          onClick={() => setRightPanel({ kind: 'none' })}
+          label={t('threads')}
+          active={rightPanel.kind === 'threads' || rightPanel.kind === 'thread'}
+          onClick={() => setRightPanel({ kind: 'threads' })}
+          testId="threads-button"
+          buttonRef={threadsRef}
         />
         <SectionButton
           icon={<Bell size={15} />}
-          label="Activity"
+          label={t('activity')}
           badge={activityBadge}
           active={rightPanel.kind === 'activity'}
           onClick={() => setRightPanel({ kind: 'activity' })}
           testId="activity-button"
+          buttonRef={activityRef}
         />
         <SectionButton
           icon={<Bookmark size={15} />}
-          label="Saved items"
+          label={t('later')}
           active={rightPanel.kind === 'saved'}
           onClick={() => setRightPanel({ kind: 'saved' })}
           testId="saved-button"
         />
         <SectionButton
           icon={<Sparkles size={15} />}
-          label="Catch me up"
+          label={t('catch_me_up')}
           onClick={() => setDialog('catch-up')}
           testId="catch-up-button"
+          buttonRef={catchUpRef}
         />
+
+        {/* Tools (collapsible so the sidebar stays approachable) */}
+        <button
+          onClick={toggleTools}
+          className="mt-4 flex w-full items-center gap-1 px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted hover:text-white"
+          data-testid="tools-header"
+        >
+          <ChevronDown size={12} className={clsx('transition-transform', !toolsOpen && '-rotate-90')} />
+          {t('tools')}
+        </button>
+        {toolsOpen && (
+          <>
+            <SectionButton
+              icon={<Timer size={15} />}
+              label={t('team_timeline')}
+              active={mainView === 'timeline'}
+              onClick={() => setMainView('timeline')}
+              testId="timeline-button"
+              buttonRef={timelineRef}
+            />
+            <SectionButton
+              icon={<CalendarClock size={15} />}
+              label={t('standups')}
+              onClick={() => setDialog('standups')}
+              testId="standups-button"
+            />
+            <SectionButton
+              icon={<Clock size={15} />}
+              label={t('scheduled')}
+              onClick={() => setDialog('scheduled')}
+              testId="scheduled-button"
+            />
+            <SectionButton
+              icon={<Zap size={15} />}
+              label={t('workflows')}
+              onClick={() => setDialog('workflows')}
+              testId="workflows-button"
+            />
+            <SectionButton
+              icon={<UsersRound size={15} />}
+              label={t('user_groups')}
+              onClick={() => setDialog('user-groups')}
+              testId="user-groups-button"
+            />
+            {atlassian.data?.connected && (
+              <SectionButton
+                icon={<SquareKanban size={15} />}
+                label="Jira"
+                active={mainView === 'jira'}
+                onClick={() => setMainView('jira')}
+                testId="jira-view-button"
+              />
+            )}
+            {atlassian.data?.connected && atlassian.data.confluenceReady && (
+              <SectionButton
+                icon={<FileText size={15} />}
+                label="Confluence"
+                active={mainView === 'confluence'}
+                onClick={() => setMainView('confluence')}
+                testId="confluence-view-button"
+              />
+            )}
+            {isAdmin && (
+              <>
+                <SectionButton
+                  icon={<BarChart3 size={15} />}
+                  label={t('analytics')}
+                  onClick={() => setDialog('analytics')}
+                  testId="analytics-button"
+                />
+                <SectionButton
+                  icon={<ScrollText size={15} />}
+                  label={t('audit_log')}
+                  onClick={() => setDialog('audit')}
+                  testId="audit-button"
+                />
+              </>
+            )}
+          </>
+        )}
 
         {/* Channels */}
         <SectionHeader
-          label="Channels"
+          label={t('channels')}
+          testIdKey="channels"
+          browseTitle={t('browse_channels')}
+          addTitle={t('add')}
+          headerRef={channelsRef}
           onAdd={() => setDialog('create-channel')}
           onBrowse={() => setDialog('browse')}
         />
@@ -197,15 +400,13 @@ export function Sidebar({
           );
         })}
 
-        {/* Integration browse trees: Jira projects → issues, Confluence spaces → pages.
-            Kept under Channels (above DMs) so the workspace navigation stays together. */}
-        {atlassian.data?.connected && <JiraTree workspaceId={workspaceId} />}
-        {atlassian.data?.connected && atlassian.data.confluenceReady && (
-          <ConfluenceTree workspaceId={workspaceId} />
-        )}
-
         {/* DMs */}
-        <SectionHeader label="Direct messages" onAdd={() => setDialog('dm')} />
+        <SectionHeader
+          label={t('direct_messages')}
+          testIdKey="direct-messages"
+          addTitle={t('add')}
+          onAdd={() => setDialog('dm')}
+        />
         <ul>
           {conversations.map((dm) => {
             const others = dm.members.filter((m) => m.id !== me?.id);
@@ -259,21 +460,25 @@ export function Sidebar({
             )}
           </span>
         </button>
-        <button
-          title="Toggle theme"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className="rounded p-1.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white"
-          data-testid="theme-toggle"
-        >
-          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
-        <button
-          title="Sign out"
-          onClick={() => void logout()}
-          className="rounded p-1.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white"
-        >
-          <LogOut size={15} />
-        </button>
+        <Tooltip label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
+          <button
+            aria-label="Toggle theme"
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="rounded p-1.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white"
+            data-testid="theme-toggle"
+          >
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+        </Tooltip>
+        <Tooltip label="Sign out">
+          <button
+            aria-label="Sign out"
+            onClick={() => void logout()}
+            className="rounded p-1.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white"
+          >
+            <LogOut size={15} />
+          </button>
+        </Tooltip>
       </div>
 
       {dialog === 'create-channel' && (
@@ -294,20 +499,56 @@ export function Sidebar({
           onClose={() => setDialog('none')}
         />
       )}
-      {dialog === 'atlassian' && (
-        <AtlassianDialog
+      {dialog === 'settings' && (
+        <WorkspaceSettingsDialog
           workspaceId={workspaceId}
+          workspaceName={workspace?.name ?? 'Workspace'}
           isAdmin={workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN'}
           onClose={() => setDialog('none')}
-          onOpenConfluence={() => setDialog('confluence')}
         />
-      )}
-      {dialog === 'confluence' && (
-        <ConfluenceDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
       )}
       {dialog === 'catch-up' && (
         <CatchUpDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
       )}
+      {dialog === 'scheduled' && (
+        <ScheduledDialog
+          workspaceId={workspaceId}
+          channels={channels}
+          conversations={conversations}
+          onClose={() => setDialog('none')}
+        />
+      )}
+      {dialog === 'workflows' && (
+        <WorkflowsDialog
+          workspaceId={workspaceId}
+          channels={channels}
+          onClose={() => setDialog('none')}
+        />
+      )}
+      {dialog === 'user-groups' && (
+        <UserGroupsDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
+      )}
+      {dialog === 'analytics' && (
+        <AnalyticsDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
+      )}
+      {dialog === 'audit' && (
+        <AuditDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
+      )}
+      {dialog === 'standups' && (
+        <StandupsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
+      )}
+
+      <GuidedTour
+        storageKey="bs.tour.sidebar.v1"
+        steps={tourSteps}
+        replayEvent="bs:start-tour"
+        labels={{
+          skip: lang === 'id' ? 'Lewati' : 'Skip',
+          back: lang === 'id' ? 'Kembali' : 'Back',
+          next: lang === 'id' ? 'Lanjut' : 'Next',
+          done: lang === 'id' ? 'Selesai' : 'Done',
+        }}
+      />
     </aside>
   );
 }
@@ -366,6 +607,7 @@ function SectionButton({
   active,
   onClick,
   testId,
+  buttonRef,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -373,9 +615,11 @@ function SectionButton({
   active?: boolean;
   onClick: () => void;
   testId?: string;
+  buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
   return (
     <button
+      ref={buttonRef}
       onClick={onClick}
       data-testid={testId}
       className={clsx(
@@ -392,18 +636,36 @@ function SectionButton({
   );
 }
 
-function SectionHeader({ label, onAdd, onBrowse }: { label: string; onAdd?: () => void; onBrowse?: () => void }) {
+function SectionHeader({
+  label,
+  onAdd,
+  onBrowse,
+  headerRef,
+  testIdKey,
+  browseTitle = 'Browse channels',
+  addTitle = 'Add',
+}: {
+  label: string;
+  onAdd?: () => void;
+  onBrowse?: () => void;
+  headerRef?: React.Ref<HTMLDivElement>;
+  /** Stable, language-independent key for the add button's test id. */
+  testIdKey?: string;
+  browseTitle?: string;
+  addTitle?: string;
+}) {
+  const key = testIdKey ?? label.toLowerCase().replace(/\s/g, '-');
   return (
-    <div className="mt-4 flex items-center justify-between px-2 pb-1">
+    <div ref={headerRef} className="mt-4 flex items-center justify-between px-2 pb-1">
       <span className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted">{label}</span>
       <span className="flex gap-1">
         {onBrowse && (
-          <button onClick={onBrowse} title="Browse channels" className="rounded p-0.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white">
+          <button onClick={onBrowse} title={browseTitle} className="rounded p-0.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white">
             <Search size={13} />
           </button>
         )}
         {onAdd && (
-          <button onClick={onAdd} title="Add" data-testid={`add-${label.toLowerCase().replace(/\s/g, '-')}`} className="rounded p-0.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white">
+          <button onClick={onAdd} title={addTitle} data-testid={`add-${key}`} className="rounded p-0.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white">
             <Plus size={13} />
           </button>
         )}
@@ -697,10 +959,14 @@ function ProfileDialog({
 }) {
   const me = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const lang = useUiStore((s) => s.lang);
+  const setLang = useUiStore((s) => s.setLang);
+  const t = useT();
   const [name, setName] = useState(me?.displayName ?? '');
   const [emoji, setEmoji] = useState(me?.statusEmoji ?? '');
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [text, setText] = useState(me?.statusText ?? '');
+  const [clearAfter, setClearAfter] = useState<'' | '1h' | 'today' | 'week'>('');
   const [presenceState, setPresenceState] = useState<'ACTIVE' | 'AWAY' | 'DND'>(initialPresence);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -741,9 +1007,22 @@ function ProfileDialog({
       if (name.trim() && name.trim() !== me?.displayName) {
         await api('PATCH', '/me/profile', { displayName: name.trim() });
       }
+      const expiresAt =
+        clearAfter === '1h'
+          ? new Date(Date.now() + 3600_000)
+          : clearAfter === 'today'
+            ? (() => {
+                const d = new Date();
+                d.setHours(23, 59, 0, 0);
+                return d;
+              })()
+            : clearAfter === 'week'
+              ? new Date(Date.now() + 7 * 86400_000)
+              : null;
       const user = await api<typeof me>('PATCH', '/me/status', {
         statusEmoji: emoji || null,
         statusText: text || null,
+        statusExpiresAt: expiresAt ? expiresAt.toISOString() : null,
       });
       await api('PATCH', '/me/presence', { state: presenceState });
       if (user) setUser(user);
@@ -823,6 +1102,67 @@ function ProfileDialog({
             Clear
           </button>
         )}
+      </div>
+
+      <label className="mb-1 block text-xs font-medium text-gray-500">Clear status after</label>
+      <select
+        value={clearAfter}
+        onChange={(e) => setClearAfter(e.target.value as typeof clearAfter)}
+        className={clsx(inputCls, 'mb-3')}
+        data-testid="status-clear-after"
+      >
+        <option value="">Don&apos;t clear</option>
+        <option value="1h">1 hour</option>
+        <option value="today">Today</option>
+        <option value="week">This week</option>
+      </select>
+
+      <label className="mb-1 block text-xs font-medium text-gray-500">Language</label>
+      <select
+        value={lang}
+        onChange={(e) => setLang(e.target.value as 'en' | 'id')}
+        className={clsx(inputCls, 'mb-3')}
+        data-testid="language-select"
+      >
+        <option value="en">English</option>
+        <option value="id">Bahasa Indonesia</option>
+      </select>
+
+      <button
+        type="button"
+        onClick={() => {
+          onClose();
+          window.dispatchEvent(new Event('bs:start-tour'));
+        }}
+        className="mb-3 flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+        data-testid="replay-tour"
+      >
+        <Sparkles size={14} className="text-accent" />
+        {t('replay_tour')}
+      </button>
+
+      <label className="mb-1 block text-xs font-medium text-gray-500">Pause notifications (DND)</label>
+      <div className="mb-4 flex flex-wrap gap-2">
+        {[
+          { label: '30 min', mins: 30 },
+          { label: '1 hour', mins: 60 },
+          { label: 'Until tomorrow', mins: 60 * 16 },
+          { label: 'Off', mins: 0 },
+        ].map((o) => (
+          <button
+            key={o.label}
+            type="button"
+            onClick={() =>
+              void api('PATCH', '/me/dnd', {
+                until: o.mins ? new Date(Date.now() + o.mins * 60_000).toISOString() : null,
+              })
+            }
+            className="rounded-full border border-gray-300 px-2.5 py-0.5 text-[12px] font-medium hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+            data-testid="dnd-option"
+          >
+            {o.label}
+          </button>
+        ))}
       </div>
 
       <div className="mb-4 flex gap-4 text-sm">

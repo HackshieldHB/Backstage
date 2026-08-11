@@ -17,6 +17,9 @@ dist/
 # Uploaded files (local disk storage)
 apps/api/uploads/
 
+# Redis snapshot (written when running Redis locally without Docker)
+dump.rdb
+
 # Test artifacts
 coverage/
 playwright-report/

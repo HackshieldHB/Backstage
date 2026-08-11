@@ -14,17 +14,26 @@ import {
   type Container,
 } from '@/hooks/queries';
 import { api } from '@/lib/api';
+import { useHuddle } from '@/hooks/use-huddle';
 import { WorkspaceRail } from '@/components/workspace-rail';
 import { Sidebar } from '@/components/sidebar';
 import { MainPane } from '@/components/main-pane';
+import { HuddleBar } from '@/components/huddle-bar';
 import { RightPanelView } from '@/components/right-panel';
+import { TeamTimelinePane } from '@/components/team-timeline-pane';
+import { JiraPane } from '@/components/jira-pane';
+import { ConfluencePane } from '@/components/confluence-pane';
 import { SearchDialog } from '@/components/search-dialog';
+import { GettingStarted } from '@/components/getting-started';
+import { ErrorBoundary } from '@/components/error-boundary';
+import { ShortcutsHelp } from '@/components/shortcuts-help';
+import { Toaster } from '@/components/toaster';
 
 function AppShell() {
   const router = useRouter();
   const params = useSearchParams();
   const { user, loading } = useAuthStore();
-  const { rightPanel, setRightPanel, searchOpen, setSearchOpen, sidebarOpen, toggleSidebar } =
+  const { rightPanel, setRightPanel, searchOpen, setSearchOpen, sidebarOpen, toggleSidebar, mainView, setMainView } =
     useUiStore();
 
   const workspaces = useWorkspaces();
@@ -52,14 +61,31 @@ function AppShell() {
     (next: Container, highlight?: string) => {
       setHighlightMessageId(highlight ?? null);
       setRightPanel({ kind: 'none' });
+      // Opening a channel/DM always returns to the chat view (out of Jira/etc panes).
+      setMainView('chat');
       toggleSidebar(false);
       router.push(`/app?ws=${workspaceId}&c=${next.id}&t=${next.kind === 'conversation' ? 'dm' : 'ch'}`);
     },
-    [router, workspaceId, setRightPanel, toggleSidebar],
+    [router, workspaceId, setRightPanel, setMainView, toggleSidebar],
   );
 
   useRealtime(workspaceId);
   useTypingJanitor();
+
+  // The huddle lives at the shell (not inside MainPane) so it keeps running when
+  // you navigate to another channel or DM.
+  const huddle = useHuddle();
+  const huddleTarget = huddle.activeTarget;
+  const huddleLabel = useMemo(() => {
+    if (!huddleTarget) return undefined;
+    if (huddleTarget.kind === 'channel') {
+      const ch = channels.data?.find((c) => c.id === huddleTarget.id);
+      return ch ? `#${ch.name}` : 'a channel';
+    }
+    const dm = conversations.data?.find((c) => c.id === huddleTarget.id);
+    const others = dm?.members.filter((m) => m.id !== user?.id) ?? [];
+    return others.length > 0 ? others.map((o) => o.displayName).join(', ') : 'a DM';
+  }, [huddleTarget, channels.data, conversations.data, user?.id]);
 
   const qc = useQueryClient();
   // Open (or create) a DM with a user — fired from profile cards anywhere.
@@ -106,13 +132,6 @@ function AppShell() {
     return () => window.removeEventListener('keydown', onKey);
   }, [setSearchOpen, setRightPanel, searchOpen]);
 
-  // Ask for desktop notification permission once.
-  useEffect(() => {
-    if (user && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      void Notification.requestPermission();
-    }
-  }, [user]);
-
   useEffect(() => {
     if (!loading && !user) router.replace('/login');
   }, [loading, user, router]);
@@ -155,27 +174,49 @@ function AppShell() {
         <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => toggleSidebar(false)} />
       )}
       <main className="flex min-w-0 flex-1 flex-col">
-        {container ? (
-          <MainPane
-            key={container.id}
+        {huddleTarget && (
+          <HuddleBar
+            huddle={huddle}
+            targetLabel={huddleLabel}
+            viewingActive={container?.id === huddleTarget.id}
+            onOpenTarget={() => navigate(huddleTarget)}
+          />
+        )}
+        <ErrorBoundary key={`${mainView}:${container?.id ?? 'none'}`}>
+          {mainView === 'timeline' ? (
+            <TeamTimelinePane workspaceId={workspaceId} />
+          ) : mainView === 'jira' ? (
+            <JiraPane workspaceId={workspaceId} />
+          ) : mainView === 'confluence' ? (
+            <ConfluencePane workspaceId={workspaceId} />
+          ) : container ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <GettingStarted workspaceId={workspaceId} />
+              <MainPane
+                key={container.id}
+                workspaceId={workspaceId}
+                container={container}
+                huddle={huddle}
+                highlightMessageId={highlightMessageId}
+                clearHighlight={() => setHighlightMessageId(null)}
+              />
+            </div>
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-sm text-gray-500">
+              Pick a channel to get started
+            </div>
+          )}
+        </ErrorBoundary>
+      </main>
+      {mainView === 'chat' && rightPanel.kind !== 'none' && container && (
+        <ErrorBoundary key={`right:${rightPanel.kind}`}>
+          <RightPanelView
             workspaceId={workspaceId}
             container={container}
-            highlightMessageId={highlightMessageId}
-            clearHighlight={() => setHighlightMessageId(null)}
+            panel={rightPanel}
+            onNavigate={navigate}
           />
-        ) : (
-          <div className="flex flex-1 items-center justify-center text-sm text-gray-500">
-            Pick a channel to get started
-          </div>
-        )}
-      </main>
-      {rightPanel.kind !== 'none' && container && (
-        <RightPanelView
-          workspaceId={workspaceId}
-          container={container}
-          panel={rightPanel}
-          onNavigate={navigate}
-        />
+        </ErrorBoundary>
       )}
       {searchOpen && (
         <SearchDialog
@@ -187,6 +228,8 @@ function AppShell() {
           }}
         />
       )}
+      <ShortcutsHelp />
+      <Toaster />
     </div>
   );
 }

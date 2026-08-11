@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisClient } from '../redis/redis.module';
 import { RealtimeService } from '../realtime/realtime.service';
 import { PolicyService } from '../authz/policy.service';
+import { ActivityService } from '../timesheet/activity.service';
 
 /** Sockets heartbeat every ~30s; a user with no beat for this long is offline. */
 const ONLINE_TTL_SECONDS = 75;
@@ -19,13 +20,17 @@ export class PresenceService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
     private readonly policy: PolicyService,
+    private readonly activity: ActivityService,
   ) {}
 
   /** Called on socket connect. Returns true when the user just came online. */
   async connected(userId: string): Promise<void> {
     const count = await this.redis.incr(onlineKey(userId));
     await this.redis.expire(onlineKey(userId), ONLINE_TTL_SECONDS);
-    if (count === 1) await this.broadcast(userId);
+    if (count === 1) {
+      await this.broadcast(userId);
+      await this.trackOnline(userId, true);
+    }
   }
 
   /** Called on socket disconnect. */
@@ -34,6 +39,7 @@ export class PresenceService {
     if (count <= 0) {
       await this.redis.del(onlineKey(userId));
       await this.broadcast(userId);
+      await this.trackOnline(userId, false);
     }
   }
 
@@ -46,6 +52,7 @@ export class PresenceService {
       // TTL lapsed (e.g. laptop slept) — coming back counts as a transition.
       await this.redis.set(onlineKey(userId), '1', 'EX', ONLINE_TTL_SECONDS);
       await this.broadcast(userId);
+      await this.trackOnline(userId, true);
     }
   }
 
@@ -54,7 +61,40 @@ export class PresenceService {
     if (state === 'ACTIVE') await this.redis.del(manualKey(userId));
     else await this.redis.set(manualKey(userId), state);
     await this.broadcast(userId);
+    // AWAY/DND opens an AWAY activity block; going ACTIVE closes it.
+    await this.trackAway(userId, state !== 'ACTIVE');
     return this.effectiveState(userId);
+  }
+
+  // ---------- activity tracking (feeds the team timeline) ----------
+
+  /** Open or close an ONLINE presence block across every workspace the user is in. */
+  private async trackOnline(userId: string, online: boolean): Promise<void> {
+    if (online) {
+      for (const workspaceId of await this.workspaceIds(userId)) {
+        await this.activity.open({ workspaceId, userId, kind: 'ONLINE', source: 'PRESENCE' });
+      }
+    } else {
+      await this.activity.close({ userId, source: 'PRESENCE', kind: 'ONLINE' });
+    }
+  }
+
+  private async trackAway(userId: string, away: boolean): Promise<void> {
+    if (away) {
+      for (const workspaceId of await this.workspaceIds(userId)) {
+        await this.activity.open({ workspaceId, userId, kind: 'AWAY', source: 'PRESENCE' });
+      }
+    } else {
+      await this.activity.close({ userId, source: 'PRESENCE', kind: 'AWAY' });
+    }
+  }
+
+  private async workspaceIds(userId: string): Promise<string[]> {
+    const memberships = await this.prisma.workspaceMember.findMany({
+      where: { userId },
+      select: { workspaceId: true },
+    });
+    return memberships.map((m) => m.workspaceId);
   }
 
   async effectiveState(userId: string): Promise<PresenceState> {

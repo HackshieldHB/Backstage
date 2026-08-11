@@ -41,6 +41,25 @@ enum NotificationType {
   SYSTEM
 }
 
+enum ActivityKind {
+  MEETING
+  IMPLEMENTATION
+  DOCUMENTATION
+  COLLABORATION
+  WORK_LOGGED
+  ONLINE
+  AWAY
+}
+
+enum ActivitySource {
+  JIRA_WORKLOG
+  JIRA_STATUS
+  CONFLUENCE
+  HUDDLE
+  MESSAGE
+  PRESENCE
+}
+
 model User {
   id              String    @id @default(cuid())
   email           String    @unique
@@ -52,6 +71,8 @@ model User {
   statusEmoji     String?
   statusText      String?
   statusExpiresAt DateTime?
+  /// When set and in the future, desktop notifications are snoozed (DND).
+  dndUntil        DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -75,6 +96,63 @@ model User {
   atlassianLink           AtlassianAccountLink?
   atlassianConnections    AtlassianConnection[] @relation("AtlassianConnector")
   scheduledMessages       ScheduledMessage[]
+  customEmojis            CustomEmoji[]
+  shareLinks              ShareLink[]
+  workflows               Workflow[]
+  userGroupsCreated       UserGroup[]          @relation("UserGroupCreator")
+  userGroupMemberships    UserGroupMember[]
+  pollVotes               PollVote[]
+  pushSubscriptions       PushSubscription[]
+  auditLogs               AuditLog[]           @relation("AuditActor")
+  canvasEdits             Canvas[]             @relation("CanvasEditor")
+  activitySegments        ActivitySegment[]
+  huddleParticipations    HuddleParticipant[]
+  timesheetEntries        TimesheetEntry[]
+  utilizationDays         UtilizationDaily[]
+  standupsCreated         Standup[]            @relation("StandupCreator")
+  standupMemberships      StandupMember[]
+  standupResponses        StandupResponse[]
+}
+
+model ShareLink {
+  id          String    @id @default(cuid())
+  /// Opaque, URL-safe token embedded in the public share URL.
+  token       String    @unique
+  workspaceId String
+  /// A shared channel (read-only view of its recent messages)…
+  channelId   String?
+  /// …or a shared thread (a root message + its replies). Exactly one is set.
+  messageId   String?
+  createdById String
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  expiresAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel   Channel?  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message   Message?  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model Workflow {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  enabled     Boolean  @default(true)
+  /// Trigger discriminator, e.g. "message_posted".
+  trigger     String
+  /// Trigger + action parameters, shape depends on `trigger`.
+  config      Json
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 model Workspace {
@@ -95,6 +173,33 @@ model Workspace {
 
   bitbucketSubscriptions BitbucketSubscription[]
   scheduledMessages      ScheduledMessage[]
+  customEmojis           CustomEmoji[]
+  shareLinks             ShareLink[]
+  workflows              Workflow[]
+  userGroups             UserGroup[]
+  auditLogs              AuditLog[]
+  activitySegments       ActivitySegment[]
+  huddleSessions         HuddleSession[]
+  timesheetEntries       TimesheetEntry[]
+  standups               Standup[]
+  utilizationDays        UtilizationDaily[]
+}
+
+model CustomEmoji {
+  id          String   @id @default(cuid())
+  workspaceId String
+  /// Shortcode without colons, e.g. "party-parrot". Unique per workspace.
+  name        String
+  storageKey  String   @unique
+  mimeType    String
+  createdById String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
 }
 
 model WorkspaceMember {
@@ -163,6 +268,9 @@ model Channel {
   bitbucketSubscriptions BitbucketSubscription[]
   bitbucketPrCards       BitbucketPrCard[]
   scheduledMessages      ScheduledMessage[]
+  shareLinks             ShareLink[]
+  canvas                 Canvas?
+  standups               Standup[]
 
   @@unique([workspaceId, name])
 }
@@ -261,6 +369,8 @@ model Message {
   conversationLastReadMarkers ConversationMember[] @relation("ConversationLastRead")
   jiraIssueCard               JiraIssueCard?
   bitbucketPrCard             BitbucketPrCard?
+  shareLinks                  ShareLink[]
+  poll                        Poll?
 
   @@unique([userId, clientMsgId])
   @@index([channelId, createdAt])
@@ -527,4 +637,261 @@ model ScheduledMessage {
 
   @@index([scheduledFor])
   @@index([userId])
+}
+
+model UserGroup {
+  id          String            @id @default(cuid())
+  workspaceId String
+  /// Display name, e.g. "Engineering".
+  name        String
+  /// Mention handle without @, e.g. "engineering". Unique per workspace.
+  handle      String
+  createdById String
+  createdAt   DateTime          @default(now())
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User              @relation("UserGroupCreator", fields: [createdById], references: [id])
+  members   UserGroupMember[]
+
+  @@unique([workspaceId, handle])
+  @@index([workspaceId])
+}
+
+model UserGroupMember {
+  id      String @id @default(cuid())
+  groupId String
+  userId  String
+
+  group UserGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
+model Poll {
+  id           String     @id @default(cuid())
+  messageId    String     @unique
+  question     String
+  /// Array of option label strings.
+  options      Json
+  allowMultiple Boolean   @default(false)
+  createdById  String
+  createdAt    DateTime   @default(now())
+
+  message Message    @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  votes   PollVote[]
+}
+
+model PollVote {
+  id          String @id @default(cuid())
+  pollId      String
+  userId      String
+  optionIndex Int
+
+  poll Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([pollId, userId, optionIndex])
+  @@index([pollId])
+}
+
+model Canvas {
+  id          String   @id @default(cuid())
+  channelId   String   @unique
+  /// TipTap JSON document.
+  contentJson Json
+  contentText String   @default("")
+  updatedById String
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  updatedBy User    @relation("CanvasEditor", fields: [updatedById], references: [id])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  actorId     String?
+  /// Verb-ish action key, e.g. "channel.delete", "member.role_change".
+  action      String
+  targetType  String?
+  targetId    String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User?     @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// A block of a user's tracked activity, normalized from every signal source.
+/// endedAt/durationSec are null while the block is still open (ongoing).
+model ActivitySegment {
+  id          String         @id @default(cuid())
+  workspaceId String
+  userId      String
+  kind        ActivityKind
+  source      ActivitySource
+  /// Free-form reference: Jira issue key, huddle room key, etc.
+  refId       String?
+  startedAt   DateTime
+  endedAt     DateTime?
+  durationSec Int?
+  meta        Json?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId, startedAt])
+  @@index([workspaceId, startedAt])
+  // Fast lookup of a user's open segment per (source, kind) when closing it.
+  @@index([userId, source, kind, endedAt])
+}
+
+/// Persisted record of a huddle (voice/video) session, so meeting time survives
+/// the in-memory HuddleService and feeds the timeline.
+model HuddleSession {
+  id          String              @id @default(cuid())
+  workspaceId String
+  /// Socket-room key: "channel:X" or "conversation:Y".
+  roomKey     String
+  startedAt   DateTime            @default(now())
+  endedAt     DateTime?
+
+  workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  participants HuddleParticipant[]
+
+  @@index([workspaceId, roomKey, endedAt])
+}
+
+model HuddleParticipant {
+  id        String    @id @default(cuid())
+  sessionId String
+  userId    String
+  joinedAt  DateTime  @default(now())
+  leftAt    DateTime?
+
+  session HuddleSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([userId])
+}
+
+/// A user-entered timesheet entry, mirrored locally and pushed to Jira as a
+/// native worklog. jiraWorklogId/syncedAt are null until the push succeeds.
+model TimesheetEntry {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  userId        String
+  issueKey      String
+  startedAt     DateTime
+  durationSec   Int
+  comment       String?
+  jiraWorklogId String?
+  syncedAt      DateTime?
+  createdAt     DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId, startedAt])
+}
+
+/// Nightly per-member rollup of ActivitySegment durations, for fast dashboards.
+model UtilizationDaily {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  userId            String
+  day               DateTime @db.Date
+  meetingSec        Int      @default(0)
+  implementationSec Int      @default(0)
+  documentationSec  Int      @default(0)
+  collaborationSec  Int      @default(0)
+  idleSec           Int      @default(0)
+  awaySec           Int      @default(0)
+  onlineSec         Int      @default(0)
+  loggedSec         Int      @default(0)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId, day])
+  @@index([workspaceId, day])
+}
+
+/// A recurring async standup: at a scheduled local time on selected weekdays a
+/// prompt is posted to `channel`, participants submit check-ins, and a digest
+/// is assembled from their responses (plus auto-pulled activity).
+model Standup {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  channelId   String
+  /// HH:MM in the schedule's local time.
+  timeOfDay   String
+  /// Weekdays it runs, comma-separated 0-6 (Sun-Sat), e.g. "1,2,3,4,5".
+  days        String   @default("1,2,3,4,5")
+  /// Minutes east of UTC for the local time above.
+  tzOffsetMin Int      @default(0)
+  active      Boolean  @default(true)
+  /// Schedule-local date (yyyy-mm-dd) the prompt last fired, so it runs once/day.
+  lastRunOn   String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel   Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdBy User              @relation("StandupCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  members   StandupMember[]
+  responses StandupResponse[]
+
+  @@index([workspaceId])
+}
+
+model StandupMember {
+  id        String @id @default(cuid())
+  standupId String
+  userId    String
+
+  standup Standup @relation(fields: [standupId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([standupId, userId])
+}
+
+model StandupResponse {
+  id        String   @id @default(cuid())
+  standupId String
+  userId    String
+  /// Schedule-local date the response is for (yyyy-mm-dd).
+  onDate    String
+  yesterday String   @default("")
+  today     String   @default("")
+  blockers  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  standup Standup @relation(fields: [standupId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([standupId, userId, onDate])
+  @@index([standupId, onDate])
 }

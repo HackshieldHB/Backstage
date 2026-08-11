@@ -88,7 +88,8 @@ export class AtlassianApiService {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      this.logger.warn(`Atlassian POST ${url} -> ${res.status}`);
+      const errBody = await res.text().catch(() => '');
+      this.logger.warn(`Atlassian POST ${url} -> ${res.status} body=${errBody.slice(0, 400)}`);
       throw new BadGatewayException('Atlassian API request failed');
     }
     return res.json() as Promise<T>;
@@ -372,5 +373,64 @@ export class AtlassianApiService {
         content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
       },
     });
+  }
+
+  /**
+   * Logs work against an issue via the native Jira worklog API, attributed to
+   * whoever owns `accessToken`. `started` uses Jira's required
+   * `yyyy-MM-ddTHH:mm:ss.SSS+0000` shape (a trailing `Z` is rejected).
+   */
+  async addWorklog(
+    accessToken: string,
+    cloudId: string,
+    issueKey: string,
+    input: { startedAt: Date; durationSec: number; comment?: string },
+  ): Promise<{ id: string }> {
+    const started = input.startedAt.toISOString().replace('Z', '+0000');
+    const res = await fetch(`${this.issueBase(cloudId, issueKey)}/worklog`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        timeSpentSeconds: Math.max(60, Math.round(input.durationSec)),
+        started,
+        ...(input.comment?.trim()
+          ? {
+              comment: {
+                type: 'doc',
+                version: 1,
+                content: [{ type: 'paragraph', content: [{ type: 'text', text: input.comment.trim() }] }],
+              },
+            }
+          : {}),
+      }),
+    });
+    if (!res.ok) {
+      this.logger.warn(`Atlassian POST worklog ${issueKey} -> ${res.status}`);
+      throw new BadGatewayException('Failed to log work in Jira');
+    }
+    const json = (await res.json()) as { id: string };
+    return { id: json.id };
+  }
+
+  /** Existing worklogs for an issue (used to reconcile/pull logged time). */
+  async getWorklogs(
+    accessToken: string,
+    cloudId: string,
+    issueKey: string,
+  ): Promise<Array<{ id: string; authorAccountId: string | null; startedAt: string | null; durationSec: number }>> {
+    const json = await this.get<{
+      worklogs?: Array<{
+        id: string;
+        author?: { accountId?: string };
+        started?: string;
+        timeSpentSeconds?: number;
+      }>;
+    }>(`${this.issueBase(cloudId, issueKey)}/worklog`, accessToken);
+    return (json?.worklogs ?? []).map((w) => ({
+      id: w.id,
+      authorAccountId: w.author?.accountId ?? null,
+      startedAt: w.started ?? null,
+      durationSec: w.timeSpentSeconds ?? 0,
+    }));
   }
 }

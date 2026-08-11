@@ -1,0 +1,16 @@
+# LiveKit server config for local self-hosting.
+# Generate a strong pair for production: `docker run --rm livekit/livekit-server generate-keys`
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false # set true (and open UDP) when running on a public host
+
+# apiKey: apiSecret — MUST match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in apps/api/.env.
+# Replace the dev values below before exposing this anywhere.
+keys:
+  devkey: devsecret_change_me_to_a_long_random_string
+
+logging:
+  level: info

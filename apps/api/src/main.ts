@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import helmet from 'helmet';
+import compression from 'compression';
 import { AppModule } from './app.module';
 import { ContextLogger } from './observability/request-context';
 import { ErrorReporter } from './observability/error-reporter';
@@ -11,6 +13,20 @@ async function bootstrap() {
     // carries the request id.
     logger: new ContextLogger(),
   });
+
+  app.use(
+    helmet({
+      // This is a JSON/media API, not an HTML origin — a document CSP would only
+      // get in the way, and the web app sets its own. Keep the other hardening
+      // headers (HSTS, X-Content-Type-Options, frameguard, …).
+      contentSecurityPolicy: false,
+      // Avatars and attachments are fetched cross-origin by the web app, so the
+      // default same-origin resource policy would break them.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
+  app.use(compression());
+
   app.enableCors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000', credentials: true });
   app.enableShutdownHooks();
 

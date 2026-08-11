@@ -35,6 +35,11 @@ export class UsersController {
     return this.users.updateStatus(user.id, body);
   }
 
+  @Patch('dnd')
+  setDnd(@CurrentUser() user: AuthUser, @Body() body: { until: string | null }) {
+    return this.users.setDnd(user.id, body?.until ?? null);
+  }
+
   @Patch('profile')
   updateProfile(
     @CurrentUser() user: AuthUser,

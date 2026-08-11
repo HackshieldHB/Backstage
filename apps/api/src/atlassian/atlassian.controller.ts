@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   HttpCode,
+  Logger,
   Param,
   Post,
   Query,
@@ -66,6 +67,8 @@ const CreateChannelIssueSchema = z.object({
 
 @Controller()
 export class AtlassianController {
+  private readonly atlassianLogger = new Logger(AtlassianController.name);
+
   constructor(
     private readonly atlassian: AtlassianService,
     private readonly sync: AtlassianSyncService,
@@ -106,8 +109,22 @@ export class AtlassianController {
   @Public()
   @Get('atlassian/callback')
   async callback(@Query('code') code: string, @Query('state') state: string, @Res() res: Response) {
-    const { redirect } = await this.atlassian.handleCallback(code, state);
-    res.redirect(redirect);
+    const web = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+    // Atlassian may hand back an error (denied consent, etc.) instead of a code.
+    const oauthError = (res.req.query.error as string | undefined) ?? undefined;
+    if (oauthError || !code) {
+      return res.redirect(`${web}/login?error=atlassian-denied`);
+    }
+    try {
+      const { redirect } = await this.atlassian.handleCallback(code, state);
+      res.redirect(redirect);
+    } catch (err) {
+      // Never dump a raw API error page at users mid-login: log it, bounce home.
+      this.atlassianLogger.warn(
+        `OAuth callback failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      res.redirect(`${web}/login?error=atlassian-failed`);
+    }
   }
 
   /** "Log in with Atlassian" entry point. */

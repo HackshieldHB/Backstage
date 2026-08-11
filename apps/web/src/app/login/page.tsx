@@ -1,10 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth-store';
 import { AuthCard, Field, FormError, SubmitButton } from '@/components/auth/auth-card';
+
+/** Friendly copy for the ?error= codes the Atlassian callback bounces back with. */
+const ATLASSIAN_ERRORS: Record<string, string> = {
+  'atlassian-email-unverified':
+    "Your Atlassian account doesn't expose a verified email, so we can't sign you in that way. Create an account with email & password below, or make your Atlassian email public and verified, then try again.",
+  'atlassian-denied': 'Atlassian sign-in was cancelled. You can try again or use email & password.',
+  'atlassian-failed': 'Atlassian sign-in failed. Please try again in a moment, or use email & password.',
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,6 +21,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Surface an Atlassian SSO failure the callback redirected us back with.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('error');
+    if (code) setError(ATLASSIAN_ERRORS[code] ?? 'Sign-in failed. Please try again.');
+  }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

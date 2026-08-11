@@ -99,6 +99,15 @@ export class UsersService {
     return toUserDto(user);
   }
 
+  /** Snooze desktop notifications until a timestamp (null clears). */
+  async setDnd(userId: string, until: string | null) {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { dndUntil: until ? new Date(until) : null },
+    });
+    return { dndUntil: user.dndUntil?.toISOString() ?? null };
+  }
+
   /** Activity feed: mentions, thread replies, reactions, DMs — newest first. */
   async listNotifications(userId: string, cursor?: string, limit = 30) {
     const rows = await this.prisma.notification.findMany({
