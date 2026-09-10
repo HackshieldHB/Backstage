@@ -240,14 +240,22 @@ export function MeetingRoom({ huddle, label }: { huddle: HuddleController; label
                   </button>
                 ))}
               </div>
-              {/* Request-control affordance for viewers of someone else's screen */}
+              {/* Request-control affordance for viewers of someone else's screen.
+                  Browser-scoped: grants annotate/point on the shared screen — a
+                  browser cannot drive the presenter's OS (that needs a native agent). */}
               {!huddle.screenSharing && stageSharerId && !huddle.control && (
                 <button
                   onClick={() => huddle.requestControl(stageSharerId)}
-                  className="mx-auto rounded-full bg-white/10 px-3 py-1 text-[12px] text-white/80 hover:bg-white/20"
+                  title="Ask the presenter to let you annotate/point on their screen (browser-scoped — does not control their computer)"
+                  className="mx-auto rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[12px] font-medium text-white/90 hover:bg-white/20"
                 >
-                  Request control
+                  Request control (annotate)
                 </button>
+              )}
+              {huddle.control && huddle.control.controllerId !== myId && huddle.control.presenterId !== myId && (
+                <p className="mx-auto text-[11px] text-white/50">
+                  {huddle.participants.find((p) => p.userId === huddle.control!.controllerId)?.displayName ?? 'Someone'} has control
+                </p>
               )}
               {huddle.control?.presenterId === myId && (
                 <button onClick={huddle.revokeControl} className="mx-auto rounded-full bg-red-600/80 px-3 py-1 text-[12px] font-semibold text-white hover:bg-red-600">
@@ -286,9 +294,9 @@ export function MeetingRoom({ huddle, label }: { huddle: HuddleController; label
               </div>
             </div>
           ) : (
-            <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2 overflow-y-auto">
+            <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-2 overflow-y-auto">
               {tiles.map((p) => (
-                <button key={p.userId} onClick={() => { setFocusedId(p.userId); setLayout('focus'); }} className="min-h-0">
+                <button key={p.userId} onClick={() => { setFocusedId(p.userId); setLayout('focus'); }} className="h-full w-full min-h-[180px]">
                   <ParticipantTile
                     participant={p}
                     stream={huddle.remoteStreams[p.userId]}

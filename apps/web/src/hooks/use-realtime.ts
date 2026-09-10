@@ -134,37 +134,40 @@ export function useRealtime(workspaceId: string | null) {
 
     const onNotification = (p: NotificationNewPayload) => {
       qc.invalidateQueries({ queryKey: keys.notifications });
-      // Desktop notification when the tab is not focused — unless the user muted.
-      if (
-        !useUiStore.getState().notificationsMuted &&
-        typeof document !== 'undefined' &&
-        !document.hasFocus() &&
-        typeof Notification !== 'undefined' &&
-        Notification.permission === 'granted'
-      ) {
-        const pl = (p.payload ?? {}) as {
-          source?: string;
-          action?: string;
-          issueKey?: string;
-          title?: string;
-          direction?: string;
-        };
-        const title =
-          pl.action === 'created' && pl.source === 'jira'
-            ? `Jira issue created: ${pl.issueKey ?? ''}`
-            : pl.action === 'created' && pl.source === 'confluence'
-              ? `Confluence page created: ${pl.title ?? ''}`
-              : pl.source === 'jira'
-                ? pl.direction === 'out'
-                  ? `Jira: ${pl.issueKey ?? 'an issue'} unassigned from you`
-                  : `Jira: ${pl.issueKey ?? 'an issue'} assigned to you`
-                : p.type === 'MENTION'
-                  ? `${p.actor?.displayName ?? 'Someone'} mentioned you`
-                  : p.type === 'THREAD_REPLY'
-                    ? `${p.actor?.displayName ?? 'Someone'} replied in a thread`
-                    : p.type === 'DM'
-                      ? `New message from ${p.actor?.displayName ?? 'someone'}`
+      if (useUiStore.getState().notificationsMuted) return;
+
+      const pl = (p.payload ?? {}) as {
+        source?: string;
+        action?: string;
+        issueKey?: string;
+        title?: string;
+        direction?: string;
+      };
+      const title =
+        pl.action === 'created' && pl.source === 'jira'
+          ? `Jira issue created: ${pl.issueKey ?? ''}`
+          : pl.action === 'created' && pl.source === 'confluence'
+            ? `Confluence page created: ${pl.title ?? ''}`
+            : pl.source === 'jira'
+              ? pl.direction === 'out'
+                ? `Jira: ${pl.issueKey ?? 'an issue'} unassigned from you`
+                : `Jira: ${pl.issueKey ?? 'an issue'} assigned to you`
+              : p.type === 'MENTION'
+                ? `${p.actor?.displayName ?? 'Someone'} mentioned you`
+                : p.type === 'THREAD_REPLY'
+                  ? `${p.actor?.displayName ?? 'Someone'} replied in a thread`
+                  : p.type === 'DM'
+                    ? `New message from ${p.actor?.displayName ?? 'someone'}`
+                    : p.type === 'REACTION'
+                      ? `${p.actor?.displayName ?? 'Someone'} reacted to your message`
                       : 'New activity in Backstages';
+
+      const focused = typeof document !== 'undefined' && document.hasFocus();
+      if (focused) {
+        // In-app toast so notifications are visible even with the tab focused and
+        // regardless of OS notification permission (which many users never grant).
+        useUiStore.getState().pushToast(title, 'info');
+      } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         const n = new Notification(title, { tag: p.id });
         n.onclick = () => {
           window.focus();

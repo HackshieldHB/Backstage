@@ -54,7 +54,7 @@ export const ParticipantTile = memo(function ParticipantTile({
 
   return (
     <div
-      className={`group relative flex items-center justify-center overflow-hidden rounded-xl bg-gray-800 ${
+      className={`group relative flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-gray-800 ${
         speaking ? 'ring-2 ring-green-400' : 'ring-1 ring-white/10'
       }`}
       data-testid="participant-tile"

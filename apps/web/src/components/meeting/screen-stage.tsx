@@ -103,7 +103,7 @@ export function ScreenStage({
         className="relative flex h-full w-full items-center justify-center"
         style={{ transform: `scale(${zoom})`, transition: 'transform 120ms' }}
       >
-        <video ref={videoRef} autoPlay playsInline muted className="max-h-full max-w-full object-contain" />
+        <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-contain" />
         {/* Annotation + laser overlay sits exactly over the video box. */}
         <div className="absolute inset-0">
           <AnnotationLayer
@@ -132,8 +132,8 @@ export function ScreenStage({
         </div>
       )}
 
-      {/* Annotation toolbar — appears on hover; laser always available */}
-      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl bg-black/70 p-1 opacity-0 backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      {/* Annotation toolbar — always visible so tools are discoverable */}
+      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-xl bg-black/70 p-1 opacity-80 backdrop-blur transition-opacity hover:opacity-100 focus-within:opacity-100">
         {TOOLS.map((t) => {
           const disabled = t.draw && !canAnnotate;
           return (

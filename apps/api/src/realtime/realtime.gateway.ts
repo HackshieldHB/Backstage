@@ -338,6 +338,11 @@ export class RealtimeGateway
     // presenter (me) responds about a requester. All are validated server-side.
     if (body.action === 'grant') {
       this.huddle.grantControl(key, body.targetUserId, me);
+      // Browser-scoped control = the controller may annotate/point on the shared
+      // screen (a browser cannot drive the presenter's OS). Grant that capability
+      // so control is actually functional, then re-broadcast the participant list.
+      this.huddle.setCanAnnotate(key, body.targetUserId, true);
+      await this.broadcastHuddle(key);
     } else if (body.action === 'revoke' || body.action === 'deny') {
       const session = this.huddle.getControl(key);
       if (session && session.presenterId === me) this.huddle.revokeControl(key);
