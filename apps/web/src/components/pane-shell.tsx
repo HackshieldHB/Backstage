@@ -26,23 +26,23 @@ export function PaneShell({
 }) {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex items-center gap-2 border-b border-gray-200 px-4 py-2.5 dark:border-gray-800">
+    <div className="flex min-w-0 flex-1 flex-col bg-surface">
+      <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-5">
         <button
           onClick={() => toggleSidebar(true)}
-          className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 md:hidden"
+          className="rounded-lg p-1.5 text-ink-3 hover:bg-hovered hover:text-ink md:hidden"
           aria-label="Open sidebar"
         >
           <Menu size={18} />
         </button>
         {icon}
         <div className="min-w-0">
-          <h1 className="truncate text-[15px] font-semibold leading-tight">{title}</h1>
-          {subtitle && <p className="truncate text-[12px] text-gray-500">{subtitle}</p>}
+          <h1 className="truncate text-[15px] font-semibold leading-tight tracking-tight text-ink">{title}</h1>
+          {subtitle && <p className="truncate text-[12px] text-ink-3">{subtitle}</p>}
         </div>
         {actions && <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>}
       </header>
-      <div className={bodyClassName ?? 'thin-scrollbar flex-1 overflow-y-auto p-4'}>{children}</div>
+      <div className={bodyClassName ?? 'thin-scrollbar flex-1 overflow-y-auto p-6'}>{children}</div>
     </div>
   );
 }

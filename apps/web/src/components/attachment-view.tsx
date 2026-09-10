@@ -24,14 +24,23 @@ export function AttachmentView({ attachments }: { attachments: AttachmentDto[] }
             <img
               src={fileUrl(a.url)}
               alt={a.filename}
-              className="max-h-64 max-w-xs rounded-lg border border-gray-200 object-cover dark:border-gray-700"
+              className="max-h-64 max-w-xs rounded-lg border border-line object-cover dark:border-line"
             />
           </button>
+        ) : a.mimeType.startsWith('audio/') ? (
+          <audio key={a.id} controls src={fileUrl(a.url)} className="h-10 w-64 max-w-full" />
+        ) : a.mimeType.startsWith('video/') ? (
+          <video
+            key={a.id}
+            controls
+            src={fileUrl(a.url)}
+            className="max-h-64 max-w-xs rounded-lg border border-line"
+          />
         ) : (
           <a
             key={a.id}
             href={`${fileUrl(a.url)}&download=1`}
-            className="flex items-center gap-2.5 rounded-lg border border-gray-200 px-3 py-2 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+            className="flex items-center gap-2.5 rounded-lg border border-line px-3 py-2 hover:bg-gray-50 dark:border-line dark:hover:bg-gray-800"
           >
             <FileText size={20} className="shrink-0 text-accent" />
             <span className="min-w-0">

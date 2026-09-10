@@ -19,6 +19,17 @@ export const UpdatePresenceSchema = z.object({
 });
 export type UpdatePresenceInput = z.infer<typeof UpdatePresenceSchema>;
 
+/** Start a focus block: snoozes notifications and sets a focus status for N minutes. */
+export const StartFocusSchema = z.object({
+  minutes: z.number().int().min(5).max(480).default(60),
+});
+export type StartFocusInput = z.infer<typeof StartFocusSchema>;
+
+export interface FocusStateDto {
+  active: boolean;
+  until: string | null;
+}
+
 export const UpdateNotificationPrefSchema = z.object({
   pref: z.enum(['ALL', 'MENTIONS', 'MUTED']),
 });

@@ -176,6 +176,7 @@ export function MessageList({
 
   return (
     <div ref={scrollRef} onScroll={onScroll} className="thin-scrollbar flex-1 overflow-y-auto pb-3" data-testid="message-list">
+      <div className="mx-auto w-full max-w-[1000px]">
       {query.isFetchingNextPage && (
         <p className="py-2 text-center text-xs text-gray-500 dark:text-gray-400">Loading older messages…</p>
       )}
@@ -197,12 +198,12 @@ export function MessageList({
         return (
           <div key={message.id}>
             {showDateDivider && (
-              <div className="relative my-3 flex items-center px-5" data-testid="date-divider">
-                <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
-                <span className="mx-2 rounded-full border border-gray-200 px-3 py-0.5 text-[11px] font-semibold dark:border-gray-700">
+              <div className="relative my-5 flex items-center px-5" data-testid="date-divider">
+                <span className="h-px flex-1 bg-line" />
+                <span className="mx-3 rounded-full bg-hovered px-3 py-0.5 text-[11px] font-medium text-ink-3">
                   {format(new Date(message.createdAt), 'EEEE, MMMM d')}
                 </span>
-                <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+                <span className="h-px flex-1 bg-line" />
               </div>
             )}
             {message.id === firstUnreadId && (
@@ -238,6 +239,7 @@ export function MessageList({
       {messages.length === 0 && query.isSuccess && (
         <p className="px-5 pt-8 text-sm text-gray-500 dark:text-gray-400">No messages yet. Say hello!</p>
       )}
+      </div>
     </div>
   );
 }

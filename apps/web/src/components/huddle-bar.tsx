@@ -55,7 +55,7 @@ function ScreenTile({
       className={
         live
           ? 'group relative overflow-hidden rounded-md bg-black ring-2 ring-green-500'
-          : 'group relative overflow-hidden rounded-md border border-gray-300 bg-black dark:border-gray-600'
+          : 'group relative overflow-hidden rounded-md border border-line-strong bg-black dark:border-line-strong'
       }
       data-testid={live ? 'screen-tile-live' : 'screen-tile'}
     >
@@ -110,7 +110,7 @@ export function HuddleBar({
   const showScreens = screenSharing || screenEntries.length > 0;
 
   return (
-    <div className="border-b border-gray-200 dark:border-gray-700">
+    <div className="border-b border-line">
       <div
         className="flex items-center gap-3 bg-indigo-50 px-4 py-2 dark:bg-indigo-950/40"
         data-testid="huddle-bar"

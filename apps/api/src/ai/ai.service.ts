@@ -1,7 +1,22 @@
 import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
+import type { AskAnswerDto, AskSourceDto } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
+
+/**
+ * Parse the model's action-item reply (one item per line) into a clean list:
+ * strips list markers/numbering, drops blanks, honours the "NONE" sentinel, and
+ * caps the count. Pure so it can be tested without the model.
+ */
+export function parseActionItems(raw: string): string[] {
+  if (/^\s*none\s*$/i.test(raw)) return [];
+  return raw
+    .split('\n')
+    .map((l) => l.replace(/^[-*\d.)\s]+/, '').trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
 
 /**
  * AI helpers backed by the Claude API. Enabled only when ANTHROPIC_API_KEY is
@@ -54,6 +69,91 @@ export class AiService {
     return message;
   }
 
+  /**
+   * Turn a bundle of weekly facts into a short human narrative. Returns null when
+   * AI is not configured so callers can fall back to a plain stats digest.
+   */
+  async narrateWeekly(facts: string): Promise<string | null> {
+    if (!this.enabled) return null;
+    return this.complete(
+      'You write a team\'s weekly wrap-up from raw activity facts. Open with one upbeat sentence on what the team accomplished, then 3–5 tight bullet points grouping shipped work, decisions, and collaboration. Be concrete, never invent facts beyond those given, and keep it under 130 words. No preamble, no closing sign-off.',
+      `Write this week's team wrap-up from these facts:\n\n${facts}`,
+      600,
+    );
+  }
+
+  /**
+   * "Ask Backstages" — answers a question grounded in the workspace's decisions
+   * and the messages in channels the caller belongs to (never leaks channels they
+   * can't see). Retrieval is keyword-based; the model must cite sources and admit
+   * when the answer isn't in the context.
+   */
+  async ask(userId: string, workspaceId: string, question: string): Promise<AskAnswerDto> {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const terms = [...new Set((question.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []))].slice(0, 8);
+    if (terms.length === 0) return { answer: 'Please ask a more specific question.', sources: [] };
+
+    const [decisions, messages] = await Promise.all([
+      this.prisma.decision.findMany({
+        where: {
+          workspaceId,
+          OR: terms.flatMap((t) => [
+            { title: { contains: t, mode: 'insensitive' as const } },
+            { detail: { contains: t, mode: 'insensitive' as const } },
+            { outcome: { contains: t, mode: 'insensitive' as const } },
+          ]),
+        },
+        take: 6,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.message.findMany({
+        where: {
+          workspaceId,
+          deletedAt: null,
+          channel: { members: { some: { userId } } },
+          OR: terms.map((t) => ({ contentText: { contains: t, mode: 'insensitive' as const } })),
+        },
+        take: 10,
+        orderBy: { createdAt: 'desc' },
+        include: { user: { select: { displayName: true } }, channel: { select: { id: true, name: true } } },
+      }),
+    ]);
+
+    const sources: AskSourceDto[] = [];
+    const ctx: string[] = [];
+    for (const d of decisions) {
+      sources.push({ kind: 'decision', label: d.title, ref: d.id, channelId: d.channelId });
+      ctx.push(
+        `[${sources.length}] DECISION "${d.title}"${d.outcome ? ` — decided: ${d.outcome}` : ''}${d.detail ? ` (${d.detail})` : ''}`,
+      );
+    }
+    for (const m of messages) {
+      sources.push({
+        kind: 'message',
+        label: `#${m.channel?.name ?? 'channel'} · ${m.user?.displayName ?? 'someone'}`,
+        ref: m.id,
+        channelId: m.channelId,
+      });
+      ctx.push(
+        `[${sources.length}] MESSAGE in #${m.channel?.name ?? 'channel'} by ${m.user?.displayName ?? 'someone'}: ${m.contentText.slice(0, 300)}`,
+      );
+    }
+
+    if (ctx.length === 0) {
+      return {
+        answer: "I couldn't find anything about that in this workspace's decisions or your channels.",
+        sources: [],
+      };
+    }
+
+    const answer = await this.complete(
+      "You answer a teammate's question using ONLY the numbered context from their workspace. Cite the sources you rely on inline as [n]. Be concise (2–5 sentences). If the context doesn't contain the answer, say you couldn't find it — never invent facts.",
+      `Question: ${question}\n\nContext:\n${ctx.join('\n')}`,
+      700,
+    );
+    return { answer, sources };
+  }
+
   async summarizeThread(userId: string, messageId: string): Promise<{ summary: string }> {
     const parent = await this.accessMessage(userId, messageId);
     const replies = await this.prisma.message.findMany({
@@ -98,6 +198,32 @@ export class AiService {
       1500,
     );
     return { summary };
+  }
+
+  /**
+   * Pulls concrete action items out of a thread so they can be turned into Jira
+   * issues. Returns one imperative line per item (empty when there are none).
+   */
+  async extractActionItems(userId: string, messageId: string): Promise<{ items: string[] }> {
+    const parent = await this.accessMessage(userId, messageId);
+    const rootId = parent.parentId ?? parent.id;
+    const rows = await this.prisma.message.findMany({
+      where: { OR: [{ id: rootId }, { parentId: rootId }], deletedAt: null },
+      include: { user: { select: { displayName: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+    });
+    const transcript = rows
+      .map((r) => `${r.user?.displayName ?? 'Someone'}: ${r.contentText}`)
+      .join('\n');
+    if (!transcript.trim()) return { items: [] };
+
+    const out = await this.complete(
+      'You extract concrete, actionable to-do items from a team discussion. Reply with one action item per line in the imperative voice — no numbering, no preamble. If there are no clear action items, reply with the single word NONE.',
+      `Extract the action items from this discussion:\n\n${transcript}`,
+      600,
+    );
+    return { items: parseActionItems(out) };
   }
 
   async translate(

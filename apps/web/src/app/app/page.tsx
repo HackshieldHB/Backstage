@@ -18,12 +18,18 @@ import { useHuddle } from '@/hooks/use-huddle';
 import { WorkspaceRail } from '@/components/workspace-rail';
 import { Sidebar } from '@/components/sidebar';
 import { MainPane } from '@/components/main-pane';
-import { HuddleBar } from '@/components/huddle-bar';
+import { MeetingRoom } from '@/components/meeting/meeting-room';
 import { RightPanelView } from '@/components/right-panel';
 import { TeamTimelinePane } from '@/components/team-timeline-pane';
 import { JiraPane } from '@/components/jira-pane';
 import { ConfluencePane } from '@/components/confluence-pane';
+import { ProjectsPane } from '@/components/projects-pane';
+import { IncidentsPane } from '@/components/incidents-pane';
+import { InboxPane } from '@/components/inbox-pane';
+import { DiscoverPane } from '@/components/discover-pane';
+import { AskDialog } from '@/components/ask-dialog';
 import { SearchDialog } from '@/components/search-dialog';
+import { CommandPalette } from '@/components/command-palette';
 import { GettingStarted } from '@/components/getting-started';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ShortcutsHelp } from '@/components/shortcuts-help';
@@ -118,19 +124,17 @@ function AppShell() {
     }
   }, [user, router]);
 
-  // Global keyboard shortcuts.
+  // Global keyboard shortcuts. Cmd/Ctrl-K is owned by the CommandPalette; here we
+  // only collapse the right panel on Escape when nothing modal is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-      } else if (e.key === 'Escape' && !searchOpen) {
+      if (e.key === 'Escape' && !searchOpen) {
         setRightPanel({ kind: 'none' });
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setSearchOpen, setRightPanel, searchOpen]);
+  }, [setRightPanel, searchOpen]);
 
   useEffect(() => {
     if (!loading && !user) router.replace('/login');
@@ -153,7 +157,7 @@ function AppShell() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-canvas">
       <WorkspaceRail
         workspaces={workspaces.data ?? []}
         activeId={workspaceId}
@@ -173,15 +177,8 @@ function AppShell() {
       {sidebarOpen && (
         <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => toggleSidebar(false)} />
       )}
-      <main className="flex min-w-0 flex-1 flex-col">
-        {huddleTarget && (
-          <HuddleBar
-            huddle={huddle}
-            targetLabel={huddleLabel}
-            viewingActive={container?.id === huddleTarget.id}
-            onOpenTarget={() => navigate(huddleTarget)}
-          />
-        )}
+      {huddle.joined && <MeetingRoom huddle={huddle} label={huddleLabel} />}
+      <main className="flex min-w-0 flex-1 flex-col bg-surface">
         <ErrorBoundary key={`${mainView}:${container?.id ?? 'none'}`}>
           {mainView === 'timeline' ? (
             <TeamTimelinePane workspaceId={workspaceId} />
@@ -189,6 +186,14 @@ function AppShell() {
             <JiraPane workspaceId={workspaceId} />
           ) : mainView === 'confluence' ? (
             <ConfluencePane workspaceId={workspaceId} />
+          ) : mainView === 'projects' ? (
+            <ProjectsPane workspaceId={workspaceId} />
+          ) : mainView === 'incidents' ? (
+            <IncidentsPane workspaceId={workspaceId} />
+          ) : mainView === 'inbox' ? (
+            <InboxPane workspaceId={workspaceId} onNavigate={navigate} />
+          ) : mainView === 'discover' ? (
+            <DiscoverPane workspaceId={workspaceId} onNavigate={navigate} />
           ) : container ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <GettingStarted workspaceId={workspaceId} />
@@ -229,6 +234,8 @@ function AppShell() {
         />
       )}
       <ShortcutsHelp />
+      <CommandPalette />
+      <AskDialog workspaceId={workspaceId} onNavigate={navigate} />
       <Toaster />
     </div>
   );
@@ -241,7 +248,7 @@ function CreateFirstWorkspace({ onCreated }: { onCreated: (id: string) => void }
   return (
     <main className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
       <form
-        className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+        className="w-full max-w-sm rounded-xl border border-line bg-white p-6 shadow-sm dark:border-line dark:bg-gray-900"
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
@@ -253,7 +260,7 @@ function CreateFirstWorkspace({ onCreated }: { onCreated: (id: string) => void }
         <h1 className="mb-1 text-lg font-semibold">Create your workspace</h1>
         <p className="mb-4 text-sm text-gray-500">A home for your team&apos;s conversations.</p>
         <input
-          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+          className="mb-3 w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
           placeholder="Workspace name"
           value={name}
           onChange={(e) => setName(e.target.value)}

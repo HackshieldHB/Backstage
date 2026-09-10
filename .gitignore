@@ -34,3 +34,7 @@ Thumbs.db
 
 # Local Claude settings
 .claude/settings.local.json
+
+# local backups (never commit — may hold secrets)
+*.bak
+.env.bak*

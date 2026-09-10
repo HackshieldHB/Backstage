@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/auth-store';
-import { useUiStore } from '@/stores/ui-store';
+import { ACCENTS, useUiStore, type AccentId } from '@/stores/ui-store';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -15,14 +15,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   );
   const bootstrap = useAuthStore((s) => s.bootstrap);
-  const setTheme = useUiStore((s) => s.setTheme);
+  const setAccent = useUiStore((s) => s.setAccent);
 
   useEffect(() => {
     void bootstrap();
-    const saved = window.localStorage.getItem('bs.theme');
+    // A theme carries its own light/dark mode, so applying the saved theme is enough.
+    const savedAccent = window.localStorage.getItem('bs.accent') as AccentId | null;
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    setTheme(saved === 'dark' || (!saved && prefersDark) ? 'dark' : 'light');
-  }, [bootstrap, setTheme]);
+    const theme =
+      savedAccent && ACCENTS.includes(savedAccent) ? savedAccent : prefersDark ? 'midnight' : 'daylight';
+    setAccent(theme);
+  }, [bootstrap, setAccent]);
 
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }

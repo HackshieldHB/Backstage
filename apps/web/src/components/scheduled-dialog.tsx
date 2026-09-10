@@ -58,7 +58,7 @@ export function ScheduledDialog({
         {items.map((s) => (
           <li
             key={s.id}
-            className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700"
+            className="flex items-start gap-3 rounded-lg border border-line p-3 dark:border-line"
             data-testid="scheduled-row"
           >
             <div className="min-w-0 flex-1">

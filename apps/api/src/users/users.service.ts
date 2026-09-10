@@ -108,6 +108,62 @@ export class UsersService {
     return { dndUntil: user.dndUntil?.toISOString() ?? null };
   }
 
+  /** Start a focus block: snooze notifications and set a self-clearing focus status. */
+  async startFocus(userId: string, minutes: number) {
+    const until = new Date(Date.now() + minutes * 60_000);
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        dndUntil: until,
+        statusEmoji: '🎯',
+        statusText: 'Focusing',
+        statusExpiresAt: until,
+      },
+    });
+    await this.broadcastStatus(userId, user);
+    return { active: true, until: until.toISOString() };
+  }
+
+  /**
+   * End a focus block early: always lift the snooze, but only clear the status if
+   * it is still the focus status — so a custom status set before/during focus survives.
+   */
+  async endFocus(userId: string) {
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { statusText: true },
+    });
+    const clearStatus = current?.statusText === 'Focusing';
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        dndUntil: null,
+        ...(clearStatus ? { statusEmoji: null, statusText: null, statusExpiresAt: null } : {}),
+      },
+    });
+    await this.broadcastStatus(userId, user);
+    return { active: false, until: null };
+  }
+
+  private async broadcastStatus(
+    userId: string,
+    user: { statusEmoji: string | null; statusText: string | null },
+  ) {
+    const state = await this.presence.effectiveState(userId);
+    const memberships = await this.prisma.workspaceMember.findMany({
+      where: { userId },
+      select: { workspaceId: true },
+    });
+    for (const m of memberships) {
+      this.realtime.emitToWorkspace(m.workspaceId, SOCKET_EVENTS.PRESENCE_CHANGED, {
+        userId,
+        state,
+        statusEmoji: user.statusEmoji,
+        statusText: user.statusText,
+      });
+    }
+  }
+
   /** Activity feed: mentions, thread replies, reactions, DMs — newest first. */
   async listNotifications(userId: string, cursor?: string, limit = 30) {
     const rows = await this.prisma.notification.findMany({

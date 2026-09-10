@@ -14,7 +14,7 @@ const PRESETS = [
 ];
 
 const inputCls =
-  'w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800';
+  'w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';
 
 /** Log time against a Jira issue — pushed to Jira as a native worklog. If
  * `issueKey` is supplied (e.g. from a Jira card) it is locked; otherwise the
@@ -86,7 +86,7 @@ export function LogTimeDialog({
             className={`rounded-full border px-2.5 py-0.5 text-[12px] font-medium ${
               minutes === p.minutes
                 ? 'border-accent bg-accent/10 text-accent'
-                : 'border-gray-300 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800'
+                : 'border-line-strong hover:bg-gray-100 dark:border-line-strong dark:hover:bg-gray-800'
             }`}
           >
             {p.label}

@@ -92,6 +92,23 @@ export class ConfluenceApiService {
     return (json?.results ?? []).map((s) => ({ key: s.key, name: s.name, id: String(s.id) }));
   }
 
+  /** Most-recently-modified pages across the whole site — for the dashboard feed. */
+  async recentPages(
+    token: string,
+    cloudId: string,
+    limit = 8,
+  ): Promise<Array<{ id: string; title: string; webui: string | null; updatedAt: string | null }>> {
+    const json = await this.req<{
+      results?: Array<RawPageV2 & { version?: { number: number; createdAt?: string } }>;
+    }>('GET', `${this.base(cloudId)}/pages?sort=-modified-date&limit=${limit}`, token);
+    return (json?.results ?? []).map((p) => ({
+      id: p.id,
+      title: p.title,
+      webui: p._links?.webui ?? null,
+      updatedAt: p.version?.createdAt ?? null,
+    }));
+  }
+
   /** v2 keys everything by numeric space id — resolve it from the human key. */
   private async spaceIdForKey(token: string, cloudId: string, spaceKey: string): Promise<string | null> {
     const json = await this.req<{ results?: RawSpaceV2[] }>(

@@ -16,9 +16,20 @@ import {
   CLIENT_EVENTS,
   ClientHuddlePayload,
   ClientHuddleSignalPayload,
+  ClientHuddleStatePayload,
+  ClientHuddleChatPayload,
+  ClientHuddleReactionPayload,
+  ClientHuddleAnnotationPayload,
+  ClientHuddleLaserPayload,
+  ClientHuddleControlPayload,
+  ClientHuddlePollPayload,
+  ClientHuddleNotesPayload,
+  ClientHuddleModerationPayload,
   ClientTypingPayload,
   SOCKET_EVENTS,
+  type SocketEventName,
 } from '@backstages/shared';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   RealtimeService,
@@ -175,19 +186,237 @@ export class RealtimeGateway
           select: { id: true, displayName: true, avatarUrl: true },
         })
       : [];
-    const participants = users.map((u) => ({
-      userId: u.id,
-      displayName: u.displayName,
-      avatarUrl: u.avatarUrl,
-    }));
-    const event = SOCKET_EVENTS.HUDDLE_PARTICIPANTS;
+    const participants = users.map((u) => {
+      const st = this.huddle.stateOf(key, u.id);
+      return {
+        userId: u.id,
+        displayName: u.displayName,
+        avatarUrl: u.avatarUrl,
+        audioEnabled: st?.audioEnabled ?? true,
+        videoEnabled: st?.videoEnabled ?? false,
+        screenSharing: st?.screenSharing ?? false,
+        handRaised: st?.handRaised ?? false,
+        role: st?.role ?? 'participant',
+        canAnnotate: st?.canAnnotate ?? true,
+        cameraStreamId: st?.cameraStreamId ?? null,
+        screenStreamId: st?.screenStreamId ?? null,
+      };
+    });
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_PARTICIPANTS, (idField) => ({ ...idField, participants }));
+  }
+
+  /** Route a huddle event to every socket in the huddle's channel/DM room,
+   *  echoing whichever id field (channelId/conversationId) identifies it. */
+  private emitToKey(
+    key: string,
+    event: SocketEventName,
+    build: (idField: { channelId?: string; conversationId?: string }) => Record<string, unknown>,
+  ) {
     if (key.startsWith('channel:')) {
       const channelId = key.slice('channel:'.length);
-      this.realtime.emitToChannel(channelId, event, { channelId, participants });
+      this.realtime.emitToChannel(channelId, event, build({ channelId }));
     } else {
       const conversationId = key.slice('conversation:'.length);
-      this.realtime.emitToConversation(conversationId, event, { conversationId, participants });
+      this.realtime.emitToConversation(conversationId, event, build({ conversationId }));
     }
+  }
+
+  /** A huddle-scoped action is valid only from a socket that is a room member
+   *  AND actually present in the huddle. Returns the key or null. */
+  private huddleGuard(socket: AuthedSocket, body: { channelId?: string; conversationId?: string }): string | null {
+    const key = this.huddleKey(body);
+    if (!key || !socket.rooms.has(key) || !this.huddle.isPresent(key, socket.data.userId)) return null;
+    return key;
+  }
+
+  private async userInfo(socket: AuthedSocket): Promise<{ displayName: string; avatarUrl: string | null }> {
+    if (!socket.data.displayName) {
+      const u = await this.prisma.user.findUnique({
+        where: { id: socket.data.userId },
+        select: { displayName: true, avatarUrl: true },
+      });
+      socket.data.displayName = u?.displayName ?? 'Someone';
+      (socket.data as { avatarUrl?: string | null }).avatarUrl = u?.avatarUrl ?? null;
+    }
+    return {
+      displayName: socket.data.displayName!,
+      avatarUrl: (socket.data as { avatarUrl?: string | null }).avatarUrl ?? null,
+    };
+  }
+
+  // ---------- huddle: media/hand state ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_STATE)
+  async onHuddleState(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleStatePayload) {
+    const key = this.huddleGuard(socket, body);
+    if (!key) return;
+    this.huddle.setState(key, socket.data.userId, {
+      audioEnabled: body.audioEnabled,
+      videoEnabled: body.videoEnabled,
+      screenSharing: body.screenSharing,
+      handRaised: body.handRaised,
+      cameraStreamId: body.cameraStreamId,
+      screenStreamId: body.screenStreamId,
+    });
+    await this.broadcastHuddle(key);
+  }
+
+  // ---------- huddle: chat ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_CHAT)
+  async onHuddleChat(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleChatPayload) {
+    const key = this.huddleGuard(socket, body);
+    const text = (body.text ?? '').trim();
+    if (!key || !text) return;
+    const { displayName, avatarUrl } = await this.userInfo(socket);
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_CHAT, (idField) => ({
+      ...idField,
+      id: randomUUID(),
+      userId: socket.data.userId,
+      displayName,
+      avatarUrl,
+      text: text.slice(0, 2000),
+      replyTo: body.replyTo ?? null,
+      createdAt: new Date().toISOString(),
+    }));
+  }
+
+  // ---------- huddle: reactions ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_REACTION)
+  async onHuddleReaction(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleReactionPayload) {
+    const key = this.huddleGuard(socket, body);
+    if (!key || !body.emoji) return;
+    const { displayName } = await this.userInfo(socket);
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_REACTION, (idField) => ({
+      ...idField,
+      userId: socket.data.userId,
+      displayName,
+      emoji: String(body.emoji).slice(0, 8),
+      id: randomUUID(),
+    }));
+  }
+
+  // ---------- huddle: annotation ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_ANNOTATION)
+  onHuddleAnnotation(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleAnnotationPayload) {
+    const key = this.huddleGuard(socket, body);
+    if (!key) return;
+    const op = body.op;
+    // 'clear' requires moderator; create/update/delete require annotate permission.
+    if (op.kind === 'clear') {
+      if (!this.huddle.isModerator(key, socket.data.userId)) return;
+    } else if (!this.huddle.canAnnotate(key, socket.data.userId)) {
+      return;
+    }
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_ANNOTATION, (idField) => ({
+      ...idField,
+      userId: socket.data.userId,
+      op,
+    }));
+  }
+
+  // ---------- huddle: laser pointer ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_LASER)
+  async onHuddleLaser(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleLaserPayload) {
+    const key = this.huddleGuard(socket, body);
+    if (!key) return;
+    const { displayName } = await this.userInfo(socket);
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_LASER, (idField) => ({
+      ...idField,
+      userId: socket.data.userId,
+      displayName,
+      point: body.point ?? null,
+    }));
+  }
+
+  // ---------- huddle: remote-control permission handshake ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_CONTROL)
+  async onHuddleControl(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleControlPayload) {
+    const key = this.huddleGuard(socket, body);
+    if (!key || !body.targetUserId) return;
+    const me = socket.data.userId;
+    const { displayName } = await this.userInfo(socket);
+    // request/cancel: requester (me) targets a presenter. grant/deny/revoke:
+    // presenter (me) responds about a requester. All are validated server-side.
+    if (body.action === 'grant') {
+      this.huddle.grantControl(key, body.targetUserId, me);
+    } else if (body.action === 'revoke' || body.action === 'deny') {
+      const session = this.huddle.getControl(key);
+      if (session && session.presenterId === me) this.huddle.revokeControl(key);
+    }
+    const presenterId = body.action === 'request' || body.action === 'cancel' ? body.targetUserId : me;
+    const requesterId = body.action === 'request' || body.action === 'cancel' ? me : body.targetUserId;
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_CONTROL, (idField) => ({
+      ...idField,
+      action: body.action,
+      requesterId,
+      requesterName: body.action === 'request' || body.action === 'cancel' ? displayName : '',
+      presenterId,
+    }));
+  }
+
+  // ---------- huddle: polls ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_POLL)
+  onHuddlePoll(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddlePollPayload) {
+    const key = this.huddleGuard(socket, body);
+    if (!key) return;
+    const me = socket.data.userId;
+    if (body.action === 'create') {
+      // Only a moderator may open a poll; one active poll per huddle.
+      if (!this.huddle.isModerator(key, me)) return;
+      const options = (body.options ?? []).map((o) => o.trim()).filter(Boolean).slice(0, 8);
+      const question = (body.question ?? '').trim();
+      if (!question || options.length < 2) return;
+      this.huddle.createPoll(key, { id: randomUUID(), question, options, votes: {}, createdBy: me, closed: false });
+    } else if (body.action === 'vote' && body.pollId && body.optionIndex !== undefined) {
+      this.huddle.votePoll(key, body.pollId, me, body.optionIndex);
+    } else if (body.action === 'close' && body.pollId) {
+      if (!this.huddle.isModerator(key, me)) return;
+      this.huddle.closePoll(key, body.pollId);
+    }
+    const poll = this.huddle.getPoll(key);
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_POLL, (idField) => ({ ...idField, poll }));
+  }
+
+  // ---------- huddle: collaborative notes ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_NOTES)
+  onHuddleNotes(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleNotesPayload) {
+    const key = this.huddleGuard(socket, body);
+    if (!key) return;
+    this.huddle.setNotes(key, body.content ?? '');
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_NOTES, (idField) => ({
+      ...idField,
+      content: this.huddle.getNotes(key),
+      updatedBy: socket.data.userId,
+    }));
+  }
+
+  // ---------- huddle: moderation (host/co-host only) ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_MODERATION)
+  async onHuddleModeration(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: ClientHuddleModerationPayload,
+  ) {
+    const key = this.huddleGuard(socket, body);
+    if (!key || !this.huddle.isModerator(key, socket.data.userId) || !body.targetUserId) return;
+    const me = socket.data.userId;
+    if (body.action === 'lower-hand') {
+      this.huddle.lowerHand(key, body.targetUserId);
+      await this.broadcastHuddle(key);
+    } else if (body.action === 'set-role' && body.role) {
+      // Only a host may hand out roles; never demote the host implicitly.
+      if (this.huddle.roleOf(key, me) !== 'host') return;
+      this.huddle.setRole(key, body.targetUserId, body.role);
+      await this.broadcastHuddle(key);
+    }
+    // 'mute-request' and 'remove' are directives the target's client acts on
+    // (a browser can't force-stop someone's mic, and removal is cooperative);
+    // relay them to the target with the moderator's identity for the UI.
+    this.realtime.emitToUser(body.targetUserId, SOCKET_EVENTS.HUDDLE_MODERATION, {
+      ...(body.channelId ? { channelId: body.channelId } : { conversationId: body.conversationId }),
+      action: body.action,
+      targetUserId: body.targetUserId,
+      role: body.role,
+      by: me,
+    });
   }
 
   @SubscribeMessage('presence:heartbeat')

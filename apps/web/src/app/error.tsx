@@ -22,7 +22,7 @@ export default function Error({
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6 dark:bg-gray-950">
-      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <div className="w-full max-w-md rounded-xl border border-line bg-white p-6 text-center shadow-sm dark:border-line dark:bg-gray-900">
         <h1 className="text-lg font-bold">{t.title}</h1>
         <p className="mt-1 text-sm text-gray-500">{t.body}</p>
         {error.digest && (
@@ -37,7 +37,7 @@ export default function Error({
           </button>
           <button
             onClick={() => window.location.reload()}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+            className="rounded-md border border-line-strong px-4 py-2 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800"
           >
             {t.reload}
           </button>

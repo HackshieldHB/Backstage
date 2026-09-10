@@ -31,10 +31,19 @@ import { UsersModule } from './users/users.module';
 import { AtlassianModule } from './atlassian/atlassian.module';
 import { TimesheetModule } from './timesheet/timesheet.module';
 import { StandupsModule } from './standups/standups.module';
+import { ChannelIntegrationsModule } from './channel-integrations/channel-integrations.module';
+import { DecisionsModule } from './decisions/decisions.module';
+import { WeeklyReportModule } from './weekly-report/weekly-report.module';
+import { WellbeingModule } from './wellbeing/wellbeing.module';
+import { DigestModule } from './digest/digest.module';
+import { ProjectsModule } from './projects/projects.module';
+import { IncidentsModule } from './incidents/incidents.module';
+import { CalendarModule } from './calendar/calendar.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 import { ObservabilityModule } from './observability/observability.module';
+import { RecommendationsModule } from './recommendations/recommendations.module';
 import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
@@ -72,6 +81,15 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     AtlassianModule,
     TimesheetModule,
     StandupsModule,
+    ChannelIntegrationsModule,
+    DecisionsModule,
+    WeeklyReportModule,
+    WellbeingModule,
+    DigestModule,
+    ProjectsModule,
+    IncidentsModule,
+    CalendarModule,
+    RecommendationsModule,
   ],
   controllers: [HealthController],
   providers: [

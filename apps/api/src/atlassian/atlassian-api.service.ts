@@ -317,6 +317,139 @@ export class AtlassianApiService {
     }));
   }
 
+  /**
+   * Fast count-only query via the dedicated approximate-count endpoint — used by
+   * the dashboard so a headline number never pulls a full issue page. Same JQL
+   * safety contract as {@link searchJql}: server-owned literals / validated keys only.
+   */
+  async countJql(accessToken: string, cloudId: string, jql: string): Promise<number> {
+    const res = await fetch(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/approximate-count`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jql }),
+      },
+    );
+    if (!res.ok) {
+      this.logger.warn(`Atlassian count ${jql} -> ${res.status}`);
+      throw new BadGatewayException('Atlassian API request failed');
+    }
+    const json = (await res.json()) as { count?: number };
+    return json.count ?? 0;
+  }
+
+  // ---------- Dashboards & gadgets (for mirroring the user's real Jira dashboards) ----------
+
+  async listDashboards(
+    accessToken: string,
+    cloudId: string,
+  ): Promise<Array<{ id: string; name: string; view: string | null }>> {
+    const json = await this.get<{ dashboards?: Array<{ id: string; name: string; view?: string }> }>(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/dashboard?maxResults=50`,
+      accessToken,
+    );
+    return (json?.dashboards ?? []).map((d) => ({ id: d.id, name: d.name, view: d.view ?? null }));
+  }
+
+  async dashboardGadgets(
+    accessToken: string,
+    cloudId: string,
+    dashboardId: string,
+  ): Promise<Array<{ id: number; title: string; moduleKey: string | null; color: string | null }>> {
+    const json = await this.get<{
+      gadgets?: Array<{ id: number; title: string; moduleKey?: string; uri?: string; color?: string }>;
+    }>(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/dashboard/${dashboardId}/gadget`,
+      accessToken,
+    );
+    return (json?.gadgets ?? []).map((g) => ({
+      id: g.id,
+      title: g.title,
+      moduleKey: g.moduleKey ?? g.uri ?? null,
+      color: g.color ?? null,
+    }));
+  }
+
+  /** A saved filter's JQL — used to render filter-backed gadgets. */
+  async getFilterJql(accessToken: string, cloudId: string, filterId: string): Promise<string | null> {
+    const json = await this.get<{ jql?: string }>(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/filter/${encodeURIComponent(filterId)}`,
+      accessToken,
+    );
+    return json?.jql ?? null;
+  }
+
+  /** Best-effort read of a gadget's stored config (e.g. a filter id) from its item properties. */
+  async gadgetConfig(
+    accessToken: string,
+    cloudId: string,
+    dashboardId: string,
+    itemId: number,
+  ): Promise<Record<string, string>> {
+    const base = `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/dashboard/${dashboardId}/items/${itemId}/properties`;
+    const keys = await this.get<{ keys?: Array<{ key: string }> }>(base, accessToken).catch(() => null);
+    const out: Record<string, string> = {};
+    for (const k of keys?.keys ?? []) {
+      const v = await this.get<{ value?: unknown }>(`${base}/${encodeURIComponent(k.key)}`, accessToken).catch(() => null);
+      if (v && v.value !== undefined) out[k.key] = typeof v.value === 'string' ? v.value : JSON.stringify(v.value);
+    }
+    return out;
+  }
+
+  // ---------- Agile (boards & sprints) ----------
+
+  private agileBase(cloudId: string): string {
+    return `https://api.atlassian.com/ex/jira/${cloudId}/rest/agile/1.0`;
+  }
+
+  /** Scrum/Kanban boards on the site. */
+  async listBoards(accessToken: string, cloudId: string): Promise<Array<{ id: number; name: string }>> {
+    const json = await this.get<{ values?: Array<{ id: number; name: string }> }>(
+      `${this.agileBase(cloudId)}/board?maxResults=50`,
+      accessToken,
+    );
+    return (json?.values ?? []).map((b) => ({ id: b.id, name: b.name }));
+  }
+
+  /** Active sprints for a board. Throws for boards without sprints (Kanban) — callers guard. */
+  async activeSprints(
+    accessToken: string,
+    cloudId: string,
+    boardId: number,
+  ): Promise<Array<{ id: number; name: string; endDate: string | null }>> {
+    const json = await this.get<{ values?: Array<{ id: number; name: string; endDate?: string }> }>(
+      `${this.agileBase(cloudId)}/board/${boardId}/sprint?state=active`,
+      accessToken,
+    );
+    return (json?.values ?? []).map((s) => ({ id: s.id, name: s.name, endDate: s.endDate ?? null }));
+  }
+
+  /** Issues in a sprint, with the coarse status category for progress bars. */
+  async sprintIssues(
+    accessToken: string,
+    cloudId: string,
+    sprintId: number,
+  ): Promise<Array<{ key: string; summary: string; status: string | null; category: 'todo' | 'inProgress' | 'done' }>> {
+    const json = await this.get<{
+      issues?: Array<{
+        key: string;
+        fields?: { summary?: string; status?: { name?: string; statusCategory?: { key?: string } } };
+      }>;
+    }>(
+      `${this.agileBase(cloudId)}/sprint/${sprintId}/issue?fields=summary,status&maxResults=100`,
+      accessToken,
+    );
+    const mapCat = (key?: string): 'todo' | 'inProgress' | 'done' =>
+      key === 'done' ? 'done' : key === 'indeterminate' ? 'inProgress' : 'todo';
+    return (json?.issues ?? []).map((i) => ({
+      key: i.key,
+      summary: i.fields?.summary ?? i.key,
+      status: i.fields?.status?.name ?? null,
+      category: mapCat(i.fields?.status?.statusCategory?.key),
+    }));
+  }
+
   /** Recent issues in a project (the sidebar browse tree). */
   async searchIssues(
     accessToken: string,

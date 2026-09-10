@@ -6,23 +6,27 @@ import {
   BarChart3,
   Bell,
   Bookmark,
+  Briefcase,
   CalendarClock,
   ChevronDown,
+  ClipboardCheck,
   Clock,
+  Webhook,
   FileText,
+  Inbox,
+  Compass,
   ScrollText,
+  Siren,
   SquareKanban,
   UsersRound,
   Hash,
   Lock,
   LogOut,
   MessageSquare,
-  Moon,
   Plus,
   Search,
   Smile,
   Sparkles,
-  Sun,
   Timer,
   UserPlus,
   Zap,
@@ -53,6 +57,11 @@ import { WorkspaceSettingsDialog } from './workspace-settings-dialog';
 import { CatchUpDialog } from './catch-up-dialog';
 import { ScheduledDialog } from './scheduled-dialog';
 import { StandupsDialog } from './standups-dialog';
+import { IntegrationsDialog } from './integrations-dialog';
+import { DecisionsDialog } from './decisions-dialog';
+import { WeeklyReportsDialog } from './weekly-reports-dialog';
+import { ThemePicker } from './theme-picker';
+import { WellbeingCard, FocusCard, DigestToggle, CalendarLink } from './wellbeing-card';
 import { WorkflowsDialog } from './workflows-dialog';
 import { UserGroupsDialog, AnalyticsDialog, AuditDialog } from './workspace-admin';
 import { Tooltip } from './tooltip';
@@ -73,7 +82,7 @@ export function Sidebar({
 }) {
   const me = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const { theme, setTheme, setRightPanel, rightPanel, setSearchOpen, mainView, setMainView, lang } = useUiStore();
+  const { setRightPanel, rightPanel, setCommandOpen, mainView, setMainView, lang } = useUiStore();
   const unreads = useUnreads(workspaceId);
   const presence = usePresence(workspaceId);
   const notifications = useNotifications();
@@ -82,7 +91,7 @@ export function Sidebar({
   const workspace = workspaces.data?.find((w) => w.id === workspaceId);
 
   const [dialog, setDialog] = useState<
-    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'settings' | 'catch-up' | 'scheduled' | 'workflows' | 'user-groups' | 'analytics' | 'audit' | 'standups'
+    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'settings' | 'catch-up' | 'scheduled' | 'workflows' | 'user-groups' | 'analytics' | 'audit' | 'standups' | 'integrations' | 'decisions' | 'weekly-reports' | 'work-dashboard'
   >('none');
   const isAdmin = workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN';
 
@@ -98,22 +107,6 @@ export function Sidebar({
   }, []);
 
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  // The secondary "Tools" group is collapsible so the sidebar isn't a wall of
-  // buttons for new members. Defaults open; the choice is remembered per browser.
-  const [toolsOpen, setToolsOpen] = useState(true);
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setToolsOpen(window.localStorage.getItem('bs.sidebar.toolsOpen') !== '0');
-    }
-  }, []);
-  const toggleTools = () =>
-    setToolsOpen((v) => {
-      const next = !v;
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('bs.sidebar.toolsOpen', next ? '1' : '0');
-      }
-      return next;
-    });
   // Platform-aware search shortcut hint (⌘K on Mac, Ctrl K elsewhere). Resolved
   // after mount to keep SSR output stable and avoid a hydration mismatch.
   const [modKey, setModKey] = useState('⌘K');
@@ -199,11 +192,11 @@ export function Sidebar({
   ];
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col bg-sidebar text-gray-200">
+    <aside className="sidebar-surface flex h-full w-64 shrink-0 flex-col border-r border-line text-ink">
       {/* Workspace header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
-          className="flex items-center gap-1 text-[15px] font-bold text-white"
+          className="flex items-center gap-1 text-[15px] font-bold text-ink"
           onClick={() => setDialog('settings')}
           title="Workspace settings"
           data-testid="workspace-menu"
@@ -214,7 +207,7 @@ export function Sidebar({
           <button
             title="Invite people"
             onClick={() => setDialog('invite')}
-            className="rounded p-1.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white"
+            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
             data-testid="invite-button"
           >
             <UserPlus size={16} />
@@ -222,18 +215,34 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Search trigger */}
+      {/* Command palette launcher (search + jump + run) */}
       <button
         ref={searchRef}
-        onClick={() => setSearchOpen(true)}
-        className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 text-[13px] text-sidebar-muted hover:bg-white/10"
+        onClick={() => setCommandOpen(true)}
+        className="mx-3 mb-3 flex items-center gap-2 rounded-lg border border-line bg-hovered px-2.5 py-2 text-[13px] text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
         data-testid="search-trigger"
       >
-        <Search size={14} /> Search… <kbd className="ml-auto text-[10px] opacity-70">{modKey}</kbd>
+        <Search size={14} className="text-ink-3" /> Search or jump to…
+        <kbd className="ml-auto rounded border border-line px-1 py-0.5 text-[10px] text-ink-3">{modKey}</kbd>
       </button>
 
       <div className="thin-scrollbar flex-1 overflow-y-auto px-2 pb-2">
         {/* Primary quick-access */}
+        <SectionButton
+          icon={<Inbox size={15} />}
+          label={t('inbox')}
+          badge={activityBadge}
+          active={mainView === 'inbox'}
+          onClick={() => setMainView('inbox')}
+          testId="inbox-button"
+        />
+        <SectionButton
+          icon={<Compass size={15} />}
+          label="Discover"
+          active={mainView === 'discover'}
+          onClick={() => setMainView('discover')}
+          testId="discover-button"
+        />
         <SectionButton
           icon={<MessageSquare size={15} />}
           label={t('threads')}
@@ -266,85 +275,117 @@ export function Sidebar({
           buttonRef={catchUpRef}
         />
 
-        {/* Tools (collapsible so the sidebar stays approachable) */}
-        <button
-          onClick={toggleTools}
-          className="mt-4 flex w-full items-center gap-1 px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted hover:text-white"
-          data-testid="tools-header"
-        >
-          <ChevronDown size={12} className={clsx('transition-transform', !toolsOpen && '-rotate-90')} />
-          {t('tools')}
-        </button>
-        {toolsOpen && (
-          <>
+        {/* Insights — data views that replace the chat pane */}
+        <NavGroup id="insights" label={t('insights')}>
+          {atlassian.data?.connected && (
             <SectionButton
-              icon={<Timer size={15} />}
-              label={t('team_timeline')}
-              active={mainView === 'timeline'}
-              onClick={() => setMainView('timeline')}
-              testId="timeline-button"
-              buttonRef={timelineRef}
+              icon={<SquareKanban size={15} />}
+              label="Jira"
+              active={mainView === 'jira'}
+              onClick={() => setMainView('jira')}
+              testId="jira-view-button"
             />
+          )}
+          {atlassian.data?.connected && atlassian.data.confluenceReady && (
             <SectionButton
-              icon={<CalendarClock size={15} />}
-              label={t('standups')}
-              onClick={() => setDialog('standups')}
-              testId="standups-button"
+              icon={<FileText size={15} />}
+              label="Confluence"
+              active={mainView === 'confluence'}
+              onClick={() => setMainView('confluence')}
+              testId="confluence-view-button"
             />
+          )}
+          <SectionButton
+            icon={<Timer size={15} />}
+            label={t('team_timeline')}
+            active={mainView === 'timeline'}
+            onClick={() => setMainView('timeline')}
+            testId="timeline-button"
+            buttonRef={timelineRef}
+          />
+          {isAdmin && (
             <SectionButton
-              icon={<Clock size={15} />}
-              label={t('scheduled')}
-              onClick={() => setDialog('scheduled')}
-              testId="scheduled-button"
+              icon={<Briefcase size={15} />}
+              label={t('clients_projects')}
+              active={mainView === 'projects'}
+              onClick={() => setMainView('projects')}
+              testId="projects-button"
             />
-            <SectionButton
-              icon={<Zap size={15} />}
-              label={t('workflows')}
-              onClick={() => setDialog('workflows')}
-              testId="workflows-button"
-            />
-            <SectionButton
-              icon={<UsersRound size={15} />}
-              label={t('user_groups')}
-              onClick={() => setDialog('user-groups')}
-              testId="user-groups-button"
-            />
-            {atlassian.data?.connected && (
+          )}
+          <SectionButton
+            icon={<Siren size={15} />}
+            label={t('incidents')}
+            active={mainView === 'incidents'}
+            onClick={() => setMainView('incidents')}
+            testId="incidents-button"
+          />
+        </NavGroup>
+
+        {/* Productivity — actions and recurring work */}
+        <NavGroup id="productivity" label={t('productivity')}>
+          <SectionButton
+            icon={<CalendarClock size={15} />}
+            label={t('standups')}
+            onClick={() => setDialog('standups')}
+            testId="standups-button"
+          />
+          <SectionButton
+            icon={<ClipboardCheck size={15} />}
+            label={t('decisions')}
+            onClick={() => setDialog('decisions')}
+            testId="decisions-button"
+          />
+          <SectionButton
+            icon={<BarChart3 size={15} />}
+            label={t('weekly_reports')}
+            onClick={() => setDialog('weekly-reports')}
+            testId="weekly-reports-button"
+          />
+          <SectionButton
+            icon={<Zap size={15} />}
+            label={t('workflows')}
+            onClick={() => setDialog('workflows')}
+            testId="workflows-button"
+          />
+          <SectionButton
+            icon={<Clock size={15} />}
+            label={t('scheduled')}
+            onClick={() => setDialog('scheduled')}
+            testId="scheduled-button"
+          />
+        </NavGroup>
+
+        {/* Workspace — configuration & admin */}
+        <NavGroup id="workspace" label={t('workspace_group')} defaultOpen={false}>
+          <SectionButton
+            icon={<Webhook size={15} />}
+            label={t('integrations')}
+            onClick={() => setDialog('integrations')}
+            testId="integrations-button"
+          />
+          <SectionButton
+            icon={<UsersRound size={15} />}
+            label={t('user_groups')}
+            onClick={() => setDialog('user-groups')}
+            testId="user-groups-button"
+          />
+          {isAdmin && (
+            <>
               <SectionButton
-                icon={<SquareKanban size={15} />}
-                label="Jira"
-                active={mainView === 'jira'}
-                onClick={() => setMainView('jira')}
-                testId="jira-view-button"
+                icon={<BarChart3 size={15} />}
+                label={t('analytics')}
+                onClick={() => setDialog('analytics')}
+                testId="analytics-button"
               />
-            )}
-            {atlassian.data?.connected && atlassian.data.confluenceReady && (
               <SectionButton
-                icon={<FileText size={15} />}
-                label="Confluence"
-                active={mainView === 'confluence'}
-                onClick={() => setMainView('confluence')}
-                testId="confluence-view-button"
+                icon={<ScrollText size={15} />}
+                label={t('audit_log')}
+                onClick={() => setDialog('audit')}
+                testId="audit-button"
               />
-            )}
-            {isAdmin && (
-              <>
-                <SectionButton
-                  icon={<BarChart3 size={15} />}
-                  label={t('analytics')}
-                  onClick={() => setDialog('analytics')}
-                  testId="analytics-button"
-                />
-                <SectionButton
-                  icon={<ScrollText size={15} />}
-                  label={t('audit_log')}
-                  onClick={() => setDialog('audit')}
-                  testId="audit-button"
-                />
-              </>
-            )}
-          </>
-        )}
+            </>
+          )}
+        </NavGroup>
 
         {/* Channels */}
         <SectionHeader
@@ -375,7 +416,7 @@ export function Sidebar({
             <div key={gk}>
               <button
                 onClick={() => setCollapsedGroups((s) => ({ ...s, [gk]: !s[gk] }))}
-                className="mt-4 flex w-full items-center gap-1 px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted hover:text-white"
+                className="mt-4 flex w-full items-center gap-1 px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-3 hover:text-ink"
               >
                 <ChevronDown
                   size={12}
@@ -422,10 +463,10 @@ export function Sidebar({
                   className={clsx(
                     'flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px]',
                     active
-                      ? 'bg-sidebar-active font-medium text-white'
+                      ? 'bg-accent/10 font-medium text-accent'
                       : u.unread > 0
-                        ? 'font-semibold text-white hover:bg-sidebar-hover'
-                        : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-gray-100',
+                        ? 'font-semibold text-ink hover:bg-hovered'
+                        : 'text-ink-2 hover:bg-hovered hover:text-ink',
                   )}
                 >
                   <Avatar
@@ -447,34 +488,25 @@ export function Sidebar({
       </div>
 
       {/* Footer: current user */}
-      <div className="flex items-center gap-2 border-t border-white/10 px-3 py-2.5">
-        <button onClick={() => setDialog('status')} title="Edit profile & status" className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 hover:bg-sidebar-hover">
+      <div className="flex items-center gap-2 border-t border-line px-3 py-2.5">
+        <button onClick={() => setDialog('status')} title="Edit profile & status" className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 hover:bg-hovered">
           <Avatar user={me} size="sm" presence={me ? (presence.data?.[me.id] ?? 'ACTIVE') : undefined} />
           <span className="min-w-0 flex-1 text-left">
-            <span className="block truncate text-[13px] font-medium text-white">{me?.displayName}</span>
+            <span className="block truncate text-[13px] font-medium text-ink">{me?.displayName}</span>
             {me?.statusText && (
-              <span className="block truncate text-[11px] text-sidebar-muted">
+              <span className="block truncate text-[11px] text-ink-2">
                 {me.statusEmoji ? `${emojiChar(me.statusEmoji)} ` : ''}
                 {me.statusText}
               </span>
             )}
           </span>
         </button>
-        <Tooltip label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
-          <button
-            aria-label="Toggle theme"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="rounded p-1.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white"
-            data-testid="theme-toggle"
-          >
-            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-          </button>
-        </Tooltip>
+        <ThemePicker />
         <Tooltip label="Sign out">
           <button
             aria-label="Sign out"
             onClick={() => void logout()}
-            className="rounded p-1.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white"
+            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
           >
             <LogOut size={15} />
           </button>
@@ -493,6 +525,7 @@ export function Sidebar({
       )}
       {dialog === 'status' && (
         <ProfileDialog
+          workspaceId={workspaceId}
           initialPresence={
             (me && (presence.data?.[me.id] as 'ACTIVE' | 'AWAY' | 'DND' | undefined)) ?? 'ACTIVE'
           }
@@ -537,6 +570,15 @@ export function Sidebar({
       {dialog === 'standups' && (
         <StandupsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
       )}
+      {dialog === 'decisions' && (
+        <DecisionsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
+      )}
+      {dialog === 'weekly-reports' && (
+        <WeeklyReportsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
+      )}
+      {dialog === 'integrations' && (
+        <IntegrationsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
+      )}
 
       <GuidedTour
         storageKey="bs.tour.sidebar.v1"
@@ -574,10 +616,10 @@ function ChannelRow({
         className={clsx(
           'group flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px]',
           active
-            ? 'bg-sidebar-active font-medium text-white'
+            ? 'bg-accent/10 font-medium text-accent'
             : unread.unread > 0
-              ? 'font-semibold text-white hover:bg-sidebar-hover'
-              : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-gray-100',
+              ? 'font-semibold text-ink hover:bg-hovered'
+              : 'text-ink-2 hover:bg-hovered hover:text-ink',
         )}
       >
         {ch.isPrivate ? <Lock size={13} className="shrink-0" /> : <Hash size={13} className="shrink-0" />}
@@ -589,7 +631,7 @@ function ChannelRow({
         )}
         {unread.mentions === 0 && unread.unread > 0 && (
           <span
-            className="ml-auto rounded-full bg-white/20 px-1.5 text-[11px] font-semibold text-white"
+            className="ml-auto rounded-full bg-accent/15 px-1.5 text-[11px] font-semibold text-accent"
             data-testid={`unread-${ch.name}`}
           >
             {unread.unread}
@@ -623,16 +665,56 @@ function SectionButton({
       onClick={onClick}
       data-testid={testId}
       className={clsx(
-        'flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px]',
-        active ? 'bg-sidebar-active text-white' : 'text-sidebar-muted hover:bg-sidebar-hover hover:text-gray-100',
+        'relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors',
+        active
+          ? 'bg-accent/10 font-medium text-accent before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-accent'
+          : 'text-ink-2 hover:bg-hovered hover:text-ink',
       )}
     >
-      {icon}
-      {label}
+      <span className={clsx('shrink-0', active ? 'text-accent' : 'text-ink-3')}>{icon}</span>
+      <span className="truncate">{label}</span>
       {badge != null && badge > 0 && (
-        <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">{badge}</span>
+        <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{badge}</span>
       )}
     </button>
+  );
+}
+
+/** A collapsible sidebar hub. Remembers its open/closed state per `id`. */
+function NavGroup({
+  id,
+  label,
+  defaultOpen = true,
+  children,
+}: {
+  id: string;
+  label: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => {
+    const v = window.localStorage.getItem(`bs.sidebar.${id}`);
+    if (v !== null) setOpen(v !== '0');
+  }, [id]);
+  const toggle = () =>
+    setOpen((o) => {
+      const next = !o;
+      window.localStorage.setItem(`bs.sidebar.${id}`, next ? '1' : '0');
+      return next;
+    });
+  return (
+    <>
+      <button
+        onClick={toggle}
+        className="mt-5 flex w-full items-center gap-1 px-2.5 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-3 transition-colors hover:text-ink-2"
+        data-testid={`navgroup-${id}`}
+      >
+        <ChevronDown size={11} className={clsx('transition-transform', !open && '-rotate-90')} />
+        {label}
+      </button>
+      {open && <div className="space-y-0.5">{children}</div>}
+    </>
   );
 }
 
@@ -657,15 +739,15 @@ function SectionHeader({
   const key = testIdKey ?? label.toLowerCase().replace(/\s/g, '-');
   return (
     <div ref={headerRef} className="mt-4 flex items-center justify-between px-2 pb-1">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted">{label}</span>
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-2">{label}</span>
       <span className="flex gap-1">
         {onBrowse && (
-          <button onClick={onBrowse} title={browseTitle} className="rounded p-0.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white">
+          <button onClick={onBrowse} title={browseTitle} className="rounded p-0.5 text-ink-3 hover:bg-hovered hover:text-ink">
             <Search size={13} />
           </button>
         )}
         {onAdd && (
-          <button onClick={onAdd} title={addTitle} data-testid={`add-${key}`} className="rounded p-0.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white">
+          <button onClick={onAdd} title={addTitle} data-testid={`add-${key}`} className="rounded p-0.5 text-ink-3 hover:bg-hovered hover:text-ink">
             <Plus size={13} />
           </button>
         )}
@@ -709,7 +791,7 @@ function CreateChannelDialog({
       >
         {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
         <input
-          className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+          className="mb-3 w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
           placeholder="e.g. project-launch"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -750,13 +832,13 @@ function BrowseChannelsDialog({
   return (
     <Dialog title="Browse channels" onClose={onClose} wide>
       <input
-        className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+        className="mb-3 w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
         placeholder="Filter channels"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         autoFocus
       />
-      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+      <ul className="divide-y divide-line dark:divide-line">
         {list.map((ch) => (
           <li key={ch.id} className="flex items-center justify-between py-2">
             <div>
@@ -771,7 +853,7 @@ function BrowseChannelsDialog({
               </div>
             </div>
             {ch.isMember ? (
-              <button onClick={() => onOpen(ch.id)} className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800">
+              <button onClick={() => onOpen(ch.id)} className="rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800">
                 Open
               </button>
             ) : (
@@ -833,7 +915,7 @@ function InviteDialog({ workspaceId, onClose }: { workspaceId: string; onClose: 
         <div>
           {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
           <input
-            className="mb-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+            className="mb-2 w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
             placeholder="colleague@company.com"
             type="email"
             value={email}
@@ -842,7 +924,7 @@ function InviteDialog({ workspaceId, onClose }: { workspaceId: string; onClose: 
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as typeof role)}
-            className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
+            className="mb-3 w-full rounded-md border border-line-strong px-3 py-2 text-sm dark:border-line dark:bg-gray-800"
           >
             <option value="MEMBER">Member</option>
             <option value="ADMIN">Admin</option>
@@ -859,7 +941,7 @@ function InviteDialog({ workspaceId, onClose }: { workspaceId: string; onClose: 
             <button
               onClick={() => void create(false)}
               data-testid="create-invite-link"
-              className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+              className="flex-1 rounded-md border border-line-strong px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800"
             >
               Create link
             </button>
@@ -895,7 +977,7 @@ function DmPickerDialog({
   return (
     <Dialog title="New direct message" onClose={onClose}>
       <input
-        className="mb-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+        className="mb-2 w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
         placeholder="Search people"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
@@ -904,7 +986,7 @@ function DmPickerDialog({
       <ul className="mb-3 max-h-60 overflow-y-auto">
         {candidates.map((m) => (
           <li key={m.user.id}>
-            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800">
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-hovered">
               <input
                 type="checkbox"
                 checked={selected.includes(m.user.id)}
@@ -951,9 +1033,11 @@ const PRESENCE_META: Record<'ACTIVE' | 'AWAY' | 'DND', { label: string; dot: str
 };
 
 function ProfileDialog({
+  workspaceId,
   initialPresence = 'ACTIVE',
   onClose,
 }: {
+  workspaceId: string;
   initialPresence?: 'ACTIVE' | 'AWAY' | 'DND';
   onClose: () => void;
 }) {
@@ -1034,7 +1118,7 @@ function ProfileDialog({
   };
 
   const inputCls =
-    'w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800';
+    'w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';
 
   return (
     <Dialog title="Edit profile" onClose={onClose}>
@@ -1042,7 +1126,7 @@ function ProfileDialog({
 
       <div className="mb-4 flex items-center gap-3">
         <Avatar user={me} size="lg" />
-        <label className="cursor-pointer rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800">
+        <label className="cursor-pointer rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800">
           {uploading ? 'Uploading…' : 'Change photo'}
           <input
             type="file"
@@ -1134,7 +1218,7 @@ function ProfileDialog({
           onClose();
           window.dispatchEvent(new Event('bs:start-tour'));
         }}
-        className="mb-3 flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+        className="mb-3 flex w-full items-center justify-center gap-2 rounded-md border border-line-strong px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800"
         data-testid="replay-tour"
       >
         <Sparkles size={14} className="text-accent" />
@@ -1157,7 +1241,7 @@ function ProfileDialog({
                 until: o.mins ? new Date(Date.now() + o.mins * 60_000).toISOString() : null,
               })
             }
-            className="rounded-full border border-gray-300 px-2.5 py-0.5 text-[12px] font-medium hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+            className="rounded-full border border-line-strong px-2.5 py-0.5 text-[12px] font-medium hover:bg-gray-100 dark:border-line-strong dark:hover:bg-gray-800"
             data-testid="dnd-option"
           >
             {o.label}
@@ -1175,7 +1259,38 @@ function ProfileDialog({
         ))}
       </div>
 
-      <div className="mb-4 rounded-md border border-gray-200 p-2.5 dark:border-gray-700">
+      <label className="mb-1 block text-xs font-medium text-gray-500">Focus mode</label>
+      <div className="mb-4 flex flex-wrap gap-2">
+        {[
+          { label: 'Focus 25 min', mins: 25 },
+          { label: 'Focus 50 min', mins: 50 },
+        ].map((o) => (
+          <button
+            key={o.label}
+            type="button"
+            onClick={() => void api('POST', '/me/focus', { minutes: o.mins })}
+            className="rounded-full border border-accent px-2.5 py-0.5 text-[12px] font-medium text-accent hover:bg-accent/10"
+            data-testid="focus-option"
+          >
+            🎯 {o.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => void api('POST', '/me/focus/end', {})}
+          className="rounded-full border border-line-strong px-2.5 py-0.5 text-[12px] font-medium hover:bg-gray-100 dark:border-line-strong dark:hover:bg-gray-800"
+          data-testid="focus-end"
+        >
+          End
+        </button>
+      </div>
+
+      <WellbeingCard workspaceId={workspaceId} />
+      <FocusCard workspaceId={workspaceId} />
+      <DigestToggle workspaceId={workspaceId} />
+      <CalendarLink />
+
+      <div className="mb-4 rounded-md border border-line p-2.5 dark:border-line">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
             Desktop notifications

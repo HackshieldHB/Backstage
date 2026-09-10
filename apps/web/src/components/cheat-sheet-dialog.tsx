@@ -7,7 +7,7 @@ function Row({ keys, desc }: { keys: string; desc: string }) {
   return (
     <div className="flex items-start justify-between gap-3 py-1.5">
       <span className="text-sm text-gray-600 dark:text-gray-300">{desc}</span>
-      <kbd className="shrink-0 rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-mono text-[11px] text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">
+      <kbd className="shrink-0 rounded border border-line-strong bg-gray-50 px-1.5 py-0.5 font-mono text-[11px] text-gray-700 dark:border-line-strong dark:bg-gray-800 dark:text-gray-200">
         {keys}
       </kbd>
     </div>
@@ -16,7 +16,7 @@ function Row({ keys, desc }: { keys: string; desc: string }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="border-t border-gray-100 pt-2 first:border-t-0 first:pt-0 dark:border-gray-800">
+    <div className="border-t border-line pt-2 first:border-t-0 first:pt-0 dark:border-line">
       <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</h3>
       {children}
     </div>

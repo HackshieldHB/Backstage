@@ -2,12 +2,209 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+   THEME SYSTEM
+   Each theme defines a full tinted neutral ramp (--gray-50..950) so every
+   surface, text and border in the app re-colours cohesively — plus its accent
+   and sidebar. Light themes leave .dark off; dark themes add it (via JS).
+   Default (:root) = Daylight.
+   ========================================================================== */
+/* Sidebar surface tokens reference the shared ladder, so the nav always belongs
+   to the same visual system as the content (defined once, not per theme). */
+:root {
+  --sidebar-bg: var(--nav);
+  --sidebar-hover: var(--hover);
+  --sidebar-muted: var(--ink-2);
+}
+
+/* ---------- Daylight (default, light) ---------- */
 :root {
   color-scheme: light;
+  --gray-50: 248 250 252;
+  --gray-100: 241 245 249;
+  --gray-200: 226 232 240;
+  --gray-300: 203 213 225;
+  --gray-400: 148 163 184;
+  --gray-500: 100 116 139;
+  --gray-600: 71 85 105;
+  --gray-700: 51 65 85;
+  --gray-800: 30 41 59;
+  --gray-900: 15 23 42;
+  --gray-950: 2 6 23;
+  --canvas: 238 240 244;
+  --nav: 239 241 245;
+  --surface: 255 255 255;
+  --elevated: 255 255 255;
+  --hover: 237 239 243;
+  --overlay: 255 255 255;
+  --line: 228 231 236;
+  --line-strong: 208 213 221;
+  --ink: 22 25 31;
+  --ink-2: 92 99 110;
+  --ink-3: 140 148 161;
+  --accent: 99 91 244;
+  --accent-hover: 79 70 229;
+  --accent-grad-from: 99 91 244;
+  --accent-grad-to: 168 85 247;
+}
+
+/* ---------- Linen (light, warm) ---------- */
+[data-accent='linen'] {
+  --gray-50: 250 250 249;
+  --gray-100: 245 245 244;
+  --gray-200: 231 229 228;
+  --gray-300: 214 211 209;
+  --gray-400: 168 162 158;
+  --gray-500: 120 113 108;
+  --gray-600: 87 83 78;
+  --gray-700: 68 64 60;
+  --gray-800: 41 37 36;
+  --gray-900: 28 25 23;
+  --gray-950: 12 10 9;
+  --canvas: 243 241 236;
+  --nav: 244 242 237;
+  --surface: 255 255 255;
+  --elevated: 255 255 255;
+  --hover: 241 238 231;
+  --overlay: 255 255 255;
+  --line: 233 228 220;
+  --line-strong: 216 209 198;
+  --ink: 38 34 29;
+  --ink-2: 107 98 89;
+  --ink-3: 154 144 133;
+  --accent: 202 110 20;
+  --accent-hover: 170 92 14;
+  --accent-grad-from: 245 158 11;
+  --accent-grad-to: 234 88 12;
+}
+
+/* ---------- Midnight (dark, blue) ---------- */
+[data-accent='midnight'] {
+  --gray-50: 236 244 255;
+  --gray-100: 219 233 250;
+  --gray-200: 191 210 235;
+  --gray-300: 148 174 208;
+  --gray-400: 108 134 170;
+  --gray-500: 84 105 138;
+  --gray-600: 62 80 110;
+  --gray-700: 42 58 86;
+  --gray-800: 26 38 62;
+  --gray-900: 15 24 44;
+  --gray-950: 8 14 28;
+  --canvas: 8 11 18;
+  --nav: 10 13 21;
+  --surface: 20 27 45;
+  --elevated: 29 39 62;
+  --hover: 38 49 76;
+  --overlay: 29 39 62;
+  --line: 40 51 76;
+  --line-strong: 55 70 100;
+  --ink: 232 237 247;
+  --ink-2: 150 162 187;
+  --ink-3: 96 108 134;
+  --accent: 56 189 248;
+  --accent-hover: 14 165 233;
+  --accent-grad-from: 56 189 248;
+  --accent-grad-to: 59 130 246;
+}
+
+/* ---------- Obsidian (dark, neutral) ---------- */
+[data-accent='obsidian'] {
+  --gray-50: 250 250 250;
+  --gray-100: 244 244 245;
+  --gray-200: 228 228 231;
+  --gray-300: 212 212 216;
+  --gray-400: 161 161 170;
+  --gray-500: 113 113 122;
+  --gray-600: 82 82 91;
+  --gray-700: 63 63 70;
+  --gray-800: 39 39 42;
+  --gray-900: 24 24 27;
+  --gray-950: 9 9 11;
+  --canvas: 9 9 11;
+  --nav: 10 10 12;
+  --surface: 28 28 33;
+  --elevated: 38 38 45;
+  --hover: 47 47 55;
+  --overlay: 38 38 45;
+  --line: 46 46 54;
+  --line-strong: 64 64 74;
+  --ink: 240 240 243;
+  --ink-2: 161 161 170;
+  --ink-3: 106 106 116;
+  --accent: 167 139 250;
+  --accent-hover: 139 92 246;
+  --accent-grad-from: 168 85 247;
+  --accent-grad-to: 217 70 239;
+}
+
+/* ---------- Forest (dark, green) ---------- */
+[data-accent='forest'] {
+  --gray-50: 240 249 245;
+  --gray-100: 224 242 233;
+  --gray-200: 197 224 211;
+  --gray-300: 150 194 174;
+  --gray-400: 101 156 133;
+  --gray-500: 64 118 99;
+  --gray-600: 44 92 76;
+  --gray-700: 33 72 60;
+  --gray-800: 22 50 41;
+  --gray-900: 13 34 28;
+  --gray-950: 7 20 16;
+  --canvas: 7 16 12;
+  --nav: 8 18 14;
+  --surface: 18 37 30;
+  --elevated: 27 51 42;
+  --hover: 34 60 49;
+  --overlay: 27 51 42;
+  --line: 39 67 56;
+  --line-strong: 53 89 76;
+  --ink: 230 240 235;
+  --ink-2: 148 176 165;
+  --ink-3: 93 115 105;
+  --accent: 45 212 161;
+  --accent-hover: 16 185 129;
+  --accent-grad-from: 52 211 153;
+  --accent-grad-to: 20 184 166;
+}
+
+/* ---------- Dusk (dark, rose) ---------- */
+[data-accent='dusk'] {
+  --gray-50: 250 244 246;
+  --gray-100: 245 230 235;
+  --gray-200: 234 205 214;
+  --gray-300: 212 165 180;
+  --gray-400: 181 120 138;
+  --gray-500: 148 84 102;
+  --gray-600: 120 62 78;
+  --gray-700: 96 48 62;
+  --gray-800: 66 34 44;
+  --gray-900: 42 22 30;
+  --gray-950: 26 13 19;
+  --canvas: 17 9 13;
+  --nav: 19 10 14;
+  --surface: 38 22 30;
+  --elevated: 52 31 42;
+  --hover: 61 38 50;
+  --overlay: 52 31 42;
+  --line: 64 40 52;
+  --line-strong: 84 54 70;
+  --ink: 242 231 236;
+  --ink-2: 189 151 166;
+  --ink-3: 122 84 98;
+  --accent: 251 113 133;
+  --accent-hover: 244 63 94;
+  --accent-grad-from: 251 146 60;
+  --accent-grad-to: 244 63 94;
 }
 
 .dark {
   color-scheme: dark;
+}
+
+/* The nav surface: flat, part of the system, with a whisper of accent at the top. */
+.sidebar-surface {
+  background-color: rgb(var(--nav));
 }
 
 /* ---- interactive polish: smooth, tactile, modern ---- */
@@ -32,19 +229,19 @@ button:not(:disabled):active,
 /* One consistent, on-brand focus ring everywhere. */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(109, 92, 245, 0.55);
+  box-shadow: 0 0 0 2px rgb(var(--accent) / 0.55);
   border-radius: 6px;
 }
 ::selection {
-  background: rgba(109, 92, 245, 0.25);
+  background: rgb(var(--accent) / 0.25);
 }
 
-/* Reusable vibrant brand gradient for hero surfaces / CTAs. */
+/* Reusable vibrant brand gradient for hero surfaces / CTAs — follows the accent. */
 .brand-gradient {
-  background-image: linear-gradient(135deg, #6d5cf5 0%, #a855f7 100%);
+  background-image: linear-gradient(135deg, rgb(var(--accent-grad-from)) 0%, rgb(var(--accent-grad-to)) 100%);
 }
 .brand-gradient-hover:hover {
-  background-image: linear-gradient(135deg, #5b47e0 0%, #9333ea 100%);
+  background-image: linear-gradient(135deg, rgb(var(--accent-hover)) 0%, rgb(var(--accent-grad-to)) 100%);
 }
 
 /* Soft entrance for lists/cards. */
@@ -76,15 +273,15 @@ button:not(:disabled):active,
   float: left;
   pointer-events: none;
   height: 0;
-  @apply text-gray-400 dark:text-gray-500;
+  @apply text-ink-3;
 }
 
 .ProseMirror code {
-  @apply rounded bg-gray-100 px-1 py-0.5 font-mono text-sm text-rose-600 dark:bg-gray-800 dark:text-rose-400;
+  @apply rounded bg-hovered px-1 py-0.5 font-mono text-sm text-rose-600 dark:text-rose-400;
 }
 
 .ProseMirror pre {
-  @apply my-1 overflow-x-auto rounded-md border border-gray-200 bg-gray-50 p-2 font-mono text-sm dark:border-gray-700 dark:bg-gray-900;
+  @apply my-1 overflow-x-auto rounded-lg border border-line bg-hovered p-2.5 font-mono text-sm;
 }
 
 .ProseMirror pre code {
@@ -92,7 +289,7 @@ button:not(:disabled):active,
 }
 
 .ProseMirror blockquote {
-  @apply border-l-4 border-gray-300 pl-3 text-gray-600 dark:border-gray-600 dark:text-gray-300;
+  @apply border-l-2 border-line-strong pl-3 text-ink-2;
 }
 
 .ProseMirror ul {
@@ -108,27 +305,31 @@ button:not(:disabled):active,
 }
 
 .mention {
-  @apply rounded bg-accent/10 px-1 py-0.5 font-medium text-accent;
+  @apply rounded px-0.5 font-medium text-accent;
 }
 
-/* Rendered message bodies share the same look */
+/* Rendered message bodies — the primary reading surface: comfortable size,
+   generous line-height, full-contrast ink. */
+.message-body {
+  @apply text-[14px] leading-[1.6] text-ink;
+}
 .message-body p {
   @apply my-0;
 }
 .message-body p + p {
-  @apply mt-1;
+  @apply mt-1.5;
 }
 .message-body code {
-  @apply rounded bg-gray-100 px-1 py-0.5 font-mono text-[13px] text-rose-600 dark:bg-gray-800 dark:text-rose-400;
+  @apply rounded bg-hovered px-1 py-0.5 font-mono text-[13px] text-rose-600 dark:text-rose-400;
 }
 .message-body pre {
-  @apply my-1 overflow-x-auto rounded-md border border-gray-200 bg-gray-50 p-2 font-mono text-[13px] dark:border-gray-700 dark:bg-gray-900;
+  @apply my-1.5 overflow-x-auto rounded-lg border border-line bg-hovered p-2.5 font-mono text-[13px];
 }
 .message-body pre code {
   @apply bg-transparent p-0 text-inherit;
 }
 .message-body blockquote {
-  @apply border-l-4 border-gray-300 pl-3 text-gray-600 dark:border-gray-600 dark:text-gray-300;
+  @apply border-l-2 border-line-strong pl-3 text-ink-2;
 }
 .message-body ul {
   @apply list-disc pl-5;

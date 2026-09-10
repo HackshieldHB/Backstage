@@ -76,7 +76,7 @@ export function StandupsDialog({
           />
         ))}
         {standups.isSuccess && standups.data.length === 0 && !creating && (
-          <li className="rounded-lg border border-dashed border-gray-300 py-6 text-center text-sm text-gray-500 dark:border-gray-700">
+          <li className="rounded-lg border border-dashed border-line-strong py-6 text-center text-sm text-gray-500 dark:border-line">
             No standups yet. Create one to get your team checking in.
           </li>
         )}
@@ -104,7 +104,7 @@ function StandupRow({
   };
 
   return (
-    <li className="rounded-lg border border-gray-200 dark:border-gray-800">
+    <li className="rounded-lg border border-line">
       <div className="flex items-center gap-3 px-3 py-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent">
           <CalendarClock size={16} />
@@ -138,7 +138,7 @@ function StandupRow({
       </div>
 
       {open && (
-        <div className="border-t border-gray-100 p-3 dark:border-gray-800">
+        <div className="border-t border-line p-3 dark:border-line">
           <CheckinPanel standupId={standup.id} workspaceId={workspaceId} />
           <DigestPanel standupId={standup.id} workspaceId={workspaceId} />
         </div>
@@ -188,7 +188,7 @@ function CheckinPanel({ standupId, workspaceId }: { standupId: string; workspace
   };
 
   const ta =
-    'w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800';
+    'w-full rounded-md border border-line-strong px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';
 
   return (
     <div className="mb-4">
@@ -249,7 +249,7 @@ function DigestPanel({ standupId, workspaceId }: { standupId: string; workspaceI
           <button
             onClick={() => void post()}
             disabled={posting}
-            className="rounded-md border border-gray-300 px-2 py-0.5 text-xs font-medium hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-gray-800"
+            className="rounded-md border border-line-strong px-2 py-0.5 text-xs font-medium hover:bg-gray-50 disabled:opacity-50 dark:border-line-strong dark:hover:bg-gray-800"
           >
             {posting ? 'Posting…' : 'Post digest to channel'}
           </button>
@@ -331,10 +331,10 @@ function CreateStandupForm({
   };
 
   const input =
-    'w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800';
+    'w-full rounded-md border border-line-strong px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';
 
   return (
-    <div className="mb-4 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+    <div className="mb-4 rounded-lg border border-line p-3 dark:border-line">
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
       <div className="grid grid-cols-2 gap-2">
         <div>
@@ -379,9 +379,9 @@ function CreateStandupForm({
       </div>
 
       <label className="mb-1 mt-2 block text-xs text-gray-500">Participants</label>
-      <div className="mb-3 max-h-40 overflow-y-auto rounded-md border border-gray-200 p-1 dark:border-gray-700">
+      <div className="mb-3 max-h-40 overflow-y-auto rounded-md border border-line p-1 dark:border-line">
         {candidates.map((m) => (
-          <label key={m.user.id} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-gray-50 dark:hover:bg-gray-800">
+          <label key={m.user.id} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-hovered">
             <input type="checkbox" checked={memberIds.includes(m.user.id)} onChange={() => toggleMember(m.user.id)} />
             <Avatar user={m.user} size="xs" />
             <span>{m.user.displayName}</span>
@@ -398,7 +398,7 @@ function CreateStandupForm({
         >
           {busy ? 'Creating…' : 'Create standup'}
         </button>
-        <button onClick={onDone} className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800">
+        <button onClick={onDone} className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-500 hover:bg-hovered">
           Cancel
         </button>
       </div>

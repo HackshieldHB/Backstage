@@ -50,7 +50,7 @@ export default function SharePage({ params }: { params: { token: string } }) {
   return (
     <main className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <div className="mx-auto max-w-2xl px-4 py-8">
-        <header className="mb-6 border-b border-gray-200 pb-4 dark:border-gray-800">
+        <header className="mb-6 border-b border-line pb-4 dark:border-line">
           <p className="text-xs font-medium uppercase tracking-wide text-accent">
             Shared from {view.workspaceName} · Backstages
           </p>
@@ -81,7 +81,7 @@ export default function SharePage({ params }: { params: { token: string } }) {
           ))}
         </div>
 
-        <footer className="mt-10 border-t border-gray-200 pt-4 text-center text-xs text-gray-400 dark:border-gray-800">
+        <footer className="mt-10 border-t border-line pt-4 text-center text-xs text-gray-400 dark:border-line">
           Shared with a public link. Only the selected {view.kind} is visible.
         </footer>
       </div>

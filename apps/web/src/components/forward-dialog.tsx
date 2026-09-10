@@ -69,7 +69,7 @@ export function ForwardDialog({
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         placeholder="Search channels & people"
-        className="mb-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+        className="mb-2 w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
       />
       <ul className="max-h-72 overflow-y-auto">
         {targets.map((t) => (

@@ -84,7 +84,7 @@ export function SaveThreadDialog({
                 value={spaceKey}
                 onChange={(e) => setSpaceKey(e.target.value)}
                 data-testid="save-thread-space"
-                className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800"
+                className="w-full rounded-md border border-line-strong bg-white px-2 py-1.5 text-sm dark:border-line-strong dark:bg-gray-800"
               >
                 <option value="">Choose a space…</option>
                 {spaces.data.map((s) => (
@@ -103,7 +103,7 @@ export function SaveThreadDialog({
               onChange={(e) => setTitle(e.target.value)}
               maxLength={255}
               placeholder="Defaults to the first line of the thread"
-              className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800"
+              className="w-full rounded-md border border-line-strong bg-white px-2 py-1.5 text-sm dark:border-line-strong dark:bg-gray-800"
             />
 
             {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}

@@ -52,13 +52,13 @@ export function UserGroupsDialog({ workspaceId, onClose }: { workspaceId: string
   };
 
   const inputCls =
-    'w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800';
+    'w-full rounded-md border border-line-strong px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';
 
   return (
     <Dialog title="User groups" onClose={onClose} wide>
       <ul className="mb-4 space-y-2">
         {(groups.data ?? []).map((g) => (
-          <li key={g.id} className="flex items-center gap-2 rounded-lg border border-gray-200 p-2.5 dark:border-gray-700">
+          <li key={g.id} className="flex items-center gap-2 rounded-lg border border-line p-2.5 dark:border-line">
             <span className="text-sm font-semibold">@{g.handle}</span>
             <span className="text-[13px] text-gray-500">{g.name} · {g.memberIds.length} members</span>
             <button onClick={() => void remove(g.id)} className="ml-auto rounded p-1 text-gray-400 hover:text-red-500">
@@ -67,19 +67,19 @@ export function UserGroupsDialog({ workspaceId, onClose }: { workspaceId: string
           </li>
         ))}
         {(groups.data ?? []).length === 0 && (
-          <li className="rounded-lg border border-dashed border-gray-300 p-3 text-center text-sm text-gray-500 dark:border-gray-600">
+          <li className="rounded-lg border border-dashed border-line-strong p-3 text-center text-sm text-gray-500 dark:border-line-strong">
             No groups yet. Mention a group with @handle to ping everyone in it.
           </li>
         )}
       </ul>
-      <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+      <div className="rounded-lg border border-line p-3 dark:border-line">
         <div className="mb-2 grid grid-cols-2 gap-2">
           <input className={inputCls} placeholder="Name (e.g. Engineering)" value={name} onChange={(e) => setName(e.target.value)} />
           <input className={inputCls} placeholder="handle" value={handle} onChange={(e) => setHandle(e.target.value.toLowerCase())} />
         </div>
-        <div className="mb-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 p-1 dark:border-gray-700">
+        <div className="mb-2 max-h-40 overflow-y-auto rounded-md border border-line p-1 dark:border-line">
           {(members.data ?? []).map((m) => (
-            <label key={m.user.id} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-gray-50 dark:hover:bg-gray-800">
+            <label key={m.user.id} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-hovered">
               <input
                 type="checkbox"
                 checked={selected.includes(m.user.id)}
@@ -120,7 +120,7 @@ export function AnalyticsDialog({ workspaceId, onClose }: { workspaceId: string;
               { label: 'Members', value: a.data.memberCount },
               { label: 'Active (7d)', value: a.data.activeUsers7d },
             ].map((s) => (
-              <div key={s.label} className="rounded-lg border border-gray-200 p-3 text-center dark:border-gray-700">
+              <div key={s.label} className="rounded-lg border border-line p-3 text-center dark:border-line">
                 <div className="text-2xl font-bold">{s.value}</div>
                 <div className="text-[11px] uppercase tracking-wide text-gray-500">{s.label}</div>
               </div>
@@ -164,7 +164,7 @@ export function AuditDialog({ workspaceId, onClose }: { workspaceId: string; onC
       {log.isLoading && <p className="text-sm text-gray-500">Loading…</p>}
       <ul className="space-y-1.5">
         {(log.data ?? []).map((e) => (
-          <li key={e.id} className="flex items-center gap-2 rounded-md border border-gray-200 p-2 text-[13px] dark:border-gray-700">
+          <li key={e.id} className="flex items-center gap-2 rounded-md border border-line p-2 text-[13px] dark:border-line">
             <Avatar user={e.actor} size="xs" />
             <span className="font-medium">{e.actor?.displayName ?? 'System'}</span>
             <code className="rounded bg-gray-100 px-1 text-[12px] dark:bg-gray-800">{e.action}</code>

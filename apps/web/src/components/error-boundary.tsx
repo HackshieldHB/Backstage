@@ -47,7 +47,7 @@ export class ErrorBoundary extends Component<Props, State> {
     const c = copy();
     return (
       <div className="flex h-full min-h-40 flex-1 items-center justify-center p-6">
-        <div className="max-w-sm rounded-xl border border-gray-200 bg-white p-5 text-center shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="max-w-sm rounded-xl border border-line bg-white p-5 text-center shadow-sm dark:border-line dark:bg-gray-900">
           <h2 className="text-sm font-bold">{c.title}</h2>
           <p className="mt-1 text-sm text-gray-500">{c.body}</p>
           <button

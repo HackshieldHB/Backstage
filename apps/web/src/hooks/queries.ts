@@ -23,6 +23,22 @@ import type {
   SendMessageInput,
   StandupDto,
   StandupResponseDto,
+  IncomingWebhookDto,
+  CustomCommandDto,
+  DecisionDto,
+  WeeklyReportDto,
+  WellbeingReportDto,
+  WellbeingTeamDto,
+  DigestPrefDto,
+  WorkDashboardDto,
+  SprintDashboardDto,
+  JiraAlertRuleDto,
+  JiraDashboardSummaryDto,
+  JiraDashboardViewDto,
+  ProjectsOverviewDto,
+  IncidentDto,
+  OncallDto,
+  CalendarLinkDto,
   SlashCommandDto,
   TimelineResponse,
   TimesheetEntryDto,
@@ -31,6 +47,17 @@ import type {
   UtilizationResponse,
   WorkspaceDto,
   WorkspaceMemberDto,
+  DiscoverDto,
+  PersonRecommendationDto,
+  ChannelRecommendationDto,
+  PriorityInboxDto,
+  FocusReportDto,
+  BestTimeDto,
+  ExpertsResponseDto,
+  CatchupPicksDto,
+  KnowledgeResponseDto,
+  FollowupsDto,
+  RecommendationFeedbackInput,
 } from '@backstages/shared';
 import { api } from '@/lib/api';
 
@@ -67,6 +94,22 @@ export const keys = {
   workflows: (ws: string) => ['workflows', ws] as const,
   standups: (ws: string) => ['standups', ws] as const,
   standupResponses: (id: string, date: string) => ['standup-responses', id, date] as const,
+  webhooks: (ws: string) => ['webhooks', ws] as const,
+  customCommands: (ws: string) => ['custom-commands', ws] as const,
+  decisions: (ws: string) => ['decisions', ws] as const,
+  weeklyReports: (ws: string) => ['weekly-reports', ws] as const,
+  wellbeing: (ws: string) => ['wellbeing', ws] as const,
+  wellbeingTeam: (ws: string) => ['wellbeing-team', ws] as const,
+  digest: (ws: string) => ['digest', ws] as const,
+  workDashboard: (ws: string, scope: string) => ['work-dashboard', ws, scope] as const,
+  jiraSprint: (ws: string) => ['jira-sprint', ws] as const,
+  jiraAlerts: (ws: string) => ['jira-alerts', ws] as const,
+  jiraDashboards: (ws: string) => ['jira-dashboards', ws] as const,
+  jiraDashboardView: (ws: string, id: string) => ['jira-dashboard-view', ws, id] as const,
+  projectsOverview: (ws: string, days: number) => ['projects-overview', ws, days] as const,
+  incidents: (ws: string) => ['incidents', ws] as const,
+  oncall: (ws: string) => ['oncall', ws] as const,
+  calendar: ['calendar'] as const,
   pins: (channelId: string) => ['pins', channelId] as const,
   saved: (ws: string) => ['saved', ws] as const,
   notifications: ['notifications'] as const,
@@ -74,6 +117,16 @@ export const keys = {
   timeline: (ws: string, from: string, to: string) => ['timeline', ws, from, to] as const,
   utilization: (ws: string, from: string, to: string) => ['utilization', ws, from, to] as const,
   timesheet: (ws: string) => ['timesheet', ws] as const,
+  recsDiscover: (ws: string) => ['recs-discover', ws] as const,
+  recsPeople: (ws: string) => ['recs-people', ws] as const,
+  recsChannels: (ws: string) => ['recs-channels', ws] as const,
+  recsPriority: (ws: string) => ['recs-priority', ws] as const,
+  recsFocus: (ws: string) => ['recs-focus', ws] as const,
+  recsCatchup: (ws: string) => ['recs-catchup', ws] as const,
+  recsFollowups: (ws: string) => ['recs-followups', ws] as const,
+  recsBestTime: (ws: string, target: string) => ['recs-best-time', ws, target] as const,
+  recsExperts: (ws: string, q: string) => ['recs-experts', ws, q] as const,
+  recsKnowledge: (messageId: string) => ['recs-knowledge', messageId] as const,
 };
 
 export function useWorkspaces() {
@@ -96,6 +149,139 @@ export function useStandupResponses(standupId: string | null, date: string) {
     queryKey: keys.standupResponses(standupId ?? '', date),
     queryFn: () => api<StandupResponseDto[]>('GET', `/standups/${standupId}/responses`),
     enabled: !!standupId,
+  });
+}
+
+export function useWebhooks(workspaceId: string) {
+  return useQuery({
+    queryKey: keys.webhooks(workspaceId),
+    queryFn: () => api<IncomingWebhookDto[]>('GET', `/workspaces/${workspaceId}/webhooks`),
+    enabled: !!workspaceId,
+  });
+}
+
+export function useCustomCommands(workspaceId: string) {
+  return useQuery({
+    queryKey: keys.customCommands(workspaceId),
+    queryFn: () => api<CustomCommandDto[]>('GET', `/workspaces/${workspaceId}/custom-commands`),
+    enabled: !!workspaceId,
+  });
+}
+
+export function useDecisions(workspaceId: string) {
+  return useQuery({
+    queryKey: keys.decisions(workspaceId),
+    queryFn: () => api<DecisionDto[]>('GET', `/workspaces/${workspaceId}/decisions`),
+    enabled: !!workspaceId,
+  });
+}
+
+export function useWeeklyReports(workspaceId: string) {
+  return useQuery({
+    queryKey: keys.weeklyReports(workspaceId),
+    queryFn: () => api<WeeklyReportDto[]>('GET', `/workspaces/${workspaceId}/weekly-reports`),
+    enabled: !!workspaceId,
+  });
+}
+
+export function useWellbeing(workspaceId: string) {
+  return useQuery({
+    queryKey: keys.wellbeing(workspaceId),
+    queryFn: () => api<WellbeingReportDto>('GET', `/workspaces/${workspaceId}/wellbeing/me`),
+    enabled: !!workspaceId,
+  });
+}
+
+export function useWellbeingTeam(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.wellbeingTeam(workspaceId),
+    queryFn: () => api<WellbeingTeamDto>('GET', `/workspaces/${workspaceId}/wellbeing/team`),
+    enabled: !!workspaceId && enabled,
+  });
+}
+
+export function useDigestPref(workspaceId: string) {
+  return useQuery({
+    queryKey: keys.digest(workspaceId),
+    queryFn: () => api<DigestPrefDto>('GET', `/workspaces/${workspaceId}/digest`),
+    enabled: !!workspaceId,
+  });
+}
+
+export function useWorkDashboard(workspaceId: string, scope: 'all' | 'me' = 'all', enabled = true) {
+  return useQuery({
+    queryKey: keys.workDashboard(workspaceId, scope),
+    queryFn: () => api<WorkDashboardDto>('GET', `/workspaces/${workspaceId}/atlassian/dashboard?scope=${scope}`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useJiraSprint(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.jiraSprint(workspaceId),
+    queryFn: () => api<SprintDashboardDto>('GET', `/workspaces/${workspaceId}/atlassian/sprint`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useJiraAlerts(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.jiraAlerts(workspaceId),
+    queryFn: () => api<JiraAlertRuleDto[]>('GET', `/workspaces/${workspaceId}/atlassian/alerts`),
+    enabled: !!workspaceId && enabled,
+  });
+}
+
+export function useJiraDashboards(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.jiraDashboards(workspaceId),
+    queryFn: () => api<JiraDashboardSummaryDto[]>('GET', `/workspaces/${workspaceId}/atlassian/jira-dashboards`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useJiraDashboardView(workspaceId: string, dashboardId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.jiraDashboardView(workspaceId, dashboardId),
+    queryFn: () => api<JiraDashboardViewDto>('GET', `/workspaces/${workspaceId}/atlassian/jira-dashboards/${dashboardId}`),
+    enabled: !!workspaceId && !!dashboardId && enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useProjectsOverview(workspaceId: string, days = 30, enabled = true) {
+  return useQuery({
+    queryKey: keys.projectsOverview(workspaceId, days),
+    queryFn: () => api<ProjectsOverviewDto>('GET', `/workspaces/${workspaceId}/projects/overview?days=${days}`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useIncidents(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.incidents(workspaceId),
+    queryFn: () => api<IncidentDto[]>('GET', `/workspaces/${workspaceId}/incidents`),
+    enabled: !!workspaceId && enabled,
+  });
+}
+
+export function useOncall(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.oncall(workspaceId),
+    queryFn: () => api<OncallDto>('GET', `/workspaces/${workspaceId}/oncall`),
+    enabled: !!workspaceId && enabled,
+  });
+}
+
+export function useCalendar(enabled = true) {
+  return useQuery({
+    queryKey: keys.calendar,
+    queryFn: () => api<CalendarLinkDto>('GET', '/me/calendar'),
+    enabled,
   });
 }
 
@@ -658,6 +844,121 @@ export function useLogTime(workspaceId: string) {
       void qc.invalidateQueries({ queryKey: keys.timesheet(workspaceId) });
       void qc.invalidateQueries({ queryKey: ['timeline', workspaceId] });
       void qc.invalidateQueries({ queryKey: ['utilization', workspaceId] });
+    },
+  });
+}
+
+// ---- Recommendations (R1–R9) ----
+
+const recBase = (ws: string) => `/workspaces/${ws}/recommendations`;
+
+export function useDiscover(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsDiscover(workspaceId),
+    queryFn: () => api<DiscoverDto>('GET', `${recBase(workspaceId)}/discover`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 120_000,
+  });
+}
+
+export function useRecommendedPeople(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsPeople(workspaceId),
+    queryFn: () => api<PersonRecommendationDto[]>('GET', `${recBase(workspaceId)}/people`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 120_000,
+  });
+}
+
+export function useRecommendedChannels(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsChannels(workspaceId),
+    queryFn: () => api<ChannelRecommendationDto[]>('GET', `${recBase(workspaceId)}/channels`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 120_000,
+  });
+}
+
+export function usePriorityInbox(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsPriority(workspaceId),
+    queryFn: () => api<PriorityInboxDto>('GET', `${recBase(workspaceId)}/priority`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useFocusReport(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsFocus(workspaceId),
+    queryFn: () => api<FocusReportDto>('GET', `${recBase(workspaceId)}/focus`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 300_000,
+  });
+}
+
+export function useCatchupPicks(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsCatchup(workspaceId),
+    queryFn: () => api<CatchupPicksDto>('GET', `${recBase(workspaceId)}/catchup`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useFollowups(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsFollowups(workspaceId),
+    queryFn: () => api<FollowupsDto>('GET', `${recBase(workspaceId)}/followups`),
+    enabled: !!workspaceId && enabled,
+    staleTime: 120_000,
+  });
+}
+
+export function useBestTime(workspaceId: string, targetUserId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsBestTime(workspaceId, targetUserId ?? ''),
+    queryFn: () => api<BestTimeDto>('GET', `${recBase(workspaceId)}/best-time/${targetUserId}`),
+    enabled: !!workspaceId && !!targetUserId && enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useExperts(workspaceId: string, q: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsExperts(workspaceId, q),
+    queryFn: () =>
+      api<ExpertsResponseDto>('GET', `${recBase(workspaceId)}/experts?q=${encodeURIComponent(q)}`),
+    enabled: !!workspaceId && q.trim().length >= 3 && enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useRelatedKnowledge(workspaceId: string, messageId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: keys.recsKnowledge(messageId ?? ''),
+    queryFn: () =>
+      api<KnowledgeResponseDto>('GET', `${recBase(workspaceId)}/knowledge/${messageId}`),
+    enabled: !!workspaceId && !!messageId && enabled,
+    staleTime: 120_000,
+  });
+}
+
+export function useRecommendationFeedback(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: RecommendationFeedbackInput) =>
+      api<{ ok: true }>('POST', `${recBase(workspaceId)}/feedback`, input),
+    onSuccess: (_r, input) => {
+      // Refresh the lists a dismissal/act affects.
+      const affected: Record<string, readonly unknown[]> = {
+        PERSON: keys.recsPeople(workspaceId),
+        CHANNEL: keys.recsChannels(workspaceId),
+        FOLLOWUP: keys.recsFollowups(workspaceId),
+      };
+      void qc.invalidateQueries({ queryKey: keys.recsDiscover(workspaceId) });
+      const k = affected[input.kind];
+      if (k) void qc.invalidateQueries({ queryKey: k });
     },
   });
 }

@@ -106,9 +106,9 @@ export function MessageItem({
 
   if (message.isDeleted) {
     return (
-      <div className={clsx('group relative flex gap-2.5 px-5 py-0.5', !grouped && 'mt-2')} data-message-id={message.id}>
+      <div className={clsx('group relative flex gap-2.5 px-5 py-0.5', !grouped && 'mt-4')} data-message-id={message.id}>
         <span className="w-9 shrink-0" />
-        <p className="text-[14px] italic text-gray-500 dark:text-gray-400">This message was deleted</p>
+        <p className="text-[14px] italic text-ink-3">This message was deleted</p>
       </div>
     );
   }
@@ -116,8 +116,8 @@ export function MessageItem({
   return (
     <div
       className={clsx(
-        'group relative flex gap-2.5 px-5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-800/50',
-        !grouped && 'mt-2',
+        'group relative flex gap-2.5 px-5 py-0.5 hover:bg-hovered',
+        !grouped && 'mt-4',
         message.failed && 'opacity-70',
       )}
       data-message-id={message.id}
@@ -126,7 +126,7 @@ export function MessageItem({
       onMouseLeave={() => setHovered(false)}
     >
       {grouped ? (
-        <span className="w-9 shrink-0 pt-0.5 text-right text-[10px] leading-5 text-gray-500 dark:text-gray-400 opacity-0 group-hover:opacity-100">
+        <span className="w-9 shrink-0 pt-0.5 text-right text-[10px] leading-5 text-ink-3 opacity-0 group-hover:opacity-100">
           {time}
         </span>
       ) : message.kind === 'INTEGRATION' ? (
@@ -148,14 +148,14 @@ export function MessageItem({
       <div className="min-w-0 flex-1">
         {!grouped && (
           <div className="flex items-baseline gap-2">
-            <span className="text-[14px] font-bold">
+            <span className="text-[15px] font-semibold text-ink">
               {message.kind === 'INTEGRATION'
                 ? 'Jira'
                 : (message.user?.displayName ?? (message.pending ? me?.displayName : 'Unknown user'))}
             </span>
-            <span className="text-[11px] text-gray-500 dark:text-gray-400">{time}</span>
+            <span className="text-[11px] text-ink-3">{time}</span>
             {message.kind === 'INTEGRATION' && (
-              <span className="rounded bg-gray-100 px-1 text-[10px] font-medium text-gray-500 dark:bg-gray-800">APP</span>
+              <span className="rounded bg-hovered px-1.5 text-[10px] font-medium text-ink-3">APP</span>
             )}
           </div>
         )}
@@ -175,14 +175,14 @@ export function MessageItem({
                 {translation}
                 <button
                   onClick={() => setTranslation(null)}
-                  className="ml-2 text-[11px] text-gray-400 hover:underline"
+                  className="ml-2 text-[11px] text-ink-3 hover:underline"
                 >
                   hide
                 </button>
               </div>
             )}
-            {message.isEdited && <span className="ml-1 text-[11px] text-gray-500 dark:text-gray-400">(edited)</span>}
-            {message.pending && <span className="ml-1 text-[11px] text-gray-500 dark:text-gray-400">sending…</span>}
+            {message.isEdited && <span className="ml-1 text-[11px] text-ink-3">(edited)</span>}
+            {message.pending && <span className="ml-1 text-[11px] text-ink-3">sending…</span>}
             {message.failed && (
               <button
                 className="ml-1 text-[11px] font-medium text-red-500 hover:underline"
@@ -209,7 +209,7 @@ export function MessageItem({
                   'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[12px]',
                   me && r.userIds.includes(me.id)
                     ? 'border-accent bg-accent/10 text-accent'
-                    : 'border-gray-200 bg-gray-50 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800',
+                    : 'border-line bg-gray-50 hover:border-line-strong dark:bg-gray-800',
                 )}
               >
                 <Emoji code={r.emoji} workspaceId={message.workspaceId} />
@@ -218,7 +218,7 @@ export function MessageItem({
             ))}
             <button
               onClick={() => setEmojiOpen(true)}
-              className="flex items-center rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:border-gray-400 hover:text-gray-600 dark:border-gray-600"
+              className="flex items-center rounded-full border border-dashed border-line-strong px-2 py-0.5 text-ink-3 hover:border-line-strong hover:text-ink dark:border-line-strong"
               title="Add reaction"
             >
               <SmilePlus size={13} />
@@ -231,7 +231,7 @@ export function MessageItem({
           <button
             onClick={() => onOpenThread?.(message.id)}
             data-testid="thread-summary"
-            className="mt-1 flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[12px] font-medium text-accent hover:border-gray-200 hover:bg-white dark:hover:border-gray-700 dark:hover:bg-gray-800"
+            className="mt-1 flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[12px] font-medium text-accent hover:border-line hover:bg-white dark:hover:border-line dark:hover:bg-gray-800"
           >
             <span className="flex -space-x-1">
               {message.threadParticipants.slice(0, 3).map((p) => (
@@ -240,7 +240,7 @@ export function MessageItem({
             </span>
             {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}
             {message.lastReplyAt && (
-              <span className="font-normal text-gray-500 dark:text-gray-400">
+              <span className="font-normal text-ink-3">
                 · last {format(new Date(message.lastReplyAt), 'MMM d, HH:mm')}
               </span>
             )}
@@ -250,7 +250,7 @@ export function MessageItem({
 
       {/* Hover toolbar */}
       {hovered && !editing && !message.pending && !message.failed && (
-        <div className="absolute -top-3 right-4 flex items-center rounded-md border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+        <div className="absolute -top-3 right-4 flex items-center rounded-md border border-line bg-white shadow-sm dark:border-line dark:bg-gray-800">
           {QUICK_EMOJI.slice(0, 3).map((e) => (
             <ToolbarButton key={e} title={`:${e}:`} onClick={() => void toggleReaction(e)}>
               <span className="text-[14px] leading-none">{emojiChar(e)}</span>
@@ -377,7 +377,7 @@ function PollCard({
   const vote = (optionIndex: number) =>
     api('POST', `/polls/${poll.id}/vote`, { optionIndex }).catch(() => undefined);
   return (
-    <div className="mt-1.5 max-w-md rounded-lg border border-gray-200 p-3 dark:border-gray-700" data-testid="poll-card">
+    <div className="mt-1.5 max-w-md rounded-lg border border-line p-3 dark:border-line" data-testid="poll-card">
       <div className="mb-2 text-[13px] font-semibold">{poll.question}</div>
       <div className="space-y-1.5">
         {poll.options.map((opt, i) => {
@@ -390,7 +390,7 @@ function PollCard({
               onClick={() => void vote(i)}
               className={clsx(
                 'relative block w-full overflow-hidden rounded-md border px-2.5 py-1.5 text-left text-[13px]',
-                mine ? 'border-accent' : 'border-gray-200 dark:border-gray-700',
+                mine ? 'border-accent' : 'border-line',
               )}
               data-testid="poll-option"
             >
@@ -403,13 +403,13 @@ function PollCard({
                   {mine && <span className="text-accent">✓</span>}
                   {opt}
                 </span>
-                <span className="text-[11px] text-gray-500">{votes.length}</span>
+                <span className="text-[11px] text-ink-3">{votes.length}</span>
               </span>
             </button>
           );
         })}
       </div>
-      <div className="mt-1.5 text-[11px] text-gray-500">
+      <div className="mt-1.5 text-[11px] text-ink-3">
         {total} vote{total === 1 ? '' : 's'}
         {poll.allowMultiple ? ' · multiple choice' : ''}
       </div>
@@ -456,20 +456,20 @@ function UnfurlCards({ message }: { message: MessageDto }) {
         <div
           key={card.url}
           data-testid="unfurl-card"
-          className="max-w-md overflow-hidden rounded-lg border-l-4 border border-gray-200 border-l-[#2684FF] bg-gray-50 dark:border-gray-700 dark:border-l-[#2684FF] dark:bg-gray-800"
+          className="max-w-md overflow-hidden rounded-lg border-l-4 border border-line border-l-[#2684FF] bg-gray-50 dark:border-line dark:border-l-[#2684FF] dark:bg-gray-800"
         >
           <a
             href={card.url}
             target="_blank"
             rel="noreferrer noopener"
-            className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="flex items-center gap-2.5 px-3 py-2 hover:bg-hovered"
           >
             <span className="min-w-0">
               <span className="block truncate text-[13px] font-semibold">
                 {card.key ? `${card.key} · ` : ''}
                 {card.title}
               </span>
-              <span className="block text-[11px] text-gray-500">
+              <span className="block text-[11px] text-ink-3">
                 {card.type === 'jira'
                   ? [card.status, card.issueType, card.priority].filter(Boolean).join(' · ')
                   : card.type === 'bitbucket'
@@ -510,7 +510,7 @@ function JiraActionChip({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-700"
+      className="rounded border border-line-strong bg-white px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-line-strong dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-700"
     >
       {children}
     </button>
@@ -580,7 +580,7 @@ function JiraCardActions({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-200 px-3 py-1.5 dark:border-gray-700">
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-line px-3 py-1.5 dark:border-line">
       <JiraActionChip disabled={busy} onClick={() => void act({ issueKey, action: 'assign_me' })}>
         Assign to me
       </JiraActionChip>
@@ -612,7 +612,7 @@ function JiraCardActions({
       {transitions && (
         <div className="flex basis-full flex-wrap items-center gap-1.5 pt-1">
           {transitions.length === 0 ? (
-            <span className="text-[11px] text-gray-500">No transitions available</span>
+            <span className="text-[11px] text-ink-3">No transitions available</span>
           ) : (
             transitions.map((t) => (
               <JiraActionChip
@@ -629,7 +629,7 @@ function JiraCardActions({
       {assignees && (
         <div className="flex basis-full flex-wrap items-center gap-1.5 pt-1">
           {assignees.length === 0 ? (
-            <span className="text-[11px] text-gray-500">No linked members to assign</span>
+            <span className="text-[11px] text-ink-3">No linked members to assign</span>
           ) : (
             assignees.map((u) => (
               <JiraActionChip
@@ -664,7 +664,7 @@ function ToolbarButton({
         aria-label={title}
         data-testid={testId}
         onClick={onClick}
-        className="p-1.5 text-gray-500 first:rounded-l-md last:rounded-r-md hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+        className="p-1.5 text-ink-3 first:rounded-l-md last:rounded-r-md hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
       >
         {children}
       </button>

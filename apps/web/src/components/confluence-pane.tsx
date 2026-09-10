@@ -7,9 +7,10 @@ import type { ConfluencePage, ConfluenceSpace } from '@backstages/shared';
 import { api } from '@/lib/api';
 import { useUiStore } from '@/stores/ui-store';
 import { PaneShell } from './pane-shell';
+import { ConfluenceTab } from './work-dashboard-dialog';
 
 const inputCls =
-  'w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800';
+  'w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';
 
 /** A dedicated Confluence workspace: spaces + pages on the left, an editor on
  *  the right. Create / edit / delete pages inline (writes need a linked account). */
@@ -24,6 +25,7 @@ export function ConfluencePane({ workspaceId }: { workspaceId: string }) {
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'pages' | 'overview'>('pages');
 
   useEffect(() => {
     api<ConfluenceSpace[]>('GET', `/workspaces/${workspaceId}/confluence/spaces`)
@@ -130,9 +132,31 @@ export function ConfluencePane({ workspaceId }: { workspaceId: string }) {
         </button>
       }
     >
-      {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/40">{error}</p>}
+      <div className="mb-4 flex gap-1 border-b border-line">
+        {(['pages', 'overview'] as const).map((tb) => (
+          <button
+            key={tb}
+            onClick={() => setTab(tb)}
+            className={clsx(
+              'px-3 py-2 text-sm font-medium capitalize',
+              tab === tb ? 'border-b-2 border-accent text-accent' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200',
+            )}
+            data-testid={`confluence-tab-${tb}`}
+          >
+            {tb}
+          </button>
+        ))}
+      </div>
 
-      {spaces === null ? (
+      {tab === 'overview' ? (
+        <div className="mx-auto max-w-5xl">
+          <ConfluenceTab workspaceId={workspaceId} />
+        </div>
+      ) : (
+        <>
+          {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/40">{error}</p>}
+
+          {spaces === null ? (
         <p className="text-sm text-gray-500">Loading spaces…</p>
       ) : spaces.length === 0 ? (
         <p className="text-sm text-gray-500">
@@ -158,13 +182,13 @@ export function ConfluencePane({ workspaceId }: { workspaceId: string }) {
                 </option>
               ))}
             </select>
-            <div className="thin-scrollbar max-h-[60vh] overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700">
+            <div className="thin-scrollbar max-h-[60vh] overflow-y-auto rounded-md border border-line">
               {loadingPages ? (
                 <p className="p-3 text-sm text-gray-500">Loading pages…</p>
               ) : pages.length === 0 ? (
                 <p className="p-3 text-sm text-gray-500">No pages in this space yet.</p>
               ) : (
-                <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                <ul className="divide-y divide-line dark:divide-line">
                   {pages.map((p) => (
                     <li
                       key={p.id}
@@ -246,7 +270,7 @@ export function ConfluencePane({ workspaceId }: { workspaceId: string }) {
               {editing && (
                 <button
                   onClick={resetForm}
-                  className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+                  className="rounded-md border border-line-strong px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800"
                 >
                   Cancel
                 </button>
@@ -254,6 +278,8 @@ export function ConfluencePane({ workspaceId }: { workspaceId: string }) {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </PaneShell>
   );

@@ -60,6 +60,24 @@ enum ActivitySource {
   PRESENCE
 }
 
+/// The family a recommendation belongs to. Used to scope feedback so a dismissal
+/// of one people-suggestion never hides an unrelated channel-suggestion.
+enum RecommendationKind {
+  PERSON
+  CHANNEL
+  PRIORITY
+  FOCUS
+  EXPERT
+  CATCHUP
+  KNOWLEDGE
+  FOLLOWUP
+}
+
+enum RecommendationAction {
+  DISMISSED
+  ACTED
+}
+
 model User {
   id              String    @id @default(cuid())
   email           String    @unique
@@ -112,6 +130,20 @@ model User {
   standupsCreated         Standup[]            @relation("StandupCreator")
   standupMemberships      StandupMember[]
   standupResponses        StandupResponse[]
+  webhooksCreated         IncomingWebhook[]    @relation("WebhookCreator")
+  customCommands          CustomCommand[]
+  weeklyReports           WeeklyReport[]       @relation("WeeklyReportCreator")
+  decisionsCreated        Decision[]           @relation("DecisionCreator")
+  decisionsDecided        Decision[]           @relation("DecisionDecider")
+  decisionsOwned          Decision[]           @relation("DecisionOwner")
+  jiraSavedWidgets        JiraSavedWidget[]    @relation("JiraWidgetCreator")
+  jiraAlertRules          JiraAlertRule[]      @relation("JiraAlertCreator")
+  incidentsDeclared       Incident[]           @relation("IncidentDeclarer")
+  incidentsCommanded      Incident[]           @relation("IncidentCommander")
+  incidentUpdates         IncidentUpdate[]     @relation("IncidentUpdateAuthor")
+  oncallShifts            OncallShift[]
+  calendarLink            CalendarLink?
+  recommendationFeedback  RecommendationFeedback[]
 }
 
 model ShareLink {
@@ -183,6 +215,18 @@ model Workspace {
   timesheetEntries       TimesheetEntry[]
   standups               Standup[]
   utilizationDays        UtilizationDaily[]
+  incomingWebhooks       IncomingWebhook[]
+  customCommands         CustomCommand[]
+  weeklyReports          WeeklyReport[]
+  decisions              Decision[]
+  channelEmails          ChannelEmail[]
+  jiraSavedWidgets       JiraSavedWidget[]
+  jiraAlertRules         JiraAlertRule[]
+  clients                Client[]
+  projects               Project[]
+  incidents              Incident[]
+  oncallShifts           OncallShift[]
+  recommendationFeedback RecommendationFeedback[]
 }
 
 model CustomEmoji {
@@ -209,6 +253,14 @@ model WorkspaceMember {
   role          WorkspaceRole @default(MEMBER)
   /// Set when the linked Atlassian account is deactivated on the connected site.
   deactivatedAt DateTime?
+  /// Opt-in to private workload/wellbeing signals derived from activity data.
+  wellbeingOptIn Boolean      @default(false)
+  /// Opt-in to a personal daily email digest of unread mentions/notifications.
+  dailyDigestOptIn Boolean    @default(false)
+  /// The member's UTC offset in minutes, so the digest fires in their local morning.
+  digestTzOffsetMin Int       @default(0)
+  /// Member-local date (yyyy-mm-dd) the digest last emailed, so it sends once/day.
+  digestLastOn  String?
   createdAt     DateTime      @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -271,6 +323,11 @@ model Channel {
   shareLinks             ShareLink[]
   canvas                 Canvas?
   standups               Standup[]
+  incomingWebhooks       IncomingWebhook[]
+  channelEmail           ChannelEmail?
+  decisions              Decision[]
+  weeklyReports          WeeklyReport[]
+  jiraAlertRules         JiraAlertRule[]
 
   @@unique([workspaceId, name])
 }
@@ -894,4 +951,279 @@ model StandupResponse {
 
   @@unique([standupId, userId, onDate])
   @@index([standupId, onDate])
+}
+
+enum DecisionStatus {
+  OPEN
+  DECIDED
+}
+
+/// Per-channel inbound webhook: external tools POST to /hooks/:token to post a
+/// message into the channel (the "for people who ship" integration glue).
+model IncomingWebhook {
+  id          String   @id @default(cuid())
+  workspaceId String
+  channelId   String
+  token       String   @unique
+  name        String
+  active      Boolean  @default(true)
+  createdById String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("WebhookCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+/// A workspace-defined slash command that posts a canned response.
+model CustomCommand {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  /// Trigger without the leading slash, lowercase, unique per workspace.
+  trigger      String
+  description  String   @default("")
+  responseText String
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, trigger])
+  @@index([workspaceId])
+}
+
+/// Config for an automated weekly team report posted to a channel.
+model WeeklyReport {
+  id          String   @id @default(cuid())
+  workspaceId String
+  channelId   String
+  /// 0=Sun..6=Sat local weekday to post on.
+  dayOfWeek   Int      @default(5)
+  timeOfDay   String   @default("16:00")
+  tzOffsetMin Int      @default(0)
+  active      Boolean  @default(true)
+  /// Schedule-local date (yyyy-mm-dd) it last fired, so it posts once/week.
+  lastRunOn   String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("WeeklyReportCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+/// A recorded team decision, optionally anchored to the message that proposed it.
+model Decision {
+  id          String         @id @default(cuid())
+  workspaceId String
+  channelId   String
+  messageId   String?
+  title       String
+  detail      String         @default("")
+  status      DecisionStatus @default(OPEN)
+  outcome     String?
+  /// Optional accountable owner for following the decision through.
+  ownerId     String?
+  /// Optional deadline for reaching / acting on the decision.
+  dueAt       DateTime?
+  decidedById String?
+  decidedAt   DateTime?
+  createdById String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("DecisionCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  decidedBy User?     @relation("DecisionDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  owner     User?     @relation("DecisionOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([channelId])
+  @@index([ownerId])
+}
+
+/// A user-saved JQL query pinned as a live count widget on the Atlassian dashboard.
+model JiraSavedWidget {
+  id          String   @id @default(cuid())
+  workspaceId String
+  createdById String
+  label       String
+  jql         String
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("JiraWidgetCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+/// A scheduled rule that posts a digest of overdue / stale / unassigned Jira issues to a channel.
+model JiraAlertRule {
+  id          String   @id @default(cuid())
+  workspaceId String
+  channelId   String
+  /// Issues untouched for this many days count as "stale".
+  staleDays   Int      @default(7)
+  active      Boolean  @default(true)
+  tzOffsetMin Int      @default(0)
+  timeOfDay   String   @default("09:00")
+  /// Rule-local date (yyyy-mm-dd) it last fired, so it posts once/day.
+  lastRunOn   String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("JiraAlertCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+/// Per-channel inbound email address; a mail provider forwards to
+/// /inbound-email/:token to post the email into the channel.
+model ChannelEmail {
+  id          String   @id @default(cuid())
+  workspaceId String
+  channelId   String   @unique
+  token       String   @unique
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+}
+
+/// A consulting client — groups projects for billability & margin rollups.
+model Client {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projects  Project[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+/// A billable project. Time is attributed via its Jira project key (matched
+/// against TimesheetEntry.issueKey prefixes).
+model Project {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  clientId       String
+  name           String
+  jiraProjectKey String?
+  channelId      String?
+  /// Rate charged to the client, in minor units (cents) per hour.
+  billRateCents  Int      @default(0)
+  /// Internal cost per hour, in minor units — used for margin.
+  costRateCents  Int      @default(0)
+  budgetHours    Int?
+  billable       Boolean  @default(true)
+  archived       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([clientId])
+}
+
+/// A tracked incident with a lifecycle (OPEN → MITIGATED → RESOLVED) and timeline.
+model Incident {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  channelId    String?
+  title        String
+  severity     String    @default("SEV3")
+  status       String    @default("OPEN")
+  commanderId  String?
+  jiraIssueKey String?
+  declaredById String
+  declaredAt   DateTime  @default(now())
+  resolvedAt   DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  workspace  Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  declaredBy User             @relation("IncidentDeclarer", fields: [declaredById], references: [id], onDelete: Cascade)
+  commander  User?            @relation("IncidentCommander", fields: [commanderId], references: [id], onDelete: SetNull)
+  updates    IncidentUpdate[]
+
+  @@index([workspaceId])
+}
+
+model IncidentUpdate {
+  id         String   @id @default(cuid())
+  incidentId String
+  authorId   String?
+  /// NOTE | STATUS | MITIGATED | RESOLVED — drives the timeline rendering.
+  kind       String   @default("NOTE")
+  body       String
+  createdAt  DateTime @default(now())
+
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  author   User?    @relation("IncidentUpdateAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([incidentId])
+}
+
+/// A single on-call shift; the "current" on-call is whoever's window covers now.
+model OncallShift {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  label       String   @default("Primary")
+  startsAt    DateTime
+  endsAt      DateTime
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, startsAt])
+}
+
+/// A user's calendar feed (ICS URL). The poller sets an "In a meeting" status
+/// and logs MEETING activity during events.
+model CalendarLink {
+  id         String    @id @default(cuid())
+  userId     String    @unique
+  icsUrl     String
+  lastSyncAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Per-user feedback on a recommendation the engine surfaced. `refId` is the
+/// recommendation's stable target key (a userId, channelId, issue key, decision
+/// id, …), scoped by `kind`. A DISMISSED row suppresses that suggestion for a
+/// cool-off window; ACTED rows train future ranking. The engine is otherwise
+/// stateless — this is the only recommendation state we persist.
+model RecommendationFeedback {
+  id          String               @id @default(cuid())
+  workspaceId String
+  userId      String
+  kind        RecommendationKind
+  refId       String
+  action      RecommendationAction
+  createdAt   DateTime             @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One feedback row per (user, kind, target): re-acting upserts.
+  @@unique([userId, kind, refId])
+  @@index([workspaceId, userId, kind])
 }

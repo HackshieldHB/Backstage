@@ -7,5 +7,6 @@ import { AttachmentsModule } from '../attachments/attachments.module';
   imports: [AttachmentsModule], // provides StorageService for avatar uploads
   controllers: [UsersController],
   providers: [UsersService],
+  exports: [UsersService],
 })
 export class UsersModule {}

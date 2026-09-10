@@ -44,7 +44,7 @@ export function ShortcutsHelp() {
 
   return (
     <Dialog title={id ? 'Pintasan keyboard' : 'Keyboard shortcuts'} onClose={() => setOpen(false)}>
-      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+      <ul className="divide-y divide-line dark:divide-line">
         {rows.map((row) => (
           <li key={row.label} className="flex items-center justify-between gap-3 py-2.5">
             <span className="text-sm text-gray-700 dark:text-gray-200">{row.label}</span>
@@ -52,7 +52,7 @@ export function ShortcutsHelp() {
               {row.keys.map((k) => (
                 <kbd
                   key={k}
-                  className="rounded-md border border-gray-300 bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                  className="rounded-md border border-line-strong bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-600 dark:border-line-strong dark:bg-gray-800 dark:text-gray-300"
                 >
                   {k}
                 </kbd>

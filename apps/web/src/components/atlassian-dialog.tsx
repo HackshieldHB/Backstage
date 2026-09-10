@@ -155,7 +155,7 @@ export function AtlassianSettings({
           {syncResult && <p className="rounded-md bg-gray-50 p-2 text-xs dark:bg-gray-800">{syncResult}</p>}
 
           {isAdmin && (
-            <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+            <div className="border-t border-line pt-3 dark:border-line">
               <p className="mb-1 text-xs font-medium">Jira project channels</p>
               <p className="mb-2 text-xs text-gray-500">
                 Create a channel under the “Jira” group that follows a project’s events.
@@ -165,7 +165,7 @@ export function AtlassianSettings({
                   value={projectKey}
                   onChange={(e) => setProjectKey(e.target.value.toUpperCase())}
                   placeholder="e.g. KAN"
-                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+                  className="flex-1 rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
                   data-testid="jira-project-key"
                 />
                 <button
@@ -180,7 +180,7 @@ export function AtlassianSettings({
             </div>
           )}
 
-          <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+          <div className="border-t border-line pt-3 dark:border-line">
             {status.data.confluenceReady === false ? (
               <div className="rounded-md bg-amber-50 p-2.5 dark:bg-amber-900/20">
                 <p className="mb-2 text-xs text-amber-700 dark:text-amber-300">
@@ -202,7 +202,7 @@ export function AtlassianSettings({
             ) : (
               <button
                 onClick={() => onOpenConfluence?.()}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+                className="w-full rounded-md border border-line-strong px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800"
                 data-testid="open-confluence"
               >
                 Manage Confluence pages
@@ -210,7 +210,7 @@ export function AtlassianSettings({
             )}
           </div>
 
-          <div className="border-t border-gray-200 pt-3 dark:border-gray-700">
+          <div className="border-t border-line pt-3 dark:border-line">
             {status.data.me?.canAct ? (
               <p className="text-xs text-green-600 dark:text-green-400">
                 Your Jira account is connected — issue actions are attributed to you.

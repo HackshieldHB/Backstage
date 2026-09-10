@@ -147,7 +147,7 @@ export function GuidedTour({
         />
       )}
       <div
-        className="fixed z-[92] animate-fade-in rounded-xl border border-gray-200 bg-white p-3.5 shadow-2xl dark:border-gray-700 dark:bg-gray-800"
+        className="fixed z-[92] animate-fade-in rounded-xl border border-line bg-white p-3.5 shadow-2xl dark:border-line dark:bg-gray-800"
         style={cardStyle}
         role="dialog"
         aria-modal="true"
@@ -155,7 +155,7 @@ export function GuidedTour({
       >
         {arrowTop != null && (
           <span
-            className="absolute -left-1.5 h-3 w-3 rotate-45 border-b border-l border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
+            className="absolute -left-1.5 h-3 w-3 rotate-45 border-b border-l border-line bg-white dark:border-line dark:bg-gray-800"
             style={{ top: arrowTop }}
           />
         )}
@@ -163,7 +163,7 @@ export function GuidedTour({
           <h3 className="text-[14px] font-bold">{step.title}</h3>
           <button
             onClick={finish}
-            className="-mr-1 -mt-1 rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="-mr-1 -mt-1 rounded p-1 text-gray-400 hover:bg-hovered"
             aria-label={labels.skip}
           >
             <X size={14} />
@@ -189,14 +189,14 @@ export function GuidedTour({
             {index === 0 ? (
               <button
                 onClick={finish}
-                className="rounded-md px-2.5 py-1 text-[13px] font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="rounded-md px-2.5 py-1 text-[13px] font-medium text-gray-500 hover:bg-hovered"
               >
                 {labels.skip}
               </button>
             ) : (
               <button
                 onClick={back}
-                className="rounded-md px-2.5 py-1 text-[13px] font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="rounded-md px-2.5 py-1 text-[13px] font-medium text-gray-500 hover:bg-hovered"
               >
                 {labels.back}
               </button>

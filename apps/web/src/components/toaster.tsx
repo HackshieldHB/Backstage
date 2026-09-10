@@ -17,7 +17,7 @@ export function Toaster() {
           key={t.id}
           role="status"
           data-testid="toast"
-          className="pointer-events-auto flex items-start gap-2.5 rounded-lg border border-gray-200 bg-white p-3 shadow-lg animate-fade-in dark:border-gray-700 dark:bg-gray-800"
+          className="pointer-events-auto flex items-start gap-2.5 rounded-lg border border-line bg-white p-3 shadow-lg animate-fade-in dark:border-line dark:bg-gray-800"
         >
           <span className="mt-0.5 shrink-0">
             {t.kind === 'success' ? (
@@ -31,7 +31,7 @@ export function Toaster() {
           <p className="flex-1 text-[13px] text-gray-700 dark:text-gray-200">{t.message}</p>
           <button
             onClick={() => dismiss(t.id)}
-            className="-mr-1 -mt-1 rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="-mr-1 -mt-1 rounded p-1 text-gray-400 hover:bg-hovered"
             aria-label="Dismiss"
           >
             <X size={13} />

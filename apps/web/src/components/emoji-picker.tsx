@@ -45,7 +45,7 @@ export function EmojiPickerPopover({
   return (
     <div ref={ref} className="absolute bottom-full right-0 z-50 mb-1">
       {workspaceId && (
-        <div className="mb-1 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+        <div className="mb-1 rounded-lg border border-line bg-white p-2 shadow-lg dark:border-line dark:bg-gray-800">
           <div className="mb-1 flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               Custom
@@ -67,7 +67,7 @@ export function EmojiPickerPopover({
                   key={e.id}
                   onClick={() => onPick(e.name, e.name)}
                   title={`:${e.name}:`}
-                  className="rounded p-1 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  className="rounded p-1 hover:bg-hovered"
                 >
                   <img src={fileUrl(e.url)} alt={e.name} className="h-6 w-6 object-contain" />
                 </button>

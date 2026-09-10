@@ -14,16 +14,28 @@ import { ConfluenceApiService } from './confluence-api.service';
 import { ConfluenceService } from './confluence.service';
 import { AtlassianController } from './atlassian.controller';
 import { ConfluenceController } from './confluence.controller';
+import { DashboardController } from './dashboard.controller';
+import { DashboardService } from './dashboard.service';
+import { JiraWidgetsService } from './jira-widgets.service';
+import { JiraDashboardsService } from './jira-dashboards.service';
+import { JiraAlertsController } from './jira-alerts.controller';
+import { JiraAlertsService } from './jira-alerts.service';
+import { JiraAlertsQueue } from './jira-alerts.queue';
 import { MessagesModule } from '../messages/messages.module';
 import { AuthModule } from '../auth/auth.module';
 
 @Global()
 @Module({
   imports: [MessagesModule, AuthModule, ChannelsModule],
-  controllers: [AtlassianController, ConfluenceController],
+  controllers: [AtlassianController, ConfluenceController, DashboardController, JiraAlertsController],
   providers: [
     AtlassianApiService,
     AtlassianService,
+    DashboardService,
+    JiraWidgetsService,
+    JiraDashboardsService,
+    JiraAlertsService,
+    JiraAlertsQueue,
     AtlassianSyncService,
     AtlassianSyncQueue,
     JiraEventsService,

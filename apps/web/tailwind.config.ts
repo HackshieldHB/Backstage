@@ -6,18 +6,57 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Left sidebar — dark indigo per spec.
+        // The ENTIRE neutral ramp is theme-driven: every bg-/text-/border-gray-*
+        // across the app re-tints per theme via these CSS variables. This is what
+        // makes a theme change the whole surface, not just the accent.
+        gray: {
+          50: 'rgb(var(--gray-50) / <alpha-value>)',
+          100: 'rgb(var(--gray-100) / <alpha-value>)',
+          200: 'rgb(var(--gray-200) / <alpha-value>)',
+          300: 'rgb(var(--gray-300) / <alpha-value>)',
+          400: 'rgb(var(--gray-400) / <alpha-value>)',
+          500: 'rgb(var(--gray-500) / <alpha-value>)',
+          600: 'rgb(var(--gray-600) / <alpha-value>)',
+          700: 'rgb(var(--gray-700) / <alpha-value>)',
+          800: 'rgb(var(--gray-800) / <alpha-value>)',
+          900: 'rgb(var(--gray-900) / <alpha-value>)',
+          950: 'rgb(var(--gray-950) / <alpha-value>)',
+        },
+        // Left sidebar — fully themeable via CSS variables (per theme preset).
         sidebar: {
-          DEFAULT: '#1A1D3A',
-          hover: '#2C2F52',
-          active: '#6d5cf5',
-          muted: '#9DA2C8',
+          DEFAULT: 'rgb(var(--sidebar-bg) / <alpha-value>)',
+          hover: 'rgb(var(--sidebar-hover) / <alpha-value>)',
+          // Active highlight follows the user's chosen accent.
+          active: 'rgb(var(--accent) / <alpha-value>)',
+          muted: 'rgb(var(--sidebar-muted) / <alpha-value>)',
         },
-        // Vibrant indigo-violet — cascades to every button, link and highlight.
+        // Accent tokens — swappable at runtime via the --accent CSS variables.
         accent: {
-          DEFAULT: '#6d5cf5',
-          hover: '#5b47e0',
+          DEFAULT: 'rgb(var(--accent) / <alpha-value>)',
+          hover: 'rgb(var(--accent-hover) / <alpha-value>)',
         },
+        // ---- Semantic surface & text ladder (Level 0 → 5) ----
+        canvas: 'rgb(var(--canvas) / <alpha-value>)',
+        nav: 'rgb(var(--nav) / <alpha-value>)',
+        surface: 'rgb(var(--surface) / <alpha-value>)',
+        elevated: 'rgb(var(--elevated) / <alpha-value>)',
+        overlay: 'rgb(var(--overlay) / <alpha-value>)',
+        hovered: 'rgb(var(--hover) / <alpha-value>)',
+        line: {
+          DEFAULT: 'rgb(var(--line) / <alpha-value>)',
+          strong: 'rgb(var(--line-strong) / <alpha-value>)',
+        },
+        ink: {
+          DEFAULT: 'rgb(var(--ink) / <alpha-value>)',
+          2: 'rgb(var(--ink-2) / <alpha-value>)',
+          3: 'rgb(var(--ink-3) / <alpha-value>)',
+        },
+      },
+      boxShadow: {
+        // Subtle, layered elevation — barely-there but effective.
+        soft: '0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 1px -1px rgb(0 0 0 / 0.06)',
+        card: '0 1px 3px 0 rgb(0 0 0 / 0.06), 0 4px 12px -4px rgb(0 0 0 / 0.08)',
+        pop: '0 8px 30px -6px rgb(0 0 0 / 0.18), 0 2px 8px -2px rgb(0 0 0 / 0.12)',
       },
       keyframes: {
         'fade-in': {

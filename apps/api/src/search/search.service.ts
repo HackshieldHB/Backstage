@@ -23,7 +23,13 @@ export class SearchService {
     );
     const parsed = parseSearchQuery(input.q);
 
-    const response: SearchResponse = { messages: [], files: [], channels: [], people: [] };
+    const response: SearchResponse = {
+      messages: [],
+      files: [],
+      channels: [],
+      people: [],
+      decisions: [],
+    };
     const wants = (t: string) => input.type === 'all' || input.type === t;
 
     if (wants('messages')) {
@@ -44,7 +50,46 @@ export class SearchService {
     if (wants('people') && parsed.text) {
       response.people = await this.searchPeople(workspaceId, parsed.text, input.limit);
     }
+    if (wants('decisions') && parsed.text) {
+      response.decisions = await this.searchDecisions(
+        workspaceId,
+        channelIds,
+        parsed.text,
+        input.limit,
+      );
+    }
     return response;
+  }
+
+  private async searchDecisions(
+    workspaceId: string,
+    channelIds: string[],
+    text: string,
+    limit: number,
+  ) {
+    if (channelIds.length === 0) return [];
+    const rows = await this.prisma.decision.findMany({
+      where: {
+        workspaceId,
+        channelId: { in: channelIds },
+        OR: [
+          { title: { contains: text, mode: 'insensitive' } },
+          { detail: { contains: text, mode: 'insensitive' } },
+          { outcome: { contains: text, mode: 'insensitive' } },
+        ],
+      },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      take: limit,
+    });
+    return rows.map((d) => ({
+      id: d.id,
+      channelId: d.channelId,
+      title: d.title,
+      detail: d.detail,
+      status: d.status,
+      outcome: d.outcome,
+      createdAt: d.createdAt.toISOString(),
+    }));
   }
 
   private async searchMessages(

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
-import { ArrowLeft, AtSign, Bell, BellOff, Clock, FileText, Hash, Link2, MessageSquareText, Reply, Smile, Sparkles, SquareKanban, Trash2, X } from 'lucide-react';
+import { ArrowLeft, AtSign, Bell, BellOff, Clock, FileText, Hash, Link2, ListChecks, MessageSquareText, Reply, Smile, Sparkles, SquareKanban, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, fileUrl } from '@/lib/api';
 import { useUiStore, type RightPanel } from '@/stores/ui-store';
@@ -20,6 +20,7 @@ import {
   useScheduledMessages,
   useSearch,
   useThread,
+  useRelatedKnowledge,
   useWorkspaces,
   type Container,
 } from '@/hooks/queries';
@@ -30,6 +31,7 @@ import { Avatar } from './avatar';
 import { MessageBody } from './message-body';
 import { UserProfileDialog } from './user-profile-dialog';
 import { SaveThreadDialog } from './save-thread-dialog';
+import { CreateJiraIssueDialog } from './create-jira-issue-dialog';
 import { ConfirmDialog } from './confirm-dialog';
 import { useAtlassianStatus } from './atlassian-dialog';
 import type { UserDto } from '@backstages/shared';
@@ -65,13 +67,13 @@ export function RightPanelView({
   const fromThreads = panel.kind === 'thread' && panel.from === 'threads';
 
   return (
-    <aside className="flex w-full max-w-md shrink-0 flex-col border-l border-gray-200 bg-white md:w-96 dark:border-gray-700 dark:bg-gray-900 absolute inset-y-0 right-0 z-30 md:static">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4 dark:border-gray-700">
+    <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-md shrink-0 flex-col border-l border-line bg-surface md:static md:w-96">
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4 dark:border-line">
         <h2 className="flex items-center gap-1.5 text-[15px] font-bold">
           {fromThreads && (
             <button
               onClick={() => setRightPanel({ kind: 'threads' })}
-              className="-ml-1 rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="-ml-1 rounded p-1 text-gray-500 hover:bg-hovered"
               aria-label="Back to threads"
               data-testid="thread-back"
             >
@@ -85,13 +87,13 @@ export function RightPanelView({
           {panel.kind === 'activity' && 'Activity'}
           {panel.kind === 'saved' && 'Later'}
         </h2>
-        <button onClick={() => setRightPanel({ kind: 'none' })} className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close panel">
+        <button onClick={() => setRightPanel({ kind: 'none' })} className="rounded p-1 text-gray-500 hover:bg-hovered" aria-label="Close panel">
           <X size={16} />
         </button>
       </header>
       <div className="thin-scrollbar flex-1 overflow-y-auto">
         {panel.kind === 'thread' && (
-          <ThreadPanel workspaceId={workspaceId} messageId={panel.messageId} />
+          <ThreadPanel workspaceId={workspaceId} messageId={panel.messageId} onNavigate={onNavigate} />
         )}
         {panel.kind === 'threads' && <ThreadsPanel workspaceId={workspaceId} />}
         {panel.kind === 'canvas' && container.kind === 'channel' && (
@@ -130,7 +132,7 @@ function ThreadsPanel({ workspaceId }: { workspaceId: string }) {
         <button
           key={message.id}
           onClick={() => setRightPanel({ kind: 'thread', messageId: message.id, from: 'threads' })}
-          className="mb-2 block w-full rounded-lg border border-gray-200 p-3 text-left hover:border-accent dark:border-gray-700"
+          className="mb-2 block w-full rounded-lg border border-line p-3 text-left hover:border-accent dark:border-line"
           data-testid="thread-row"
         >
           <div className="mb-1 flex items-center gap-2 text-xs text-gray-500">
@@ -165,15 +167,20 @@ function ThreadsPanel({ workspaceId }: { workspaceId: string }) {
 function ThreadPanel({
   workspaceId,
   messageId,
+  onNavigate,
 }: {
   workspaceId: string;
   messageId: string;
+  onNavigate: (c: Container, highlight?: string) => void;
 }) {
   const thread = useThread(messageId);
   const atlassian = useAtlassianStatus(workspaceId);
   const ai = useAiStatus();
+  const knowledge = useRelatedKnowledge(workspaceId, messageId);
   const [saveOpen, setSaveOpen] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+  const [actionItems, setActionItems] = useState<string[] | null>(null);
+  const [jiraSummary, setJiraSummary] = useState<string | null>(null);
   const pushToast = useUiStore((s) => s.pushToast);
 
   if (!thread.data) {
@@ -200,6 +207,32 @@ function ThreadPanel({
         <div className="pt-3" data-testid="thread-parent">
           <MessageItem message={thread.data.parent} grouped={false} inThread />
         </div>
+        {(knowledge.data?.items.length ?? 0) > 0 && (
+          <div className="mx-5 my-2 rounded-lg border border-line bg-elevated p-2" data-testid="related-knowledge">
+            <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">
+              <Sparkles size={11} className="text-accent" /> Related knowledge
+            </div>
+            <ul className="space-y-0.5">
+              {knowledge.data!.items.map((k) => (
+                <li key={`${k.kind}-${k.id}`}>
+                  <button
+                    onClick={() => k.channelId && onNavigate({ kind: 'channel', id: k.channelId })}
+                    disabled={!k.channelId}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink-2 enabled:hover:bg-hovered enabled:hover:text-ink disabled:cursor-default"
+                  >
+                    {k.kind === 'decision' ? (
+                      <ListChecks size={13} className="shrink-0 text-accent" />
+                    ) : (
+                      <FileText size={13} className="shrink-0 text-ink-3" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{k.title}</span>
+                    <span className="shrink-0 text-[10px] text-ink-3">{k.reason}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="mx-5 my-2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
           <span>{thread.data.replies.length} {thread.data.replies.length === 1 ? 'reply' : 'replies'}</span>
           <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
@@ -245,12 +278,62 @@ function ThreadPanel({
               <Sparkles size={12} /> Summarize
             </button>
           )}
+          {ai.data?.enabled && threadContainer.kind === 'channel' && (
+            <button
+              type="button"
+              onClick={async () => {
+                setActionItems([]);
+                try {
+                  const r = await api<{ items: string[] }>('POST', `/ai/threads/${messageId}/action-items`);
+                  setActionItems(r.items);
+                  if (r.items.length === 0) pushToast('No action items found in this thread', 'info');
+                } catch (err) {
+                  setActionItems(null);
+                  pushToast(err instanceof Error ? err.message : 'Extraction failed', 'error');
+                }
+              }}
+              data-testid="action-items-thread"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+            >
+              <ListChecks size={12} /> Action items
+            </button>
+          )}
         </div>
         {summary && (
           <div className="mx-5 mb-2 rounded-md border border-accent/30 bg-accent/5 p-2.5 text-[13px] whitespace-pre-wrap">
             <span className="mb-1 block text-[11px] font-semibold uppercase text-accent">AI summary</span>
             {summary}
           </div>
+        )}
+        {actionItems && actionItems.length > 0 && (
+          <div className="mx-5 mb-2 rounded-md border border-accent/30 bg-accent/5 p-2.5">
+            <span className="mb-1.5 block text-[11px] font-semibold uppercase text-accent">Action items</span>
+            <ul className="space-y-1.5">
+              {actionItems.map((item, i) => (
+                <li key={i} className="flex items-start gap-2 text-[13px]">
+                  <span className="min-w-0 flex-1">{item}</span>
+                  <button
+                    type="button"
+                    onClick={() => setJiraSummary(item)}
+                    className="flex shrink-0 items-center gap-1 rounded border border-accent px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent/10"
+                    data-testid="action-item-to-jira"
+                  >
+                    <SquareKanban size={11} /> Create in Jira
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {jiraSummary !== null && parent.channelId && (
+          <CreateJiraIssueDialog
+            workspaceId={workspaceId}
+            defaultSummary={jiraSummary.slice(0, 240)}
+            onCreate={(inputBody) =>
+              api<{ key: string; url: string }>('POST', `/channels/${parent.channelId}/jira/create-issue`, inputBody)
+            }
+            onClose={() => setJiraSummary(null)}
+          />
         )}
         {saveOpen && (
           <SaveThreadDialog
@@ -329,7 +412,7 @@ function CanvasPanel({ channelId }: { channelId: string }) {
         value={value}
         onChange={(e) => setText(e.target.value)}
         placeholder="Write meeting notes, decisions, links…"
-        className="thin-scrollbar flex-1 resize-none rounded-lg border border-gray-200 p-3 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
+        className="thin-scrollbar flex-1 resize-none rounded-lg border border-line p-3 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
         data-testid="canvas-editor"
       />
       <button
@@ -378,7 +461,7 @@ function DetailsPanel({
 
   return (
     <div>
-      <div className="flex border-b border-gray-200 dark:border-gray-700">
+      <div className="flex border-b border-line">
         {(['about', 'members', 'pinned', 'files'] as const).map((t) => (
           <button
             key={t}
@@ -412,7 +495,7 @@ function DetailsPanel({
                 await api('PATCH', `/channels/${channelId}/notifications`, { pref: e.target.value });
                 await qc.invalidateQueries({ queryKey: ['channel', channelId] });
               }}
-              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-800"
+              className="w-full rounded-md border border-line-strong px-2 py-1.5 text-sm dark:border-line-strong dark:bg-gray-800"
               data-testid="notification-pref"
             >
               <option value="ALL">All messages</option>
@@ -424,7 +507,7 @@ function DetailsPanel({
             <h3 className="mb-1 font-semibold">Share externally</h3>
             <button
               onClick={() => void shareAndCopy(workspaceId, { channelId }, pushToast)}
-              className="flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-[13px] font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+              className="flex items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1.5 text-[13px] font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800"
               data-testid="share-channel-button"
             >
               <Link2 size={14} /> Create public link
@@ -484,7 +567,7 @@ function DetailsPanel({
             <li key={m.id}>
               <button
                 onClick={() => setProfileUser(m)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-hovered"
                 data-testid={`member-${m.id}`}
               >
                 <Avatar user={m} size="sm" presence={presence.data?.[m.id]} />
@@ -514,7 +597,7 @@ function DetailsPanel({
             <button
               key={p.message.id}
               onClick={() => onNavigate({ kind: 'channel', id: channelId }, p.message.id)}
-              className="mb-2 block w-full rounded-lg border border-gray-200 p-3 text-left hover:border-accent dark:border-gray-700"
+              className="mb-2 block w-full rounded-lg border border-line p-3 text-left hover:border-accent dark:border-line"
             >
               <div className="mb-1 flex items-center gap-2 text-xs text-gray-500">
                 <Avatar user={p.message.user} size="xs" />
@@ -533,7 +616,7 @@ function DetailsPanel({
             <li key={f.id}>
               <a
                 href={`${fileUrl(f.url)}&download=1`}
-                className="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-hovered"
               >
                 <FileText size={18} className="text-accent" />
                 <span className="min-w-0">
@@ -595,19 +678,39 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
   const qc = useQueryClient();
   const muted = useUiStore((s) => s.notificationsMuted);
   const setMuted = useUiStore((s) => s.setNotificationsMuted);
+  const [priorityOnly, setPriorityOnly] = useState(false);
+
+  const all = notifications.data?.notifications ?? [];
+  // Priority = things aimed directly at you: mentions and DMs.
+  const items = priorityOnly ? all.filter((n) => n.type === 'MENTION' || n.type === 'DM') : all;
 
   return (
     <div className="p-2" data-testid="activity-list">
       <div className="flex items-center justify-between px-2 pb-1">
-        <button
-          className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-          onClick={() => setMuted(!muted)}
-          title={muted ? 'Notifications muted — click to unmute' : 'Mute desktop notifications'}
-          data-testid="mute-notifications"
-        >
-          {muted ? <BellOff size={13} /> : <Bell size={13} />}
-          {muted ? 'Muted' : 'Mute'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+            onClick={() => setMuted(!muted)}
+            title={muted ? 'Notifications muted — click to unmute' : 'Mute desktop notifications'}
+            data-testid="mute-notifications"
+          >
+            {muted ? <BellOff size={13} /> : <Bell size={13} />}
+            {muted ? 'Muted' : 'Mute'}
+          </button>
+          <button
+            className={clsx(
+              'rounded-full px-2 py-0.5 text-xs font-medium',
+              priorityOnly
+                ? 'bg-accent text-white'
+                : 'text-gray-500 hover:bg-hovered',
+            )}
+            onClick={() => setPriorityOnly((v) => !v)}
+            title="Show only mentions & DMs"
+            data-testid="priority-toggle"
+          >
+            Priority
+          </button>
+        </div>
         <button
           className="text-xs font-medium text-accent hover:underline"
           onClick={async () => {
@@ -618,7 +721,7 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
           Mark all read
         </button>
       </div>
-      {(notifications.data?.notifications ?? []).map((n) => {
+      {items.map((n) => {
         const pl = (n.payload ?? {}) as NotifPayload;
         const sysText = n.type === 'SYSTEM' ? systemText(pl) : null;
         const open = () => {
@@ -632,7 +735,7 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
             key={n.id}
             onClick={open}
             className={clsx(
-              'mb-1 flex w-full items-start gap-2 rounded-lg p-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800',
+              'mb-1 flex w-full items-start gap-2 rounded-lg p-2 text-left hover:bg-hovered',
               !n.readAt && 'bg-accent/5',
             )}
           >
@@ -663,8 +766,10 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
           </button>
         );
       })}
-      {(notifications.data?.notifications ?? []).length === 0 && (
-        <p className="p-3 text-sm text-gray-500 dark:text-gray-400">No activity yet.</p>
+      {items.length === 0 && (
+        <p className="p-3 text-sm text-gray-500 dark:text-gray-400">
+          {priorityOnly ? 'No priority items.' : 'No activity yet.'}
+        </p>
       )}
     </div>
   );
@@ -704,7 +809,7 @@ function SavedPanel({
           {reminders.map((r) => (
             <div
               key={r.id}
-              className="mb-1.5 flex items-start gap-2 rounded-lg border border-gray-200 p-2.5 dark:border-gray-700"
+              className="mb-1.5 flex items-start gap-2 rounded-lg border border-line p-2.5 dark:border-line"
               data-testid="reminder-row"
             >
               <Clock size={14} className="mt-0.5 shrink-0 text-accent" />
@@ -737,7 +842,7 @@ function SavedPanel({
             if (s.message.channelId) onNavigate({ kind: 'channel', id: s.message.channelId }, s.message.id);
             else if (s.message.conversationId) onNavigate({ kind: 'conversation', id: s.message.conversationId }, s.message.id);
           }}
-          className="mb-2 block w-full rounded-lg border border-gray-200 p-3 text-left hover:border-accent dark:border-gray-700"
+          className="mb-2 block w-full rounded-lg border border-line p-3 text-left hover:border-accent dark:border-line"
         >
           <div className="mb-1 flex items-center gap-2 text-xs text-gray-500">
             <Avatar user={s.message.user} size="xs" />

@@ -14,6 +14,34 @@
       "runtimeArgs": [],
       "port": 3000,
       "autoPort": false
+    },
+    {
+      "name": "api-local",
+      "runtimeExecutable": "D:\\Projects\\Backstages\\.toolchain\\api-start-local.cmd",
+      "runtimeArgs": [],
+      "port": 3001,
+      "autoPort": false
+    },
+    {
+      "name": "web-local",
+      "runtimeExecutable": "D:\\Projects\\Backstages\\.toolchain\\web-dev-local.cmd",
+      "runtimeArgs": [],
+      "port": 3000,
+      "autoPort": false
+    },
+    {
+      "name": "api-tunnel",
+      "runtimeExecutable": "D:\\Projects\\Backstages\\.toolchain\\api-tunnel.cmd",
+      "runtimeArgs": [],
+      "port": 3001,
+      "autoPort": false
+    },
+    {
+      "name": "web-tunnel",
+      "runtimeExecutable": "D:\\Projects\\Backstages\\.toolchain\\web-tunnel.cmd",
+      "runtimeArgs": [],
+      "port": 3000,
+      "autoPort": false
     }
   ]
 }

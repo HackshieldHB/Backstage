@@ -55,7 +55,7 @@ export function Avatar({
         <span
           data-testid="presence-dot"
           className={clsx(
-            'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-gray-900',
+            'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white dark:border-line',
             presence === 'ACTIVE' && 'bg-green-500',
             presence === 'AWAY' && 'bg-yellow-400',
             presence === 'DND' && 'bg-red-500',

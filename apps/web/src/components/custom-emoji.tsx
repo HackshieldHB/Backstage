@@ -87,18 +87,18 @@ export function EmojiManagerDialog({
 
   return (
     <Dialog title="Custom emoji" onClose={onClose}>
-      <div className="mb-4 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+      <div className="mb-4 rounded-lg border border-line p-3 dark:border-line">
         <div className="flex items-center gap-2">
           <span className="text-gray-400">:</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value.toLowerCase())}
             placeholder="party-parrot"
-            className="w-40 rounded-md border border-gray-300 px-2 py-1 text-sm outline-none focus:border-accent dark:border-gray-600 dark:bg-gray-800"
+            className="w-40 rounded-md border border-line-strong px-2 py-1 text-sm outline-none focus:border-accent dark:border-line-strong dark:bg-gray-800"
             data-testid="emoji-name"
           />
           <span className="text-gray-400">:</span>
-          <label className="ml-auto flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800">
+          <label className="ml-auto flex cursor-pointer items-center gap-1.5 rounded-md border border-line-strong px-2.5 py-1 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800">
             <UploadCloud size={14} />
             {file ? 'Change' : 'Image'}
             <input type="file" accept="image/*" hidden onChange={onPickFile} data-testid="emoji-file" />
@@ -124,7 +124,7 @@ export function EmojiManagerDialog({
         {(emoji.data ?? []).map((e) => (
           <div
             key={e.id}
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800"
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-hovered"
             data-testid="emoji-row"
           >
             <img src={fileUrl(e.url)} alt={e.name} className="h-6 w-6 object-contain" />

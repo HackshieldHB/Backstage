@@ -14,6 +14,8 @@ import {
   MarkNotificationsReadInput,
   MarkNotificationsReadSchema,
   MAX_UPLOAD_BYTES,
+  StartFocusInput,
+  StartFocusSchema,
   UpdateProfileInput,
   UpdateProfileSchema,
   UpdateStatusInput,
@@ -38,6 +40,20 @@ export class UsersController {
   @Patch('dnd')
   setDnd(@CurrentUser() user: AuthUser, @Body() body: { until: string | null }) {
     return this.users.setDnd(user.id, body?.until ?? null);
+  }
+
+  @Post('focus')
+  startFocus(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(StartFocusSchema)) body: StartFocusInput,
+  ) {
+    return this.users.startFocus(user.id, body.minutes);
+  }
+
+  @HttpCode(200)
+  @Post('focus/end')
+  endFocus(@CurrentUser() user: AuthUser) {
+    return this.users.endFocus(user.id);
   }
 
   @Patch('profile')

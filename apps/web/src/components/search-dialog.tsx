@@ -3,14 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
-import { FileText, Hash, Lock, MessageSquare, Search } from 'lucide-react';
+import { FileText, Gavel, Hash, Lock, MessageSquare, Search } from 'lucide-react';
 import { fileUrl } from '@/lib/api';
 import { useSearch, type Container } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
 import { Avatar } from './avatar';
 import { MessageBody } from './message-body';
 
-const TABS = ['messages', 'files', 'channels', 'people'] as const;
+const TABS = ['messages', 'files', 'channels', 'people', 'decisions'] as const;
 type Tab = (typeof TABS)[number];
 
 export function SearchDialog({
@@ -58,6 +58,7 @@ export function SearchDialog({
     files: results.data?.files.length ?? 0,
     channels: results.data?.channels.length ?? 0,
     people: results.data?.people.length ?? 0,
+    decisions: results.data?.decisions.length ?? 0,
   };
 
   return (
@@ -67,8 +68,8 @@ export function SearchDialog({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-2xl animate-fade-in rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
-        <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+      <div className="w-full max-w-2xl animate-fade-in rounded-xl border border-line bg-white shadow-xl dark:border-line dark:bg-gray-900">
+        <div className="flex items-center gap-2 border-b border-line px-4 py-3 dark:border-line">
           <Search size={16} className="text-gray-500 dark:text-gray-400" />
           <input
             ref={inputRef}
@@ -95,7 +96,7 @@ export function SearchDialog({
         </div>
 
         {/* quick filters */}
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-100 px-4 py-2 dark:border-gray-800">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-4 py-2 dark:border-line">
           <FilterChip active={hasToken('has:file')} onClick={() => toggleToken('has:file')}>
             Has file
           </FilterChip>
@@ -117,13 +118,13 @@ export function SearchDialog({
                   return e.target.value ? `${stripped} after:${e.target.value}`.trim() : stripped;
                 });
               }}
-              className="rounded border border-gray-300 bg-transparent px-1 py-0.5 text-[11px] dark:border-gray-600"
+              className="rounded border border-line-strong bg-transparent px-1 py-0.5 text-[11px] dark:border-line-strong"
               data-testid="search-after"
             />
           </label>
         </div>
 
-        <div className="flex border-b border-gray-100 px-2 dark:border-gray-800">
+        <div className="flex border-b border-line px-2 dark:border-line">
           {TABS.map((t) => (
             <button
               key={t}
@@ -161,7 +162,7 @@ export function SearchDialog({
                     m.id,
                   )
                 }
-                className="mb-1 block w-full rounded-lg p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="mb-1 block w-full rounded-lg p-3 text-left hover:bg-hovered"
                 data-testid="search-result-message"
               >
                 <div className="mb-1 flex items-center gap-2 text-xs text-gray-500">
@@ -178,7 +179,7 @@ export function SearchDialog({
               <a
                 key={f.id}
                 href={`${fileUrl(f.url)}&download=1`}
-                className="mb-1 flex items-center gap-3 rounded-lg p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="mb-1 flex items-center gap-3 rounded-lg p-3 hover:bg-hovered"
               >
                 <FileText size={20} className="text-accent" />
                 <span className="min-w-0">
@@ -195,7 +196,7 @@ export function SearchDialog({
               <button
                 key={c.id}
                 onClick={() => onJump({ kind: 'channel', id: c.id })}
-                className="mb-1 flex w-full items-center gap-2 rounded-lg p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="mb-1 flex w-full items-center gap-2 rounded-lg p-3 text-left hover:bg-hovered"
               >
                 {c.isPrivate ? <Lock size={14} /> : <Hash size={14} />}
                 <span className="text-sm font-medium">{c.name}</span>
@@ -214,7 +215,7 @@ export function SearchDialog({
                   window.dispatchEvent(new CustomEvent('bs:open-dm', { detail: p.id }));
                   onClose();
                 }}
-                className="mb-1 flex w-full items-center gap-2 rounded-lg p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="mb-1 flex w-full items-center gap-2 rounded-lg p-3 text-left hover:bg-hovered"
                 data-testid="search-result-person"
               >
                 <Avatar user={p} size="sm" />
@@ -222,6 +223,24 @@ export function SearchDialog({
                 <span className="truncate text-xs text-gray-500 dark:text-gray-400">{p.email}</span>
                 <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-medium text-accent">
                   <MessageSquare size={13} /> Message
+                </span>
+              </button>
+            ))}
+
+          {debounced && tab === 'decisions' &&
+            (results.data?.decisions ?? []).map((d) => (
+              <button
+                key={d.id}
+                onClick={() => onJump({ kind: 'channel', id: d.channelId })}
+                className="mb-1 flex w-full items-start gap-2 rounded-lg p-3 text-left hover:bg-hovered"
+                data-testid="search-result-decision"
+              >
+                <Gavel size={15} className="mt-0.5 shrink-0 text-accent" />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{d.title}</span>
+                  <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                    {d.status === 'DECIDED' ? `Decided: ${d.outcome ?? ''}` : d.detail || 'Open decision'}
+                  </span>
                 </span>
               </button>
             ))}
@@ -252,7 +271,7 @@ function FilterChip({
         'rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors',
         active
           ? 'border-accent bg-accent/10 text-accent'
-          : 'border-gray-300 text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800',
+          : 'border-line-strong text-gray-600 hover:bg-gray-100 dark:border-line-strong dark:text-gray-300 dark:hover:bg-gray-800',
       )}
     >
       {children}

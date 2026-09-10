@@ -64,7 +64,7 @@ export function WorkflowsDialog({
         {(workflows.data ?? []).map((wf) => (
           <li
             key={wf.id}
-            className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700"
+            className="flex items-start gap-3 rounded-lg border border-line p-3 dark:border-line"
             data-testid="workflow-row"
           >
             <Zap size={16} className={wf.enabled ? 'mt-0.5 text-accent' : 'mt-0.5 text-gray-300'} />
@@ -90,7 +90,7 @@ export function WorkflowsDialog({
           </li>
         ))}
         {(workflows.data ?? []).length === 0 && !creating && (
-          <li className="rounded-lg border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500 dark:border-gray-600">
+          <li className="rounded-lg border border-dashed border-line-strong p-4 text-center text-sm text-gray-500 dark:border-line-strong">
             No workflows yet.
           </li>
         )}
@@ -139,7 +139,7 @@ function WorkflowForm({
   const [busy, setBusy] = useState(false);
 
   const inputCls =
-    'w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-gray-600 dark:bg-gray-800';
+    'w-full rounded-md border border-line-strong px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-line-strong dark:bg-gray-800';
 
   const submit = async () => {
     if (!name.trim() || !channelId || !actionChannelId || !actionText.trim()) {
@@ -162,7 +162,7 @@ function WorkflowForm({
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+    <div className="rounded-lg border border-line p-3 dark:border-line">
       <input
         className={`${inputCls} mb-2`}
         placeholder="Workflow name (e.g. Deploy notifier)"
@@ -200,7 +200,7 @@ function WorkflowForm({
         onChange={(e) => setActionText(e.target.value)}
       />
       <div className="flex justify-end gap-2">
-        <button onClick={onCancel} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800">
+        <button onClick={onCancel} className="rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800">
           Cancel
         </button>
         <button

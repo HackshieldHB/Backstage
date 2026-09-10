@@ -3,74 +3,116 @@
 import { useMemo, useState } from 'react';
 import { ExternalLink, SquareKanban, Timer, UserCheck } from 'lucide-react';
 import clsx from 'clsx';
-import { useJiraIssues, useJiraProjects, useMyJiraIssues } from '@/hooks/queries';
+import { useChannels, useJiraIssues, useJiraProjects, useMyJiraIssues } from '@/hooks/queries';
 import { LogTimeDialog } from './log-time-dialog';
 import { PaneShell } from './pane-shell';
+import { AlertsTab, DashboardTab, Overview, SprintTab } from './work-dashboard-dialog';
 
-/** A dedicated Jira workspace: pick "Assigned to me" or a project on the left,
- *  browse its issues on the right with open-in-Jira and Log time inline. */
+type JiraTab = 'issues' | 'dashboard' | 'overview' | 'sprint' | 'alerts';
+
+/** The Jira home: browse issues, plus the mirrored Jira dashboard, overview,
+ *  sprint and alert rules — all under one tabbed pane. */
 export function JiraPane({ workspaceId }: { workspaceId: string }) {
+  const [tab, setTab] = useState<JiraTab>('issues');
+  const channels = useChannels(workspaceId);
+  const tabs: { id: JiraTab; label: string }[] = [
+    { id: 'issues', label: 'Issues' },
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'overview', label: 'Overview' },
+    { id: 'sprint', label: 'Sprint' },
+    { id: 'alerts', label: 'Alerts' },
+  ];
+
+  return (
+    <PaneShell icon={<SquareKanban size={18} className="text-[#2684FF]" />} title="Jira">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-4 flex gap-1 border-b border-line">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={clsx(
+                'px-3 py-2 text-sm font-medium',
+                tab === t.id ? 'border-b-2 border-accent text-accent' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200',
+              )}
+              data-testid={`jira-tab-${t.id}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'issues' && <IssuesBrowser workspaceId={workspaceId} />}
+        {tab === 'dashboard' && <DashboardTab workspaceId={workspaceId} />}
+        {tab === 'overview' && <Overview workspaceId={workspaceId} />}
+        {tab === 'sprint' && <SprintTab workspaceId={workspaceId} />}
+        {tab === 'alerts' && <AlertsTab workspaceId={workspaceId} channels={channels.data ?? []} />}
+      </div>
+    </PaneShell>
+  );
+}
+
+/** The classic issue browser: source picker on the left, issue list on the right. */
+function IssuesBrowser({ workspaceId }: { workspaceId: string }) {
   const [selected, setSelected] = useState<'mine' | string>('mine');
   const [filter, setFilter] = useState('');
   const projects = useJiraProjects(workspaceId, true);
 
   return (
-    <PaneShell icon={<SquareKanban size={18} className="text-[#2684FF]" />} title="Jira">
-      <div className="mx-auto flex max-w-5xl gap-4">
-        {/* Left rail: source selector */}
-        <div className="w-52 shrink-0">
+    <div className="flex gap-4">
+      {/* Left rail: source selector */}
+      <div className="w-52 shrink-0">
+        <button
+          onClick={() => setSelected('mine')}
+          className={clsx(
+            'mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]',
+            selected === 'mine'
+              ? 'bg-accent/10 font-medium text-accent'
+              : 'hover:bg-hovered',
+          )}
+        >
+          <UserCheck size={14} /> Assigned to me
+        </button>
+        <p className="mb-1 mt-3 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          Projects
+        </p>
+        {projects.isLoading && <p className="px-2.5 text-[12px] text-gray-400">Loading…</p>}
+        {projects.data?.map((p) => (
           <button
-            onClick={() => setSelected('mine')}
+            key={p.id}
+            onClick={() => setSelected(p.key)}
+            title={p.name}
             className={clsx(
-              'mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]',
-              selected === 'mine'
+              'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px]',
+              selected === p.key
                 ? 'bg-accent/10 font-medium text-accent'
-                : 'hover:bg-gray-100 dark:hover:bg-gray-800',
+                : 'hover:bg-hovered',
             )}
           >
-            <UserCheck size={14} /> Assigned to me
+            <span className="shrink-0 font-mono text-[11px] text-gray-400">{p.key}</span>
+            <span className="truncate">{p.name}</span>
           </button>
-          <p className="mb-1 mt-3 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-            Projects
-          </p>
-          {projects.isLoading && <p className="px-2.5 text-[12px] text-gray-400">Loading…</p>}
-          {projects.data?.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => setSelected(p.key)}
-              title={p.name}
-              className={clsx(
-                'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px]',
-                selected === p.key
-                  ? 'bg-accent/10 font-medium text-accent'
-                  : 'hover:bg-gray-100 dark:hover:bg-gray-800',
-              )}
-            >
-              <span className="shrink-0 font-mono text-[11px] text-gray-400">{p.key}</span>
-              <span className="truncate">{p.name}</span>
-            </button>
-          ))}
-          {projects.data?.length === 0 && (
-            <p className="px-2.5 text-[12px] text-gray-400">No projects</p>
-          )}
-        </div>
-
-        {/* Right: issue list */}
-        <div className="min-w-0 flex-1">
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter issues…"
-            className="mb-3 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800"
-          />
-          {selected === 'mine' ? (
-            <MyIssues workspaceId={workspaceId} filter={filter} />
-          ) : (
-            <ProjectIssues workspaceId={workspaceId} projectKey={selected} filter={filter} />
-          )}
-        </div>
+        ))}
+        {projects.data?.length === 0 && (
+          <p className="px-2.5 text-[12px] text-gray-400">No projects</p>
+        )}
       </div>
-    </PaneShell>
+
+      {/* Right: issue list */}
+      <div className="min-w-0 flex-1">
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter issues…"
+          className="mb-3 w-full rounded-md border border-line-strong px-3 py-1.5 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
+        />
+        {selected === 'mine' ? (
+          <MyIssues workspaceId={workspaceId} filter={filter} />
+        ) : (
+          <ProjectIssues workspaceId={workspaceId} projectKey={selected} filter={filter} />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -85,7 +127,7 @@ function MyIssues({ workspaceId, filter }: { workspaceId: string; filter: string
     return <Empty>Connect your Atlassian account (Workspace menu → Connect Atlassian) to see your issues.</Empty>;
   if (rows.length === 0) return <Empty>{filter ? 'No matching issues' : 'Nothing assigned to you 🎉'}</Empty>;
   return (
-    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+    <ul className="divide-y divide-line dark:divide-line">
       {rows.map((i) => (
         <IssueRow
           key={i.key}
@@ -118,7 +160,7 @@ function ProjectIssues({
   if (issues.isLoading) return <Empty>Loading…</Empty>;
   if (rows.length === 0) return <Empty>{filter ? 'No matching issues' : 'No issues in this project'}</Empty>;
   return (
-    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+    <ul className="divide-y divide-line dark:divide-line">
       {rows.map((i) => (
         <IssueRow
           key={i.key}
@@ -166,7 +208,7 @@ function IssueRow({
       )}
       <button
         onClick={() => setLogOpen(true)}
-        className="flex shrink-0 items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 opacity-0 transition-opacity hover:bg-gray-100 group-hover:opacity-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+        className="flex shrink-0 items-center gap-1 rounded border border-line-strong px-2 py-0.5 text-[11px] font-medium text-gray-600 opacity-0 transition-opacity hover:bg-gray-100 group-hover:opacity-100 dark:border-line-strong dark:text-gray-300 dark:hover:bg-gray-800"
         title="Log time to this issue"
       >
         <Timer size={12} /> Log time

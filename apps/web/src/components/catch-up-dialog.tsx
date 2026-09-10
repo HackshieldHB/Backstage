@@ -79,7 +79,7 @@ export function CatchUpDialog({ workspaceId, onClose }: { workspaceId: string; o
         {cu.data?.items.map((item) => (
           <div
             key={(item.channelId ?? item.conversationId)!}
-            className="rounded-lg border border-gray-200 p-2.5 dark:border-gray-700"
+            className="rounded-lg border border-line p-2.5 dark:border-line"
           >
             <div className="mb-1 flex items-center justify-between gap-2">
               <span className="truncate text-sm font-semibold">{item.title}</span>

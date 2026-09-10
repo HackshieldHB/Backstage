@@ -39,6 +39,7 @@ import { useUiStore } from '@/stores/ui-store';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   keys,
+  useBestTime,
   useChannelMembers,
   useCommands,
   useConversations,
@@ -55,6 +56,7 @@ import { EmojiPickerPopover } from './emoji-picker';
 import { CreateJiraIssueDialog } from './create-jira-issue-dialog';
 import { DeclareIncidentDialog } from './declare-incident-dialog';
 import { CreatePollDialog } from './poll-dialog';
+import { VoiceRecorderButton } from './voice-recorder-button';
 import { Avatar } from './avatar';
 
 const lowlight = createLowlight(common);
@@ -230,6 +232,12 @@ export function Composer({
     container.kind === 'conversation'
       ? (conversations.data?.find((c) => c.id === container.id)?.members ?? [])
       : [];
+
+  // R5: best-time-to-reach hint for a 1:1 DM whose recipient isn't reachable now.
+  const others = dmMembers.filter((m) => m.id !== me?.id);
+  const dmTargetId = !parentId && container.kind === 'conversation' && others.length === 1 ? others[0].id : null;
+  const bestTime = useBestTime(workspaceId, dmTargetId, !!dmTargetId);
+  const bt = bestTime.data;
 
   const mentionCandidates = useCallback((): SuggestionItem[] => {
     const users =
@@ -513,14 +521,35 @@ export function Composer({
   const uploadsInFlight = uploads.some((u) => !u.attachment && !u.error);
 
   return (
-    <div className="relative rounded-lg border border-gray-300 bg-white focus-within:border-accent dark:border-gray-600 dark:bg-gray-800">
+    <div className="relative rounded-xl border border-line bg-elevated shadow-soft transition-shadow focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/25">
+      {/* R5: best-time hint for an unreachable DM recipient */}
+      {!cmdOpen && bt && !bt.reachableNow && (
+        <div className="absolute bottom-full left-0 mb-2 flex items-center gap-1.5 rounded-lg border border-line bg-overlay px-3 py-1.5 text-[12px] text-ink-2 shadow-pop">
+          <Clock size={12} className="shrink-0 text-amber-500" />
+          <span>{bt.reason.startsWith('Offline') || bt.reason.startsWith('Away') || bt.reason.startsWith('In Do Not Disturb') ? `${bt.displayName} is ${bt.reason.charAt(0).toLowerCase() + bt.reason.slice(1)}` : `${bt.displayName}: ${bt.reason}`}</span>
+          {bt.suggestedAt && (
+            <button
+              type="button"
+              onClick={() => {
+                const d = new Date(bt.suggestedAt!);
+                const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+                setScheduleAt(local.toISOString().slice(0, 16));
+                setScheduleOpen(true);
+              }}
+              className="ml-1 shrink-0 rounded bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent hover:bg-accent/20"
+            >
+              Schedule for then
+            </button>
+          )}
+        </div>
+      )}
       {/* slash-command palette */}
       {cmdOpen && (
         <div
-          className="absolute bottom-full left-0 mb-2 w-full max-w-md overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+          className="absolute bottom-full left-0 mb-2 w-full max-w-md overflow-hidden rounded-lg border border-line bg-overlay shadow-pop"
           data-testid="command-palette"
         >
-          <div className="border-b border-gray-100 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700">
+          <div className="border-b border-line px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-line">
             Commands
           </div>
           <ul>
@@ -535,7 +564,7 @@ export function Composer({
                   onMouseEnter={() => setCmdIndex(i)}
                   className={clsx(
                     'flex w-full flex-col px-3 py-1.5 text-left',
-                    i === cmdIndex ? 'bg-accent/10' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50',
+                    i === cmdIndex ? 'bg-accent/10' : 'hover:bg-hovered',
                   )}
                   data-testid="command-option"
                 >
@@ -551,7 +580,7 @@ export function Composer({
       )}
 
       {/* formatting toolbar */}
-      <div className="flex items-center gap-0.5 border-b border-gray-100 px-2 py-1 dark:border-gray-700">
+      <div className="flex items-center gap-0.5 border-b border-line px-2.5 py-1.5">
         <FormatButton active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()} title="Bold">
           <BoldIcon size={14} />
         </FormatButton>
@@ -569,7 +598,7 @@ export function Composer({
         </FormatButton>
       </div>
 
-      <EditorContent editor={editor} />
+      <EditorContent editor={editor} className="px-3.5 py-2.5 text-[14px] leading-[1.6] text-ink" />
 
       {/* upload chips */}
       {uploads.length > 0 && (
@@ -579,7 +608,7 @@ export function Composer({
               key={u.key}
               className={clsx(
                 'flex items-center gap-2 rounded-md border px-2 py-1 text-xs',
-                u.error ? 'border-red-300 text-red-600' : 'border-gray-200 dark:border-gray-600',
+                u.error ? 'border-red-300 text-red-600' : 'border-line dark:border-line-strong',
               )}
             >
               <Paperclip size={12} />
@@ -630,25 +659,26 @@ export function Composer({
             </label>
           )}
         </div>
+        <VoiceRecorderButton onClip={(file) => void startUpload(file)} />
         {!parentId && (
           <div className="relative">
             <button
               onClick={() => setScheduleOpen((v) => !v)}
               title="Schedule for later"
               data-testid="schedule-button"
-              className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+              className="rounded-md p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
             >
               <Clock size={15} />
             </button>
             {scheduleOpen && (
-              <div className="absolute bottom-full right-0 mb-2 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+              <div className="absolute bottom-full right-0 mb-2 w-64 rounded-lg border border-line bg-overlay p-3 shadow-pop">
                 <p className="mb-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300">Send later</p>
                 <input
                   type="datetime-local"
                   value={scheduleAt}
                   onChange={(e) => setScheduleAt(e.target.value)}
                   data-testid="schedule-at"
-                  className="mb-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800"
+                  className="mb-2 w-full rounded-md border border-line-strong bg-white px-2 py-1 text-sm dark:border-line-strong dark:bg-gray-800"
                 />
                 <button
                   onClick={() => void scheduleSend()}
@@ -793,13 +823,13 @@ export function EditMessageEditor({ message, onDone }: { message: MessageDto; on
 
   if (!editor) return null;
   return (
-    <div className="mt-1 rounded-lg border border-accent bg-white dark:bg-gray-800">
-      <EditorContent editor={editor} />
+    <div className="mt-1 rounded-lg border border-accent bg-elevated">
+      <EditorContent editor={editor} className="px-3.5 py-2.5 text-[14px] leading-[1.6] text-ink" />
       <div className="flex gap-2 px-3 pb-2 text-xs">
         <button onClick={() => void save()} className="rounded bg-accent px-2 py-1 font-semibold text-white" data-testid="edit-save">
           Save
         </button>
-        <button onClick={onDone} className="rounded border border-gray-300 px-2 py-1 dark:border-gray-600">
+        <button onClick={onDone} className="rounded border border-line-strong px-2 py-1 dark:border-line-strong">
           Cancel
         </button>
         <span className="self-center text-gray-500 dark:text-gray-400">Enter to save · Esc to cancel</span>

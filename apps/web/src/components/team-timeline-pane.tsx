@@ -108,7 +108,7 @@ export function TeamTimelinePane({ workspaceId }: { workspaceId: string }) {
         )}
         {tab === 'mine' && <MyTimesheet workspaceId={workspaceId} />}
 
-        <p className="mt-6 border-t border-gray-100 pt-3 text-[11px] leading-snug text-gray-400 dark:border-gray-800">
+        <p className="mt-6 border-t border-line pt-3 text-[11px] leading-snug text-gray-400 dark:border-line">
           Timeline reflects activity that leaves a trace in Backstages, Jira &amp; Confluence. Gaps mean
           “no tracked activity”, not necessarily idle time — work in other tools isn’t captured. Use
           “My timesheet” to log that manually.
@@ -146,7 +146,7 @@ function TimelineView({
                 <Avatar user={{ id: m.userId, displayName: m.displayName, avatarUrl: m.avatarUrl }} size="xs" />
                 <span className="truncate text-[13px]">{m.displayName}</span>
               </div>
-              <div className="relative h-6 flex-1 overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
+              <div className="relative h-6 flex-1 overflow-hidden rounded bg-hovered">
                 {m.segments.map((s, i) => {
                   const start = new Date(s.startedAt).getTime();
                   const end = new Date(s.endedAt).getTime();
@@ -203,7 +203,7 @@ function UtilizationView({
                   {r.loggedSec > 0 && ` · ${fmtDuration(r.loggedSec)} logged`}
                 </span>
               </div>
-              <div className="flex h-5 w-full overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
+              <div className="flex h-5 w-full overflow-hidden rounded bg-hovered">
                 {UTIL_KINDS.map(({ key, kind }) => {
                   const sec = r[key] as number;
                   const pct = (sec / denom) * 100;
@@ -262,7 +262,7 @@ function MyTimesheet({ workspaceId }: { workspaceId: string }) {
       ) : entries.length === 0 ? (
         <Empty>No time logged yet. Use “Log time” to record work against a Jira issue.</Empty>
       ) : (
-        <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+        <ul className="divide-y divide-line dark:divide-line">
           {entries.map((e) => (
             <li key={e.id} className="flex items-center gap-2 py-2 text-sm">
               <span className="font-medium">{e.issueKey}</span>

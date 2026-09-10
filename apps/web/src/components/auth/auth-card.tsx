@@ -7,7 +7,7 @@ export function AuthCard({ title, children }: { title: string; children: React.R
             Backstages
           </span>
         </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="rounded-xl border border-line bg-white p-6 shadow-sm dark:border-line dark:bg-gray-900">
           <h1 className="mb-4 text-lg font-semibold">{title}</h1>
           {children}
         </div>
@@ -25,7 +25,7 @@ export function Field({
       <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
       <input
         {...props}
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-gray-700 dark:bg-gray-800"
+        className="w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-line dark:bg-gray-800"
       />
     </label>
   );

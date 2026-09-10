@@ -61,7 +61,7 @@ export function DeclareIncidentDialog({
   };
 
   const inputCls =
-    'w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent dark:border-gray-700 dark:bg-gray-800';
+    'w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';
   const hasProjects = (projects.data?.length ?? 0) > 0;
 
   return (

@@ -43,7 +43,7 @@ export const SuggestionList = forwardRef<
 
   if (items.length === 0) return null;
   return (
-    <div className="max-h-56 w-64 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+    <div className="max-h-56 w-64 overflow-y-auto rounded-lg border border-line bg-white py-1 shadow-lg dark:border-line dark:bg-gray-800">
       {items.map((item, i) => (
         <button
           key={item.id}
