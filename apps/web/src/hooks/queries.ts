@@ -58,6 +58,7 @@ import type {
   KnowledgeResponseDto,
   FollowupsDto,
   RecommendationFeedbackInput,
+  HuddleRecapDto,
 } from '@backstages/shared';
 import { api } from '@/lib/api';
 
@@ -555,6 +556,17 @@ export function useCatchUp(workspaceId: string, enabled: boolean) {
     queryFn: () => api<CatchUpResponse>('GET', `/workspaces/${workspaceId}/catch-up`),
     enabled: !!workspaceId && enabled,
     staleTime: 15000,
+  });
+}
+
+export function useHuddleRecap(workspaceId: string) {
+  return useMutation({
+    mutationFn: (input: {
+      channelId?: string;
+      conversationId?: string;
+      transcript: string;
+      post?: boolean;
+    }) => api<HuddleRecapDto>('POST', `/ai/workspaces/${workspaceId}/huddle-recap`, input),
   });
 }
 

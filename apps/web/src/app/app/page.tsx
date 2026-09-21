@@ -177,7 +177,7 @@ function AppShell() {
       {sidebarOpen && (
         <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => toggleSidebar(false)} />
       )}
-      {huddle.joined && <MeetingRoom huddle={huddle} label={huddleLabel} />}
+      {huddle.joined && <MeetingRoom huddle={huddle} label={huddleLabel} workspaceId={workspaceId} />}
       <main className="flex min-w-0 flex-1 flex-col bg-surface">
         <ErrorBoundary key={`${mainView}:${container?.id ?? 'none'}`}>
           {mainView === 'timeline' ? (

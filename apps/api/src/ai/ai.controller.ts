@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { AskSchema, type AskInput } from '@backstages/shared';
+import { AskSchema, type AskInput, HuddleRecapSchema, type HuddleRecapInput } from '@backstages/shared';
 import { AiService } from './ai.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -35,6 +35,15 @@ export class AiController {
     @Body(new ZodValidationPipe(AskSchema)) body: AskInput,
   ) {
     return this.ai.ask(user.id, workspaceId, body.question);
+  }
+
+  @Post('workspaces/:id/huddle-recap')
+  huddleRecap(
+    @CurrentUser() user: AuthUser,
+    @Param('id') workspaceId: string,
+    @Body(new ZodValidationPipe(HuddleRecapSchema)) body: HuddleRecapInput,
+  ) {
+    return this.ai.huddleRecap(user.id, workspaceId, body);
   }
 
   @Post('messages/:messageId/translate')

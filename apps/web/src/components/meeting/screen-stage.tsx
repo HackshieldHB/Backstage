@@ -40,6 +40,7 @@ export function ScreenStage({
   stream,
   label,
   live,
+  selfPreview,
   annotations,
   lasers,
   canAnnotate,
@@ -53,6 +54,9 @@ export function ScreenStage({
   stream: MediaStream | null;
   label: string;
   live: boolean;
+  /** True for the sharer's own preview — stays muted to avoid audio feedback;
+   *  viewers play the shared tab/system audio. */
+  selfPreview?: boolean;
   annotations: HuddleAnnotationShape[];
   lasers: Record<string, LaserState>;
   canAnnotate: boolean;
@@ -103,7 +107,7 @@ export function ScreenStage({
         className="relative flex h-full w-full items-center justify-center"
         style={{ transform: `scale(${zoom})`, transition: 'transform 120ms' }}
       >
-        <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-contain" />
+        <video ref={videoRef} autoPlay playsInline muted={selfPreview} className="h-full w-full object-contain" />
         {/* Annotation + laser overlay sits exactly over the video box. */}
         <div className="absolute inset-0">
           <AnnotationLayer

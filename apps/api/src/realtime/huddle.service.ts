@@ -71,6 +71,9 @@ export class HuddleService {
   private readonly polls = new Map<string, HuddlePoll>();
   /** key -> collaborative notes document. */
   private readonly notes = new Map<string, string>();
+  /** key -> (annotation shape id -> owner userId), so only the author (or a
+   *  moderator) can edit/delete a given annotation. */
+  private readonly annotationOwners = new Map<string, Map<string, string>>();
   /** key -> active remote-control session (permission only; see gateway). */
   private readonly control = new Map<string, ControlSession>();
 
@@ -154,6 +157,7 @@ export class HuddleService {
     this.polls.delete(key);
     this.notes.delete(key);
     this.control.delete(key);
+    this.annotationOwners.delete(key);
   }
 
   userIds(key: string): string[] {
@@ -235,6 +239,25 @@ export class HuddleService {
   }
   canAnnotate(key: string, userId: string): boolean {
     return this.states.get(key)?.get(userId)?.canAnnotate ?? false;
+  }
+
+  // ----- annotation ownership -----
+  recordAnnotation(key: string, shapeId: string, userId: string): void {
+    let m = this.annotationOwners.get(key);
+    if (!m) {
+      m = new Map();
+      this.annotationOwners.set(key, m);
+    }
+    m.set(shapeId, userId);
+  }
+  annotationOwner(key: string, shapeId: string): string | undefined {
+    return this.annotationOwners.get(key)?.get(shapeId);
+  }
+  deleteAnnotation(key: string, shapeId: string): void {
+    this.annotationOwners.get(key)?.delete(shapeId);
+  }
+  clearAnnotationOwners(key: string): void {
+    this.annotationOwners.delete(key);
   }
 
   // ----- polls -----

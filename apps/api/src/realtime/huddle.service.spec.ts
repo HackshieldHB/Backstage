@@ -117,6 +117,34 @@ describe('HuddleService', () => {
     });
   });
 
+  describe('annotation ownership', () => {
+    it('records the author and only reports that owner', () => {
+      svc.join(A, 'u1', 's1');
+      svc.recordAnnotation(A, 'shape-1', 'u1');
+      expect(svc.annotationOwner(A, 'shape-1')).toBe('u1');
+      expect(svc.annotationOwner(A, 'unknown')).toBeUndefined();
+    });
+
+    it('forgets an owner after delete and after clear', () => {
+      svc.join(A, 'u1', 's1');
+      svc.recordAnnotation(A, 's1', 'u1');
+      svc.recordAnnotation(A, 's2', 'u1');
+      svc.deleteAnnotation(A, 's1');
+      expect(svc.annotationOwner(A, 's1')).toBeUndefined();
+      expect(svc.annotationOwner(A, 's2')).toBe('u1');
+      svc.clearAnnotationOwners(A);
+      expect(svc.annotationOwner(A, 's2')).toBeUndefined();
+    });
+
+    it('keeps annotation ownership isolated per huddle', () => {
+      svc.join(A, 'u1', 's1');
+      svc.join(B, 'u2', 's2');
+      svc.recordAnnotation(A, 'shared-id', 'u1');
+      expect(svc.annotationOwner(A, 'shared-id')).toBe('u1');
+      expect(svc.annotationOwner(B, 'shared-id')).toBeUndefined();
+    });
+  });
+
   describe('polls', () => {
     it('records votes and prevents voting on a closed or unknown poll', () => {
       svc.join(A, 'u1', 's1');

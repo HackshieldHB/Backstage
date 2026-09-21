@@ -1,8 +1,21 @@
 import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import type { AskAnswerDto, AskSourceDto } from '@backstages/shared';
+import type { HuddleRecapInput, HuddleRecapDto } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
+import { IntegrationMessagesService } from '../messages/integration-messages.service';
+import { channelContainer, conversationContainer } from '../messages/messages.service';
+
+/** Build a minimal TipTap doc from plain-text lines (blank lines → empty paragraphs). */
+function textDoc(lines: string[]): unknown {
+  return {
+    type: 'doc',
+    content: lines.map((l) =>
+      l.trim() ? { type: 'paragraph', content: [{ type: 'text', text: l }] } : { type: 'paragraph' },
+    ),
+  };
+}
 
 /**
  * Parse the model's action-item reply (one item per line) into a clean list:
@@ -30,6 +43,7 @@ export class AiService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
+    private readonly integrationMessages: IntegrationMessagesService,
   ) {}
 
   get enabled(): boolean {
@@ -224,6 +238,53 @@ export class AiService {
       600,
     );
     return { items: parseActionItems(out) };
+  }
+
+  /**
+   * Summarise a huddle from its in-meeting chat + notes into a short recap and a
+   * list of action items, and (optionally) post the recap into the huddle's
+   * channel/DM as a message so the meeting leaves a durable artifact.
+   */
+  async huddleRecap(userId: string, workspaceId: string, input: HuddleRecapInput): Promise<HuddleRecapDto> {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    if (input.channelId) await this.policy.requireChannelMember(userId, input.channelId);
+    else if (input.conversationId) await this.policy.requireConversationMember(userId, input.conversationId);
+
+    const transcript = input.transcript.slice(0, 16000).trim();
+    if (!transcript) return { summary: '', actionItems: [], posted: false };
+
+    const [summary, itemsRaw] = await Promise.all([
+      this.complete(
+        'You summarise a team meeting from its chat and shared notes. Write 3–6 concise bullet points (each starting with "- ") covering the key discussion and any decisions. No preamble, no closing remarks.',
+        transcript,
+        600,
+      ),
+      this.complete(
+        'You extract concrete action items from a meeting. Reply with one action item per line in the imperative voice — prefix an owner when clearly named (e.g. "Kevin — review the config"). No numbering, no preamble. Reply with the single word NONE if there are none.',
+        transcript,
+        500,
+      ),
+    ]);
+    const actionItems = parseActionItems(itemsRaw);
+
+    let posted = false;
+    if (input.post && (input.channelId || input.conversationId)) {
+      const lines = ['🧠 Huddle recap', '', ...summary.split('\n')];
+      if (actionItems.length) {
+        lines.push('', 'Action items:', ...actionItems.map((i) => `• ${i}`));
+      }
+      const contentText = lines.join('\n');
+      const container = input.channelId
+        ? channelContainer(input.channelId)
+        : conversationContainer(input.conversationId!);
+      await this.integrationMessages.post(container, {
+        workspaceId,
+        contentText,
+        contentJson: textDoc(lines),
+      });
+      posted = true;
+    }
+    return { summary, actionItems, posted };
   }
 
   async translate(

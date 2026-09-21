@@ -41,6 +41,8 @@ export const SOCKET_EVENTS = {
   HUDDLE_NOTES: 'huddle:notes',
   /** A moderation directive addressed to a specific participant (e.g. please mute). */
   HUDDLE_MODERATION: 'huddle:moderation',
+  /** A live caption (speech-to-text) line from a participant (ephemeral). */
+  HUDDLE_CAPTION: 'huddle:caption',
 } as const;
 
 export type SocketEventName = (typeof SOCKET_EVENTS)[keyof typeof SOCKET_EVENTS];
@@ -325,6 +327,23 @@ export interface ClientHuddleModerationPayload {
   role?: HuddleRole;
 }
 
+/** Live caption line (speech-to-text). `final` marks a completed utterance;
+ *  interim lines update in place until then. Ephemeral — never persisted. */
+export interface HuddleCaptionPayload {
+  channelId?: string;
+  conversationId?: string;
+  userId: string;
+  displayName: string;
+  text: string;
+  final: boolean;
+}
+export interface ClientHuddleCaptionPayload {
+  channelId?: string;
+  conversationId?: string;
+  text: string;
+  final: boolean;
+}
+
 /** A huddle runs in a channel OR a DM/group conversation — exactly one id is set. */
 export interface HuddleParticipantsPayload {
   channelId?: string;
@@ -356,6 +375,7 @@ export const CLIENT_EVENTS = {
   HUDDLE_POLL: 'huddle:poll',
   HUDDLE_NOTES: 'huddle:notes',
   HUDDLE_MODERATION: 'huddle:moderation',
+  HUDDLE_CAPTION: 'huddle:caption',
 } as const;
 
 export interface ClientTypingPayload {

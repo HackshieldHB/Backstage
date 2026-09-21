@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Captions,
   ChevronDown,
   Focus,
   Hand,
@@ -15,6 +16,7 @@ import {
   MoreHorizontal,
   PhoneOff,
   Smile,
+  Sparkles,
   SquareStack,
   StickyNote,
   Users,
@@ -26,7 +28,9 @@ import {
 } from 'lucide-react';
 import { HUDDLE_REACTIONS } from '@backstages/shared';
 import type { HuddleController } from '@/hooks/use-huddle';
+import { useHuddleRecap } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
+import { useUiStore } from '@/stores/ui-store';
 import { ParticipantTile, RemoteAudio } from './participant-tile';
 import { ScreenStage } from './screen-stage';
 import { ChatPanel, NotesPanel, ParticipantsPanel, PollPanel } from './meeting-panels';
@@ -67,9 +71,48 @@ function DraggablePip({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function MeetingRoom({ huddle, label }: { huddle: HuddleController; label?: string }) {
+export function MeetingRoom({
+  huddle,
+  label,
+  workspaceId,
+}: {
+  huddle: HuddleController;
+  label?: string;
+  workspaceId: string;
+}) {
   const me = useAuthStore((s) => s.user);
   const myId = me?.id ?? '';
+  const recap = useHuddleRecap(workspaceId);
+  const pushToast = useUiStore((s) => s.pushToast);
+
+  const runRecap = () => {
+    if (recap.isPending) return;
+    const target = huddle.activeTarget;
+    if (!target) return;
+    const lines = huddle.chat.map((m) => `${m.displayName}: ${m.text}`);
+    const transcript = [
+      lines.length ? `Chat:\n${lines.join('\n')}` : '',
+      huddle.notes.trim() ? `Notes:\n${huddle.notes}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    if (!transcript.trim()) {
+      pushToast('Nothing to recap yet — add chat or notes first.', 'info');
+      return;
+    }
+    recap.mutate(
+      {
+        [target.kind === 'channel' ? 'channelId' : 'conversationId']: target.id,
+        transcript,
+        post: true,
+      },
+      {
+        onSuccess: (r) =>
+          pushToast(r.posted ? 'AI recap posted to the channel.' : 'Recap generated.', 'success'),
+        onError: () => pushToast('AI recap is unavailable (AI not configured).', 'error'),
+      },
+    );
+  };
   const [panel, setPanel] = useState<Panel>('none');
   const [minimized, setMinimized] = useState(false);
   const [layout, setLayout] = useState<Layout>('stage');
@@ -197,6 +240,7 @@ export function MeetingRoom({ huddle, label }: { huddle: HuddleController; label
                   stream={stageStream}
                   label={stageSharerName}
                   live
+                  selfPreview={huddle.screenSharing}
                   annotations={huddle.annotations}
                   lasers={huddle.lasers}
                   canAnnotate={huddle.canAnnotate}
@@ -350,6 +394,23 @@ export function MeetingRoom({ huddle, label }: { huddle: HuddleController; label
         </div>
       </div>
 
+      {/* Live captions overlay */}
+      {huddle.captionsOn && Object.keys(huddle.captions).length > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 flex justify-center px-4">
+          <div className="max-w-2xl space-y-1 rounded-lg bg-black/70 px-4 py-2 text-center">
+            {Object.values(huddle.captions)
+              .sort((a, b) => a.at - b.at)
+              .slice(-2)
+              .map((c) => (
+                <p key={c.userId} className="text-[14px] leading-snug text-white">
+                  <span className="font-semibold text-white/60">{c.displayName}: </span>
+                  {c.text}
+                </p>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Control bar */}
       <footer className="relative flex h-16 shrink-0 items-center justify-center gap-1.5 border-t border-white/10 px-3">
         <Ctrl label={huddle.muted ? 'Unmute (M)' : 'Mute (M)'} active={!huddle.muted} danger={huddle.muted} onClick={huddle.toggleMute} icon={huddle.muted ? <MicOff size={18} /> : <Mic size={18} />} testId="ctrl-mic" />
@@ -370,6 +431,9 @@ export function MeetingRoom({ huddle, label }: { huddle: HuddleController; label
           )}
         </div>
 
+        {huddle.captionsSupported && (
+          <Ctrl label="Live captions" active={huddle.captionsOn} onClick={huddle.toggleCaptions} icon={<Captions size={18} />} testId="ctrl-captions" />
+        )}
         <Ctrl label="Chat (C)" active={panel === 'chat'} badge={huddle.unreadChat} onClick={() => setPanel((p) => (p === 'chat' ? 'none' : 'chat'))} icon={<MessageSquare size={18} />} testId="ctrl-chat" />
         <Ctrl label="People (P)" active={panel === 'participants'} onClick={() => setPanel((p) => (p === 'participants' ? 'none' : 'participants'))} icon={<Users size={18} />} testId="ctrl-people" />
 
@@ -379,6 +443,11 @@ export function MeetingRoom({ huddle, label }: { huddle: HuddleController; label
             <div className="absolute bottom-14 right-0 w-48 rounded-lg border border-white/10 bg-gray-800 py-1 text-[13px] shadow-pop">
               <MoreItem icon={<StickyNote size={14} />} onClick={() => { setPanel('notes'); setMoreMenu(false); }}>Meeting notes</MoreItem>
               <MoreItem icon={<Vote size={14} />} onClick={() => { setPanel('poll'); setMoreMenu(false); }}>Polls</MoreItem>
+              {isMod && (
+                <MoreItem icon={<Sparkles size={14} />} onClick={() => { runRecap(); setMoreMenu(false); }}>
+                  {recap.isPending ? 'Generating recap…' : 'AI recap → channel'}
+                </MoreItem>
+              )}
               {isMod && (
                 <MoreItem icon={<Hand size={14} />} onClick={() => { setPanel('participants'); setMoreMenu(false); }}>
                   Moderate

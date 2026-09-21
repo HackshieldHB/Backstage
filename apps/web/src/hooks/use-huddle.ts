@@ -17,6 +17,7 @@ import {
   type HuddlePollPayload,
   type HuddleNotesPayload,
   type HuddleModerationPayload,
+  type HuddleCaptionPayload,
   type HuddleRole,
 } from '@backstages/shared';
 import { getSocket } from '@/lib/socket';
@@ -69,6 +70,37 @@ export interface LivePoll {
   votes: Record<string, number>;
   createdBy: string;
   closed: boolean;
+}
+
+export interface CaptionState {
+  userId: string;
+  displayName: string;
+  text: string;
+  final: boolean;
+  at: number;
+}
+
+// Minimal typings for the Web Speech API (not in the standard TS DOM lib).
+interface SpeechRecognitionAltLike {
+  transcript: string;
+}
+interface SpeechRecognitionResultLike {
+  isFinal: boolean;
+  [index: number]: SpeechRecognitionAltLike;
+}
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: { length: number; [index: number]: SpeechRecognitionResultLike };
+}
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start(): void;
+  stop(): void;
 }
 
 /**
@@ -158,6 +190,9 @@ export interface HuddleController {
   notes: string;
   control: ControlSessionState | null;
   controlRequests: IncomingControlRequest[];
+  captions: Record<string, CaptionState>;
+  captionsOn: boolean;
+  captionsSupported: boolean;
   /** Start (or join) a huddle in the given channel/DM. */
   join: (target: Container) => Promise<void>;
   leave: () => void;
@@ -178,6 +213,7 @@ export interface HuddleController {
   createPoll: (question: string, options: string[]) => void;
   votePoll: (optionIndex: number) => void;
   closePoll: () => void;
+  toggleCaptions: () => void;
   updateNotes: (content: string) => void;
   moderate: (targetUserId: string, action: 'mute-request' | 'lower-hand' | 'remove' | 'set-role', role?: HuddleRole) => void;
 }
@@ -223,9 +259,13 @@ export function useHuddle(): HuddleController {
   const [notes, setNotes] = useState('');
   const [control, setControl] = useState<ControlSessionState | null>(null);
   const [controlRequests, setControlRequests] = useState<IncomingControlRequest[]>([]);
+  const [captions, setCaptions] = useState<Record<string, CaptionState>>({});
+  const [captionsOn, setCaptionsOn] = useState(false);
+  const captionsOnRef = useRef(false);
 
   const cameraTrack = useRef<MediaStreamTrack | null>(null);
   const mutedRef = useRef(false);
+  const handRaisedRef = useRef(false);
   // Authoritative source map: peerId → the stream ids they report for camera/screen,
   // so incoming video tracks are classified explicitly (not by audio-track presence).
   const mediaMapRef = useRef<Record<string, { cameraStreamId: string | null; screenStreamId: string | null }>>({});
@@ -252,6 +292,12 @@ export function useHuddle(): HuddleController {
   // Peers we've already pushed a follow-up screen offer to (late-joiner fix),
   // so we never loop re-offering to the same peer.
   const screenReoffered = useRef<Set<string>>(new Set());
+  // Peers whose renegotiation was deferred because signaling wasn't stable; retried
+  // on the next 'stable' signalingstatechange so a track change is never dropped.
+  const needsRenegotiation = useRef<Set<string>>(new Set());
+  // Late-bound ref to renegotiate() so createPeer's signaling handler can call it
+  // without a definition-order dependency.
+  const renegotiateRef = useRef<((peerId: string) => Promise<void>) | null>(null);
   const joinedRef = useRef(false);
 
   const bodyFor = useCallback(
@@ -275,9 +321,11 @@ export function useHuddle(): HuddleController {
       pc.onicecandidate = null;
       pc.ontrack = null;
       pc.onconnectionstatechange = null;
+      pc.onsignalingstatechange = null;
       pc.close();
       peers.current.delete(peerId);
     }
+    needsRenegotiation.current.delete(peerId);
     pendingIce.current.delete(peerId);
     screenSenders.current.delete(peerId);
     screenReoffered.current.delete(peerId);
@@ -340,13 +388,25 @@ export function useHuddle(): HuddleController {
           });
         }
       };
+      pc.onsignalingstatechange = () => {
+        // Retry a renegotiation that was deferred while a prior offer was in flight
+        // (rapid camera+screen toggles), so track changes are never silently lost.
+        if (pc.signalingState === 'stable' && needsRenegotiation.current.has(peerId)) {
+          needsRenegotiation.current.delete(peerId);
+          void renegotiateRef.current?.(peerId);
+        }
+      };
       pc.ontrack = (e) => {
         const [stream] = e.streams;
         if (!stream) return;
         if (e.track.kind === 'audio') {
-          // Audio always belongs to the mic A/V stream (we capture screens with
-          // audio:false, so screen streams never carry audio).
-          setRemoteStreams((s) => ({ ...s, [peerId]: stream }));
+          // Screen shares may include tab/system audio; route that with the screen
+          // stream (played by the screen tile) rather than overwriting the mic A/V.
+          if (mediaMapRef.current[peerId]?.screenStreamId === stream.id) {
+            setRemoteScreens((s) => ({ ...s, [peerId]: stream }));
+          } else {
+            setRemoteStreams((s) => ({ ...s, [peerId]: stream }));
+          }
           return;
         }
         // Video: classify by the sender's reported source map (authoritative).
@@ -455,13 +515,37 @@ export function useHuddle(): HuddleController {
         void handleSignal(p.fromUserId, p.data as SignalData);
       }
     };
+    // On socket reconnect, the server dropped our previous socket from the huddle.
+    // Rebuild the mesh cleanly and re-announce presence + media state so we don't
+    // silently fall out of the meeting after a network blip (§21 resilience).
+    const onReconnect = () => {
+      const target = activeTargetRef.current;
+      if (!joinedRef.current || !target) return;
+      for (const peerId of [...peers.current.keys()]) closePeer(peerId);
+      pendingIce.current.clear();
+      screenReoffered.current.clear();
+      needsRenegotiation.current.clear();
+      const body = bodyFor(target);
+      socket.emit(CLIENT_EVENTS.HUDDLE_JOIN, body);
+      socket.emit(CLIENT_EVENTS.HUDDLE_STATE, {
+        ...body,
+        audioEnabled: !mutedRef.current,
+        videoEnabled: !!cameraTrack.current,
+        screenSharing: !!screenStream.current,
+        handRaised: handRaisedRef.current,
+        cameraStreamId: cameraTrack.current ? (localStream.current?.id ?? null) : null,
+        screenStreamId: screenStream.current?.id ?? null,
+      });
+    };
     socket.on(SOCKET_EVENTS.HUDDLE_PARTICIPANTS, onParticipants);
     socket.on(SOCKET_EVENTS.HUDDLE_SIGNAL, onSignal);
+    socket.io.on('reconnect', onReconnect);
     return () => {
       socket.off(SOCKET_EVENTS.HUDDLE_PARTICIPANTS, onParticipants);
       socket.off(SOCKET_EVENTS.HUDDLE_SIGNAL, onSignal);
+      socket.io.off('reconnect', onReconnect);
     };
-  }, [me, handleSignal]);
+  }, [me, handleSignal, closePeer, bodyFor]);
 
   const participants = useMemo(
     () => (activeTarget ? (participantsByContainer[activeTarget.id] ?? []) : []),
@@ -471,6 +555,9 @@ export function useHuddle(): HuddleController {
   useEffect(() => {
     mutedRef.current = muted;
   }, [muted]);
+  useEffect(() => {
+    handRaisedRef.current = handRaised;
+  }, [handRaised]);
 
   // Keep the authoritative source map in sync with server state and reclassify any
   // video streams that arrived before their map (or were placed optimistically).
@@ -522,18 +609,28 @@ export function useHuddle(): HuddleController {
   const renegotiate = useCallback(
     async (peerId: string) => {
       const pc = peers.current.get(peerId);
-      if (!pc || pc.signalingState !== 'stable') return;
+      if (!pc) return;
+      if (pc.signalingState !== 'stable') {
+        // A negotiation is already in flight; retry when it settles (see
+        // onsignalingstatechange) so this track change isn't dropped.
+        needsRenegotiation.current.add(peerId);
+        return;
+      }
       try {
         const offer = await pc.createOffer();
-        if (pc.signalingState !== 'stable') return; // raced with an inbound offer
+        if (pc.signalingState !== 'stable') {
+          needsRenegotiation.current.add(peerId);
+          return;
+        }
         await pc.setLocalDescription(offer);
         sendSignal(peerId, { kind: 'sdp', description: pc.localDescription!.toJSON() });
       } catch {
-        // State reconciles on the next toggle / participant reconcile.
+        needsRenegotiation.current.add(peerId);
       }
     },
     [sendSignal],
   );
+  renegotiateRef.current = renegotiate;
 
   const stopScreenShare = useCallback(() => {
     const stream = screenStream.current;
@@ -569,7 +666,10 @@ export function useHuddle(): HuddleController {
         // capture to a few fps to favour resolution, which reads as a static
         // image the moment anything moves (mouse, scroll, video).
         video: { frameRate: { ideal: 30, max: 60 } },
-        audio: false,
+        // Offer to share tab/system audio (the browser shows a checkbox). Screen
+        // audio is classified explicitly by stream id, so it never disturbs the
+        // camera/mic classification.
+        audio: true,
       });
     } catch {
       return; // user dismissed the picker
@@ -630,6 +730,9 @@ export function useHuddle(): HuddleController {
     setControl(null);
     setControlRequests([]);
     setConnectionState('connected');
+    setCaptions({});
+    setCaptionsOn(false);
+    captionsOnRef.current = false;
   }, [bodyFor, closePeer, stopScreenShare]);
 
   const join = useCallback(
@@ -756,6 +859,13 @@ export function useHuddle(): HuddleController {
     (emoji: string) => emit(CLIENT_EVENTS.HUDDLE_REACTION, { emoji }),
     [emit],
   );
+
+  const toggleCaptions = useCallback(() => {
+    setCaptionsOn((v) => {
+      captionsOnRef.current = !v;
+      return !v;
+    });
+  }, []);
 
   const sendAnnotation = useCallback(
     (op: HuddleAnnotationOp) => emit(CLIENT_EVENTS.HUDDLE_ANNOTATION, { op }),
@@ -903,6 +1013,13 @@ export function useHuddle(): HuddleController {
       if (!forActive(p)) return;
       if (p.updatedBy !== my) setNotes(p.content);
     };
+    const onCaption = (p: HuddleCaptionPayload) => {
+      if (!forActive(p)) return;
+      setCaptions((s) => ({
+        ...s,
+        [p.userId]: { userId: p.userId, displayName: p.displayName, text: p.text, final: p.final, at: Date.now() },
+      }));
+    };
     const onModeration = (p: HuddleModerationPayload) => {
       if (!forActive(p) || p.targetUserId !== my) return;
       if (p.action === 'mute-request') {
@@ -926,6 +1043,7 @@ export function useHuddle(): HuddleController {
     socket.on(SOCKET_EVENTS.HUDDLE_POLL, onPoll);
     socket.on(SOCKET_EVENTS.HUDDLE_NOTES, onNotes);
     socket.on(SOCKET_EVENTS.HUDDLE_MODERATION, onModeration);
+    socket.on(SOCKET_EVENTS.HUDDLE_CAPTION, onCaption);
     return () => {
       socket.off(SOCKET_EVENTS.HUDDLE_CHAT, onChat);
       socket.off(SOCKET_EVENTS.HUDDLE_REACTION, onReaction);
@@ -935,6 +1053,7 @@ export function useHuddle(): HuddleController {
       socket.off(SOCKET_EVENTS.HUDDLE_POLL, onPoll);
       socket.off(SOCKET_EVENTS.HUDDLE_NOTES, onNotes);
       socket.off(SOCKET_EVENTS.HUDDLE_MODERATION, onModeration);
+      socket.off(SOCKET_EVENTS.HUDDLE_CAPTION, onCaption);
     };
   }, [me, emit, leaveInternal]);
 
@@ -948,6 +1067,8 @@ export function useHuddle(): HuddleController {
       ((window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
     if (!AC) return;
     const ctx = new AC();
+    // Autoplay policy can create the context suspended; resume so the analyser runs.
+    void ctx.resume().catch(() => undefined);
     audioCtxRef.current = ctx;
     let raf = 0;
     let last = 0;
@@ -1035,6 +1156,87 @@ export function useHuddle(): HuddleController {
     return () => clearInterval(id);
   }, [joined]);
 
+  // ---- live captions: transcribe the local mic and relay lines to the room ----
+  const captionsSupported =
+    typeof window !== 'undefined' &&
+    !!(
+      (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition
+    );
+
+  useEffect(() => {
+    if (!joined || !captionsOn) return;
+    const SR = (
+      window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike }
+    ).SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }).webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || 'en-US';
+    let stopped = false;
+    let lastInterim = 0;
+    rec.onresult = (e: SpeechRecognitionEventLike) => {
+      let interim = '';
+      let final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) final += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      if (final.trim()) emit(CLIENT_EVENTS.HUDDLE_CAPTION, { text: final.trim(), final: true });
+      else if (interim.trim()) {
+        const now = performance.now();
+        if (now - lastInterim > 400) {
+          lastInterim = now;
+          emit(CLIENT_EVENTS.HUDDLE_CAPTION, { text: interim.trim(), final: false });
+        }
+      }
+    };
+    rec.onend = () => {
+      // The API auto-stops periodically; restart while captions are still on.
+      if (!stopped && captionsOnRef.current) {
+        try {
+          rec.start();
+        } catch {
+          /* already started */
+        }
+      }
+    };
+    rec.onerror = () => undefined;
+    try {
+      rec.start();
+    } catch {
+      /* start throws if already running */
+    }
+    return () => {
+      stopped = true;
+      try {
+        rec.stop();
+      } catch {
+        /* not running */
+      }
+    };
+  }, [joined, captionsOn, emit]);
+
+  // Expire stale caption lines so the overlay doesn't linger.
+  useEffect(() => {
+    if (!joined) return;
+    const id = setInterval(() => {
+      setCaptions((s) => {
+        const now = Date.now();
+        let changed = false;
+        const next: Record<string, CaptionState> = {};
+        for (const [k, v] of Object.entries(s)) {
+          if (now - v.at < (v.final ? 6000 : 4000)) next[k] = v;
+          else changed = true;
+        }
+        return changed ? next : s;
+      });
+    }, 1500);
+    return () => clearInterval(id);
+  }, [joined]);
+
   // Only tears down on app-shell unmount (i.e. logout / full navigation away).
   useEffect(() => {
     return () => {
@@ -1069,6 +1271,9 @@ export function useHuddle(): HuddleController {
     notes,
     control,
     controlRequests,
+    captions,
+    captionsOn,
+    captionsSupported,
     join,
     leave,
     toggleMute,
@@ -1088,6 +1293,7 @@ export function useHuddle(): HuddleController {
     createPoll,
     votePoll,
     closePoll,
+    toggleCaptions,
     updateNotes,
     moderate,
   };

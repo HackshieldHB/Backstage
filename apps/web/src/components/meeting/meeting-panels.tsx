@@ -14,7 +14,32 @@ import {
 } from 'lucide-react';
 import type { HuddleParticipant, HuddleRole } from '@backstages/shared';
 import type { HuddleController } from '@/hooks/use-huddle';
+import { api } from '@/lib/api';
+import { useUiStore } from '@/stores/ui-store';
 import { Avatar } from '../avatar';
+
+/** Build a minimal TipTap doc from plain-text lines (blank lines → empty paragraphs). */
+function textToDoc(text: string) {
+  return {
+    type: 'doc',
+    content: text.split('\n').map((l) =>
+      l.trim() ? { type: 'paragraph', content: [{ type: 'text', text: l }] } : { type: 'paragraph' },
+    ),
+  };
+}
+
+/** Persist meeting content into the huddle's channel/DM as a normal message,
+ *  reusing the existing send-message endpoint (no new server code). */
+async function postTextToContainer(huddle: HuddleController, text: string): Promise<void> {
+  const target = huddle.activeTarget;
+  if (!target || !text.trim()) return;
+  const path = target.kind === 'channel' ? `/channels/${target.id}/messages` : `/conversations/${target.id}/messages`;
+  await api('POST', path, {
+    clientMsgId: crypto.randomUUID(),
+    contentJson: textToDoc(text),
+    contentText: text,
+  });
+}
 
 const ago = (iso: string) => {
   try {
@@ -53,6 +78,22 @@ export function ChatPanel({ huddle, myId }: { huddle: HuddleController; myId: st
         ))}
         <div ref={endRef} />
       </div>
+      {huddle.chat.length > 0 && (
+        <button
+          onClick={async () => {
+            const t = `💬 Huddle chat transcript\n\n${huddle.chat.map((m) => `${m.displayName}: ${m.text}`).join('\n')}`;
+            try {
+              await postTextToContainer(huddle, t);
+              useUiStore.getState().pushToast('Chat transcript saved to the channel.', 'success');
+            } catch {
+              useUiStore.getState().pushToast('Could not save the transcript.', 'error');
+            }
+          }}
+          className="mx-2 mb-1 rounded-md border border-line px-2 py-1 text-[11px] font-medium text-ink-2 hover:bg-hovered"
+        >
+          Save transcript to channel
+        </button>
+      )}
       <form
         className="flex items-center gap-2 border-t border-line p-2"
         onSubmit={(e) => {
@@ -196,7 +237,7 @@ export function NotesPanel({ huddle }: { huddle: HuddleController }) {
     if (!typing.current) setLocal(huddle.notes);
   }, [huddle.notes]);
   return (
-    <div className="flex h-full flex-col p-2">
+    <div className="flex h-full flex-col gap-2 p-2">
       <textarea
         value={local}
         onChange={(e) => {
@@ -207,8 +248,22 @@ export function NotesPanel({ huddle }: { huddle: HuddleController }) {
         onBlur={() => (typing.current = false)}
         placeholder={'Shared notes\n\nAgenda\n- \n\nDecisions\n- \n\nAction items\n- Owner — task'}
         aria-label="Collaborative meeting notes"
-        className="thin-scrollbar h-full w-full resize-none rounded-lg border border-line bg-elevated p-3 text-[13px] leading-relaxed text-ink outline-none focus:border-accent"
+        className="thin-scrollbar min-h-0 flex-1 w-full resize-none rounded-lg border border-line bg-elevated p-3 text-[13px] leading-relaxed text-ink outline-none focus:border-accent"
       />
+      <button
+        disabled={!local.trim()}
+        onClick={async () => {
+          try {
+            await postTextToContainer(huddle, `📝 Meeting notes\n\n${local.trim()}`);
+            useUiStore.getState().pushToast('Notes saved to the channel.', 'success');
+          } catch {
+            useUiStore.getState().pushToast('Could not save the notes.', 'error');
+          }
+        }}
+        className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 hover:bg-hovered disabled:opacity-40"
+      >
+        Save notes to channel
+      </button>
     </div>
   );
 }

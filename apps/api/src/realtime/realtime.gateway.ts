@@ -25,6 +25,7 @@ import {
   ClientHuddlePollPayload,
   ClientHuddleNotesPayload,
   ClientHuddleModerationPayload,
+  ClientHuddleCaptionPayload,
   ClientTypingPayload,
   SOCKET_EVENTS,
   type SocketEventName,
@@ -300,15 +301,29 @@ export class RealtimeGateway
     const key = this.huddleGuard(socket, body);
     if (!key) return;
     const op = body.op;
-    // 'clear' requires moderator; create/update/delete require annotate permission.
+    const me = socket.data.userId;
+    const mod = this.huddle.isModerator(key, me);
+    // 'clear' is moderator-only. create/update/delete require annotate permission,
+    // and update/delete additionally require ownership of the shape (or moderator)
+    // so one participant can't wipe another's annotations.
     if (op.kind === 'clear') {
-      if (!this.huddle.isModerator(key, socket.data.userId)) return;
-    } else if (!this.huddle.canAnnotate(key, socket.data.userId)) {
+      if (!mod) return;
+      this.huddle.clearAnnotationOwners(key);
+    } else if (op.kind === 'create') {
+      if (!this.huddle.canAnnotate(key, me)) return;
+      this.huddle.recordAnnotation(key, op.shape.id, me);
+    } else if (op.kind === 'update' || op.kind === 'delete') {
+      if (!this.huddle.canAnnotate(key, me)) return;
+      const id = op.kind === 'update' ? op.shape.id : op.id;
+      const owner = this.huddle.annotationOwner(key, id);
+      if (owner && owner !== me && !mod) return;
+      if (op.kind === 'delete') this.huddle.deleteAnnotation(key, id);
+    } else {
       return;
     }
     this.emitToKey(key, SOCKET_EVENTS.HUDDLE_ANNOTATION, (idField) => ({
       ...idField,
-      userId: socket.data.userId,
+      userId: me,
       op,
     }));
   }
@@ -324,6 +339,22 @@ export class RealtimeGateway
       userId: socket.data.userId,
       displayName,
       point: body.point ?? null,
+    }));
+  }
+
+  // ---------- huddle: live captions (speech-to-text) ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_CAPTION)
+  async onHuddleCaption(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleCaptionPayload) {
+    const key = this.huddleGuard(socket, body);
+    const text = (body.text ?? '').trim();
+    if (!key || !text) return;
+    const { displayName } = await this.userInfo(socket);
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_CAPTION, (idField) => ({
+      ...idField,
+      userId: socket.data.userId,
+      displayName,
+      text: text.slice(0, 500),
+      final: !!body.final,
     }));
   }
 

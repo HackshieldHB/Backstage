@@ -22,4 +22,5 @@ export * from './schemas/ask';
 export * from './schemas/timesheet';
 export * from './schemas/user-status';
 export * from './schemas/recommendations';
+export * from './schemas/huddle';
 export * from './socket';
