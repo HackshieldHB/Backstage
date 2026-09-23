@@ -57,6 +57,7 @@ import { CreateJiraIssueDialog } from './create-jira-issue-dialog';
 import { DeclareIncidentDialog } from './declare-incident-dialog';
 import { CreatePollDialog } from './poll-dialog';
 import { VoiceRecorderButton } from './voice-recorder-button';
+import { ClipRecorderButton } from './clip-recorder-button';
 import { Avatar } from './avatar';
 
 const lowlight = createLowlight(common);
@@ -660,6 +661,7 @@ export function Composer({
           )}
         </div>
         <VoiceRecorderButton onClip={(file) => void startUpload(file)} />
+        <ClipRecorderButton onClip={(file) => void startUpload(file)} />
         {!parentId && (
           <div className="relative">
             <button
