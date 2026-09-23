@@ -47,6 +47,7 @@ import { RecommendationsModule } from './recommendations/recommendations.module'
 import { ScheduledHuddlesModule } from './scheduled-huddles/scheduled-huddles.module';
 import { MeetingInsightsModule } from './meeting-insights/meeting-insights.module';
 import { MeetingMinutesModule } from './meeting-minutes/meeting-minutes.module';
+import { AvailabilityModule } from './availability/availability.module';
 import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
@@ -96,6 +97,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     ScheduledHuddlesModule,
     MeetingInsightsModule,
     MeetingMinutesModule,
+    AvailabilityModule,
   ],
   controllers: [HealthController],
   providers: [

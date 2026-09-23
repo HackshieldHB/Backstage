@@ -318,6 +318,20 @@ export class AiService {
     return { summary, decisions: parseActionItems(decisionsRaw), actionItems: parseActionItems(itemsRaw) };
   }
 
+  /** Translate a short piece of free text (e.g. a live caption line). No auth —
+   *  the caller supplies the text; returns '' when AI is off or the text is empty. */
+  async translateText(text: string, targetLanguage: string): Promise<{ translation: string }> {
+    const t = (text || '').trim();
+    if (!t || !this.enabled) return { translation: '' };
+    const lang = (targetLanguage || 'English').slice(0, 40);
+    const translation = await this.complete(
+      `You are a translator. Translate the user's text into ${lang}. Reply with ONLY the translation — no notes, no quotes, no preamble.`,
+      t.slice(0, 2000),
+      400,
+    );
+    return { translation };
+  }
+
   async translate(
     userId: string,
     messageId: string,

@@ -29,6 +29,7 @@ import {
   type BreakoutRoom,
 } from '@backstages/shared';
 import { getSocket } from '@/lib/socket';
+import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { BackgroundBlurProcessor, backgroundBlurSupported } from '@/lib/background-blur';
@@ -89,6 +90,8 @@ export interface CaptionState {
   text: string;
   final: boolean;
   at: number;
+  /** AI translation of `text` into the viewer's chosen caption language, if any. */
+  translated?: string;
 }
 
 // Minimal typings for the Web Speech API (not in the standard TS DOM lib).
@@ -232,6 +235,9 @@ export interface HuddleController {
   captions: Record<string, CaptionState>;
   captionsOn: boolean;
   captionsSupported: boolean;
+  /** Target language for live caption translation ('' = off). */
+  captionLang: string;
+  setCaptionLang: (lang: string) => void;
   // ----- room settings / waiting room -----
   settings: HuddleSettings;
   /** My admission status (waiting room). 'admitted' once I'm in the meeting. */
@@ -335,6 +341,9 @@ export function useHuddle(): HuddleController {
   const [captions, setCaptions] = useState<Record<string, CaptionState>>({});
   const [captionsOn, setCaptionsOn] = useState(false);
   const captionsOnRef = useRef(false);
+  // Live caption translation target ('' = off), applied per-viewer.
+  const [captionLang, setCaptionLangState] = useState('');
+  const captionLangRef = useRef('');
   // Room settings / waiting room / whiteboard / breakouts
   const [settings, setSettings] = useState<HuddleSettings>({
     waitingRoomEnabled: false,
@@ -1095,6 +1104,11 @@ export function useHuddle(): HuddleController {
     });
   }, []);
 
+  const setCaptionLang = useCallback((lang: string) => {
+    captionLangRef.current = lang;
+    setCaptionLangState(lang);
+  }, []);
+
   const sendAnnotation = useCallback(
     (op: HuddleAnnotationOp) => emit(CLIENT_EVENTS.HUDDLE_ANNOTATION, { op }),
     [emit],
@@ -1300,6 +1314,20 @@ export function useHuddle(): HuddleController {
         ...s,
         [p.userId]: { userId: p.userId, displayName: p.displayName, text: p.text, final: p.final, at: Date.now() },
       }));
+      // Translate finalised lines from others into the viewer's chosen language.
+      const lang = captionLangRef.current;
+      if (lang && p.final && p.userId !== my && p.text.trim()) {
+        void api<{ translation: string }>('POST', '/ai/translate', { text: p.text, targetLanguage: lang })
+          .then((r) => {
+            if (!r.translation) return;
+            setCaptions((s) => {
+              const cur = s[p.userId];
+              if (!cur || cur.text !== p.text) return s; // a newer caption superseded it
+              return { ...s, [p.userId]: { ...cur, translated: r.translation } };
+            });
+          })
+          .catch(() => undefined);
+      }
     };
     const onModeration = (p: HuddleModerationPayload) => {
       if (!forActive(p) || p.targetUserId !== my) return;
@@ -1647,6 +1675,8 @@ export function useHuddle(): HuddleController {
     captions,
     captionsOn,
     captionsSupported,
+    captionLang,
+    setCaptionLang,
     settings,
     admitStatus,
     waitingList,

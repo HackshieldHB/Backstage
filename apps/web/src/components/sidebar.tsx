@@ -53,6 +53,7 @@ import { Avatar } from './avatar';
 import { Dialog } from './dialog';
 import { EmojiPickerPopover } from './emoji-picker';
 import { useAtlassianStatus } from './atlassian-dialog';
+import { AvailabilityDialog } from './availability-dialog';
 import { WorkspaceSettingsDialog } from './workspace-settings-dialog';
 import { CatchUpDialog } from './catch-up-dialog';
 import { ScheduledDialog } from './scheduled-dialog';
@@ -91,7 +92,7 @@ export function Sidebar({
   const workspace = workspaces.data?.find((w) => w.id === workspaceId);
 
   const [dialog, setDialog] = useState<
-    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'settings' | 'catch-up' | 'scheduled' | 'workflows' | 'user-groups' | 'analytics' | 'audit' | 'standups' | 'integrations' | 'decisions' | 'weekly-reports' | 'work-dashboard'
+    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'availability' | 'settings' | 'catch-up' | 'scheduled' | 'workflows' | 'user-groups' | 'analytics' | 'audit' | 'standups' | 'integrations' | 'decisions' | 'weekly-reports' | 'work-dashboard'
   >('none');
   const isAdmin = workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN';
 
@@ -501,6 +502,15 @@ export function Sidebar({
             )}
           </span>
         </button>
+        <Tooltip label="Availability & focus hours">
+          <button
+            aria-label="Availability & focus hours"
+            onClick={() => setDialog('availability')}
+            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+          >
+            <Clock size={15} />
+          </button>
+        </Tooltip>
         <ThemePicker />
         <Tooltip label="Sign out">
           <button
@@ -531,6 +541,9 @@ export function Sidebar({
           }
           onClose={() => setDialog('none')}
         />
+      )}
+      {dialog === 'availability' && (
+        <AvailabilityDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
       )}
       {dialog === 'settings' && (
         <WorkspaceSettingsDialog

@@ -20,7 +20,8 @@ import type { InfiniteData } from '@tanstack/react-query';
 import { getSocket } from '@/lib/socket';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from '@/stores/auth-store';
-import { appendMessage, keys, patchMessage, replaceMessage } from './queries';
+import { appendMessage, isQuietNow, keys, patchMessage, replaceMessage, useAvailability } from './queries';
+import type { AvailabilityDto } from '@backstages/shared';
 
 /**
  * Bridges socket events into the TanStack Query cache. Mounted once inside the
@@ -28,6 +29,9 @@ import { appendMessage, keys, patchMessage, replaceMessage } from './queries';
  */
 export function useRealtime(workspaceId: string | null) {
   const qc = useQueryClient();
+  // Populate the availability cache so the notification handler can mute desktop
+  // pop-ups when the member is OOO or outside their working hours.
+  useAvailability(workspaceId ?? '');
   const upsertTyping = useUiStore((s) => s.upsertTyping);
   const removeTyping = useUiStore((s) => s.removeTyping);
   const me = useAuthStore((s) => s.user);
@@ -167,7 +171,11 @@ export function useRealtime(workspaceId: string | null) {
         // In-app toast so notifications are visible even with the tab focused and
         // regardless of OS notification permission (which many users never grant).
         useUiStore.getState().pushToast(title, 'info');
-      } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      } else if (
+        typeof Notification !== 'undefined' &&
+        Notification.permission === 'granted' &&
+        !isQuietNow(qc.getQueryData<AvailabilityDto>(['availability', workspaceId]))
+      ) {
         const n = new Notification(title, { tag: p.id });
         n.onclick = () => {
           window.focus();

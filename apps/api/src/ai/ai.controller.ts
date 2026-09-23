@@ -54,4 +54,10 @@ export class AiController {
   ) {
     return this.ai.translate(user.id, messageId, body.targetLanguage);
   }
+
+  /** Translate arbitrary short text — used for live caption translation. */
+  @Post('translate')
+  translateText(@CurrentUser() _user: AuthUser, @Body() body: { text: string; targetLanguage: string }) {
+    return this.ai.translateText(body?.text ?? '', body?.targetLanguage ?? 'English');
+  }
 }

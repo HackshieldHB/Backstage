@@ -579,6 +579,39 @@ export function useDeleteMeetingRecord(container: Container) {
   });
 }
 
+// ---------- availability / focus hours / OOO ----------
+
+export function useAvailability(workspaceId: string) {
+  return useQuery({
+    queryKey: ['availability', workspaceId],
+    queryFn: () => api<import('@backstages/shared').AvailabilityDto>('GET', `/workspaces/${workspaceId}/availability`),
+    enabled: !!workspaceId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useSetAvailability(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: import('@backstages/shared').AvailabilityInput) =>
+      api<import('@backstages/shared').AvailabilityDto>('PUT', `/workspaces/${workspaceId}/availability`, input),
+    onSuccess: (d) => qc.setQueryData(['availability', workspaceId], d),
+  });
+}
+
+/** True when the member's own alerts should be muted right now: OOO active, or
+ *  outside their working hours (evaluated in the viewer's own local time). */
+export function isQuietNow(prefs: import('@backstages/shared').AvailabilityDto | undefined): boolean {
+  if (!prefs) return false;
+  if (prefs.oooUntil && new Date(prefs.oooUntil).getTime() > Date.now()) return true;
+  if (prefs.workStartMin == null || prefs.workEndMin == null) return false;
+  const now = new Date();
+  const days = prefs.workDays && prefs.workDays.length ? prefs.workDays : [1, 2, 3, 4, 5];
+  if (!days.includes(now.getDay())) return true;
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  return minutes < prefs.workStartMin || minutes >= prefs.workEndMin;
+}
+
 export function useMyThreads(workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: keys.myThreads(workspaceId),

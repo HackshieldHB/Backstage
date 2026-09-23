@@ -10,6 +10,7 @@ import {
   Focus,
   Image as ImageIcon,
   Hand,
+  Languages,
   LayoutGrid,
   Lock,
   LockOpen,
@@ -37,7 +38,7 @@ import {
 } from 'lucide-react';
 import { HUDDLE_REACTIONS } from '@backstages/shared';
 import type { HuddleController } from '@/hooks/use-huddle';
-import { useHuddleRecap } from '@/hooks/queries';
+import { useAiStatus, useHuddleRecap } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { ParticipantTile, RemoteAudio } from './participant-tile';
@@ -95,6 +96,7 @@ export function MeetingRoom({
   const me = useAuthStore((s) => s.user);
   const myId = me?.id ?? '';
   const recap = useHuddleRecap(workspaceId);
+  const ai = useAiStatus();
   const pushToast = useUiStore((s) => s.pushToast);
 
   const runRecap = () => {
@@ -626,6 +628,7 @@ export function MeetingRoom({
                 <p key={c.userId} className="text-[14px] leading-snug text-white">
                   <span className="font-semibold text-white/60">{c.displayName}: </span>
                   {c.text}
+                  {c.translated && <span className="mt-0.5 block italic text-white/70">{c.translated}</span>}
                 </p>
               ))}
           </div>
@@ -679,6 +682,24 @@ export function MeetingRoom({
                 <MoreItem icon={<Captions size={14} />} onClick={() => { huddle.toggleCaptions(); setMoreMenu(false); }}>
                   {huddle.captionsOn ? 'Turn off captions' : 'Live captions'}
                 </MoreItem>
+              )}
+              {huddle.captionsSupported && ai.data?.enabled && (
+                <div className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-white/90">
+                  <Languages size={14} />
+                  <span className="flex-1">Translate captions</span>
+                  <select
+                    value={huddle.captionLang}
+                    onChange={(e) => huddle.setCaptionLang(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded bg-white/10 px-1 py-0.5 text-[12px] text-white"
+                    aria-label="Caption translation language"
+                  >
+                    <option value="" className="text-black">Off</option>
+                    {['English', 'Indonesian', 'Spanish', 'French', 'German', 'Japanese', 'Korean', 'Chinese', 'Portuguese', 'Hindi'].map((l) => (
+                      <option key={l} value={l} className="text-black">{l}</option>
+                    ))}
+                  </select>
+                </div>
               )}
               <MoreItem icon={<Radio size={14} />} onClick={() => { huddle.setPttEnabled(!huddle.pttEnabled); setMoreMenu(false); }}>
                 {huddle.pttEnabled ? 'Disable push-to-talk' : 'Enable push-to-talk'}

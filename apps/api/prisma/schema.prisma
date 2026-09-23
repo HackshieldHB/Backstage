@@ -264,6 +264,15 @@ model WorkspaceMember {
   digestTzOffsetMin Int       @default(0)
   /// Member-local date (yyyy-mm-dd) the digest last emailed, so it sends once/day.
   digestLastOn  String?
+  /// Focus/working hours (minutes from local midnight); outside them the member's
+  /// own desktop alerts are muted. Null = always available.
+  workStartMin  Int?
+  workEndMin    Int?
+  /// Comma-separated local weekdays that count as working days (0=Sun..6=Sat).
+  workDays      String?
+  /// Out-of-office window + auto message; while active, alerts are muted.
+  oooUntil      DateTime?
+  oooMessage    String?
   createdAt     DateTime      @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
