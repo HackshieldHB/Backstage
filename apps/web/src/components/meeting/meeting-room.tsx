@@ -44,7 +44,9 @@ import { WhiteboardStage } from './whiteboard-stage';
 import { BreakoutPanel, ChatPanel, NotesPanel, ParticipantsPanel, PollPanel } from './meeting-panels';
 
 type Panel = 'none' | 'chat' | 'participants' | 'notes' | 'poll' | 'breakout';
-type Layout = 'stage' | 'gallery' | 'focus' | 'whiteboard';
+// 'spotlight' merges the old Stage + Focus: it shows the shared screen (or a
+// spotlighted person) big with a filmstrip below.
+type Layout = 'gallery' | 'spotlight' | 'whiteboard';
 
 /** A small draggable floating tile (self-view / PiP), clamped to the viewport. */
 function DraggablePip({ children }: { children: React.ReactNode }) {
@@ -123,7 +125,7 @@ export function MeetingRoom({
   };
   const [panel, setPanel] = useState<Panel>('none');
   const [minimized, setMinimized] = useState(false);
-  const [layout, setLayout] = useState<Layout>('stage');
+  const [layout, setLayout] = useState<Layout>('spotlight');
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [reactMenu, setReactMenu] = useState(false);
   const [moreMenu, setMoreMenu] = useState(false);
@@ -149,19 +151,15 @@ export function MeetingRoom({
   const showWhiteboard = layout === 'whiteboard' && wbOn;
   const effectiveLayout: Layout = showWhiteboard
     ? 'whiteboard'
-    : layout === 'focus'
-      ? 'focus'
-      : layout === 'whiteboard'
-        ? 'gallery' // whiteboard was turned off — fall back
-        : hasScreen
-          ? layout
-          : 'gallery';
+    : layout === 'gallery'
+      ? 'gallery'
+      : 'spotlight'; // 'spotlight' (default) or a whiteboard that's been turned off
   const focusTarget =
     huddle.participants.find((p) => p.userId === focusedId) ??
     huddle.participants.find((p) => huddle.speaking[p.userId]) ??
     huddle.participants[0];
-  // In Focus layout, default to the shared screen when one exists (until the user
-  // explicitly picks a person) — clicking Focus should show what's being shared.
+  // In Spotlight, default to the shared screen when one exists (until the user
+  // explicitly picks a person) — so spotlighting shows what's being shared.
   const focusOnScreen = hasScreen && !focusedId;
 
   const controlLabel = huddle.control
@@ -222,6 +220,22 @@ export function MeetingRoom({
     return () => set(null);
   }, [enterPip]);
 
+  // Keep the PiP-backing video fed + playing with the best stream, so the browser's
+  // automatic PiP has a live video to pop out the moment the tab is hidden.
+  useEffect(() => {
+    const v = pipVideoRef.current;
+    if (!v) return;
+    const s = pickPipStream();
+    if (s) {
+      if (v.srcObject !== s) {
+        v.srcObject = s;
+        void v.play().catch(() => undefined);
+      }
+    } else {
+      v.srcObject = null;
+    }
+  }, [pickPipStream]);
+
   // ----- keyboard shortcuts (ignored while typing) -----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -251,6 +265,16 @@ export function MeetingRoom({
         : huddle.participants,
     [huddle.participants, huddle.breakoutsOpen, huddle.myBreakoutId],
   );
+
+  // When a screen share starts, jump to Spotlight showing that screen (like Meet).
+  const prevHasScreen = useRef(false);
+  useEffect(() => {
+    if (hasScreen && !prevHasScreen.current) {
+      setLayout('spotlight');
+      setFocusedId(null);
+    }
+    prevHasScreen.current = hasScreen;
+  }, [hasScreen]);
 
   if (minimized) {
     return (
@@ -326,11 +350,8 @@ export function MeetingRoom({
         <ConnBadge state={huddle.connectionState} />
         <span className="flex-1" />
         <div className="hidden items-center gap-1 rounded-lg bg-white/10 p-0.5 sm:flex">
-          {hasScreen && (
-            <LayoutBtn active={layout === 'stage'} onClick={() => setLayout('stage')} icon={<SquareStack size={14} />} label="Stage" />
-          )}
+          <LayoutBtn active={layout === 'spotlight'} onClick={() => setLayout('spotlight')} icon={<Focus size={14} />} label="Spotlight" />
           <LayoutBtn active={layout === 'gallery'} onClick={() => setLayout('gallery')} icon={<LayoutGrid size={14} />} label="Gallery" />
-          <LayoutBtn active={layout === 'focus'} onClick={() => setLayout('focus')} icon={<Focus size={14} />} label="Focus" />
           {wbOn && (
             <LayoutBtn active={layout === 'whiteboard'} onClick={() => setLayout('whiteboard')} icon={<Presentation size={14} />} label="Board" />
           )}
@@ -426,77 +447,7 @@ export function MeetingRoom({
                 ))}
               </div>
             </div>
-          ) : effectiveLayout === 'stage' && hasScreen ? (
-            <div className="flex min-h-0 flex-1 flex-col gap-2">
-              <div className="min-h-0 flex-1">
-                <ScreenStage
-                  stream={stageStream}
-                  label={stageSharerName}
-                  live
-                  selfPreview={huddle.screenSharing}
-                  annotations={huddle.annotations}
-                  lasers={huddle.lasers}
-                  canAnnotate={huddle.canAnnotate}
-                  isModerator={isMod}
-                  myId={myId}
-                  controlLabel={controlLabel}
-                  onOp={huddle.sendAnnotation}
-                  onLaser={huddle.sendLaser}
-                  onClear={huddle.clearAnnotations}
-                />
-              </div>
-              {/* Draggable self-view PiP over the shared screen */}
-              {huddle.cameraOn && huddle.localVideo && me && (
-                <DraggablePip>
-                  <ParticipantTile
-                    participant={{ userId: myId, displayName: me.displayName, avatarUrl: me.avatarUrl }}
-                    local
-                    localVideo={huddle.localVideo}
-                    speaking={huddle.speaking[myId]}
-                    compact
-                  />
-                </DraggablePip>
-              )}
-              {/* Filmstrip — non-interactive so the shared screen stays the focus.
-                  Use the Focus layout to spotlight a person instead. */}
-              <div className="flex h-24 shrink-0 gap-2 overflow-x-auto">
-                {tiles.map((p) => (
-                  <div key={p.userId} className="aspect-video h-full shrink-0">
-                    <ParticipantTile
-                      participant={p}
-                      stream={huddle.remoteStreams[p.userId]}
-                      local={p.userId === myId}
-                      localVideo={huddle.localVideo}
-                      speaking={huddle.speaking[p.userId]}
-                      compact
-                    />
-                  </div>
-                ))}
-              </div>
-              {/* Request-control affordance for viewers of someone else's screen.
-                  Browser-scoped: grants annotate/point on the shared screen — a
-                  browser cannot drive the presenter's OS (that needs a native agent). */}
-              {!huddle.screenSharing && stageSharerId && !huddle.control && (
-                <button
-                  onClick={() => huddle.requestControl(stageSharerId)}
-                  title="Ask the presenter to let you draw/point on their shared screen. Note: a browser cannot control their actual computer — that needs a remote-desktop app."
-                  className="mx-auto rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[12px] font-medium text-white/90 hover:bg-white/20"
-                >
-                  Request pointer access
-                </button>
-              )}
-              {huddle.control && huddle.control.controllerId !== myId && huddle.control.presenterId !== myId && (
-                <p className="mx-auto text-[11px] text-white/50">
-                  {huddle.participants.find((p) => p.userId === huddle.control!.controllerId)?.displayName ?? 'Someone'} can draw on this screen
-                </p>
-              )}
-              {huddle.control?.presenterId === myId && (
-                <button onClick={huddle.revokeControl} className="mx-auto rounded-full bg-red-600/80 px-3 py-1 text-[12px] font-semibold text-white hover:bg-red-600">
-                  Stop pointer access
-                </button>
-              )}
-            </div>
-          ) : effectiveLayout === 'focus' && (focusOnScreen || focusTarget) ? (
+          ) : effectiveLayout === 'spotlight' && (focusOnScreen || focusTarget) ? (
             <div className="flex min-h-0 flex-1 flex-col gap-2">
               <div className="min-h-0 flex-1">
                 {focusOnScreen && stageStream ? (
@@ -525,11 +476,46 @@ export function MeetingRoom({
                   />
                 ) : null}
               </div>
+
+              {/* Draggable self-view PiP while spotlighting the shared screen */}
+              {focusOnScreen && huddle.cameraOn && huddle.localVideo && me && (
+                <DraggablePip>
+                  <ParticipantTile
+                    participant={{ userId: myId, displayName: me.displayName, avatarUrl: me.avatarUrl }}
+                    local
+                    localVideo={huddle.localVideo}
+                    speaking={huddle.speaking[myId]}
+                    compact
+                  />
+                </DraggablePip>
+              )}
+
+              {/* Pointer-access affordances (only meaningful on the shared screen) */}
+              {focusOnScreen && !huddle.screenSharing && stageSharerId && !huddle.control && (
+                <button
+                  onClick={() => huddle.requestControl(stageSharerId)}
+                  title="Ask the presenter to let you draw/point on their shared screen. Note: a browser cannot control their actual computer — that needs a remote-desktop app."
+                  className="mx-auto rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[12px] font-medium text-white/90 hover:bg-white/20"
+                >
+                  Request pointer access
+                </button>
+              )}
+              {focusOnScreen && huddle.control && huddle.control.controllerId !== myId && huddle.control.presenterId !== myId && (
+                <p className="mx-auto text-[11px] text-white/50">
+                  {huddle.participants.find((p) => p.userId === huddle.control!.controllerId)?.displayName ?? 'Someone'} can draw on this screen
+                </p>
+              )}
+              {focusOnScreen && huddle.control?.presenterId === myId && (
+                <button onClick={huddle.revokeControl} className="mx-auto rounded-full bg-red-600/80 px-3 py-1 text-[12px] font-semibold text-white hover:bg-red-600">
+                  Stop pointer access
+                </button>
+              )}
+
               <div className="flex h-24 shrink-0 gap-2 overflow-x-auto">
                 {hasScreen && (
                   <button
                     onClick={() => setFocusedId(null)}
-                    title="Focus the shared screen"
+                    title="Spotlight the shared screen"
                     className={`aspect-video h-full shrink-0 rounded-xl ${focusOnScreen ? 'ring-2 ring-accent' : ''}`}
                   >
                     <div className="flex h-full w-full items-center justify-center rounded-xl bg-gray-800 text-white/70">
@@ -558,7 +544,7 @@ export function MeetingRoom({
           ) : (
             <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-2 overflow-y-auto">
               {tiles.map((p) => (
-                <button key={p.userId} onClick={() => { setFocusedId(p.userId); setLayout('focus'); }} className="h-full w-full min-h-[180px]">
+                <button key={p.userId} onClick={() => { setFocusedId(p.userId); setLayout('spotlight'); }} className="h-full w-full min-h-[180px]">
                   <ParticipantTile
                     participant={p}
                     stream={huddle.remoteStreams[p.userId]}
@@ -665,15 +651,6 @@ export function MeetingRoom({
           )}
         </div>
 
-        {huddle.blurSupported && (
-          <Ctrl
-            label={huddle.blurEnabled ? 'Turn off background blur' : 'Blur my background'}
-            active={huddle.blurEnabled}
-            onClick={() => void huddle.toggleBlur()}
-            icon={<Aperture size={18} />}
-            testId="ctrl-blur"
-          />
-        )}
         <Ctrl label="Chat (C)" active={panel === 'chat'} badge={huddle.unreadChat} onClick={() => setPanel((p) => (p === 'chat' ? 'none' : 'chat'))} icon={<MessageSquare size={18} />} testId="ctrl-chat" />
         <Ctrl label="People (P)" active={panel === 'participants'} onClick={() => setPanel((p) => (p === 'participants' ? 'none' : 'participants'))} icon={<Users size={18} />} testId="ctrl-people" />
 
@@ -691,6 +668,11 @@ export function MeetingRoom({
               <MoreItem icon={<Radio size={14} />} onClick={() => { huddle.setPttEnabled(!huddle.pttEnabled); setMoreMenu(false); }}>
                 {huddle.pttEnabled ? 'Disable push-to-talk' : 'Enable push-to-talk'}
               </MoreItem>
+              {huddle.blurSupported && (
+                <MoreItem icon={<Aperture size={14} />} onClick={() => { void huddle.toggleBlur(); setMoreMenu(false); }}>
+                  {huddle.blurEnabled ? 'Turn off background blur' : 'Blur my background'}
+                </MoreItem>
+              )}
               {wbOn && (
                 <MoreItem icon={<Presentation size={14} />} onClick={() => { setLayout('whiteboard'); setMoreMenu(false); }}>
                   View whiteboard
