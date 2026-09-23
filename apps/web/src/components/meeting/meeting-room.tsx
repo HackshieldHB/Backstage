@@ -1,12 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Aperture,
   Captions,
   ChevronDown,
+  DoorOpen,
   Focus,
   Hand,
   LayoutGrid,
+  Lock,
+  LockOpen,
   MessageSquare,
   Mic,
   MicOff,
@@ -15,8 +19,12 @@ import {
   MonitorX,
   MoreHorizontal,
   PhoneOff,
+  PictureInPicture2,
+  Presentation,
+  Radio,
   Smile,
   Sparkles,
+  Split,
   SquareStack,
   StickyNote,
   Users,
@@ -33,10 +41,11 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { ParticipantTile, RemoteAudio } from './participant-tile';
 import { ScreenStage } from './screen-stage';
-import { ChatPanel, NotesPanel, ParticipantsPanel, PollPanel } from './meeting-panels';
+import { WhiteboardStage } from './whiteboard-stage';
+import { BreakoutPanel, ChatPanel, NotesPanel, ParticipantsPanel, PollPanel } from './meeting-panels';
 
-type Panel = 'none' | 'chat' | 'participants' | 'notes' | 'poll';
-type Layout = 'stage' | 'gallery' | 'focus';
+type Panel = 'none' | 'chat' | 'participants' | 'notes' | 'poll' | 'breakout';
+type Layout = 'stage' | 'gallery' | 'focus' | 'whiteboard';
 
 /** A small draggable floating tile (self-view / PiP), clamped to the viewport. */
 function DraggablePip({ children }: { children: React.ReactNode }) {
@@ -121,6 +130,10 @@ export function MeetingRoom({
   const [moreMenu, setMoreMenu] = useState(false);
 
   const isMod = huddle.myRole === 'host' || huddle.myRole === 'cohost';
+  const wbOn = huddle.settings.whiteboardOn;
+  const myBreakoutName = huddle.myBreakoutId
+    ? huddle.breakoutRooms.find((r) => r.id === huddle.myBreakoutId)?.name ?? 'a breakout'
+    : null;
 
   // Which screen is on stage: mine if I'm sharing, else the first remote screen.
   const remoteScreenEntries = Object.entries(huddle.remoteScreens);
@@ -134,17 +147,66 @@ export function MeetingRoom({
     ? 'You are sharing'
     : `${huddle.participants.find((p) => p.userId === stageSharerId)?.displayName ?? 'Someone'} is sharing`;
   const hasScreen = !!stageStream;
-  const effectiveLayout: Layout = layout === 'focus' ? 'focus' : hasScreen ? layout : 'gallery';
+  const showWhiteboard = layout === 'whiteboard' && wbOn;
+  const effectiveLayout: Layout = showWhiteboard
+    ? 'whiteboard'
+    : layout === 'focus'
+      ? 'focus'
+      : layout === 'whiteboard'
+        ? 'gallery' // whiteboard was turned off — fall back
+        : hasScreen
+          ? layout
+          : 'gallery';
   const focusTarget =
     huddle.participants.find((p) => p.userId === focusedId) ??
     huddle.participants.find((p) => huddle.speaking[p.userId]) ??
     huddle.participants[0];
+  // In Focus layout, default to the shared screen when one exists (until the user
+  // explicitly picks a person) — clicking Focus should show what's being shared.
+  const focusOnScreen = hasScreen && !focusedId;
 
   const controlLabel = huddle.control
     ? huddle.control.controllerId === myId
       ? 'You'
       : huddle.participants.find((p) => p.userId === huddle.control!.controllerId)?.displayName ?? 'Someone'
     : null;
+
+  // ----- Picture-in-Picture (float the meeting when you switch tabs, like Meet) --
+  const pipVideoRef = useRef<HTMLVideoElement>(null);
+  const pickPipStream = useCallback((): MediaStream | null => {
+    // Prefer a shared screen, then any camera with a live video track.
+    const screen = huddle.localScreen ?? Object.values(huddle.remoteScreens)[0] ?? null;
+    if (screen && screen.getVideoTracks().length) return screen;
+    for (const s of Object.values(huddle.remoteStreams)) if (s.getVideoTracks().length) return s;
+    if (huddle.localVideo && huddle.localVideo.getVideoTracks().length) return huddle.localVideo;
+    return null;
+  }, [huddle.localScreen, huddle.remoteScreens, huddle.remoteStreams, huddle.localVideo]);
+
+  const enterPip = useCallback(async () => {
+    const v = pipVideoRef.current;
+    const stream = pickPipStream();
+    if (!v || !stream || !document.pictureInPictureEnabled) return;
+    try {
+      if (v.srcObject !== stream) v.srcObject = stream;
+      await v.play().catch(() => undefined);
+      if (!document.pictureInPictureElement) await v.requestPictureInPicture();
+    } catch {
+      // PiP needs a video track and (for auto) a recent gesture — silently skip.
+    }
+  }, [pickPipStream]);
+
+  // Best-effort auto-PiP when the tab is hidden; leave PiP when it returns.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.hidden) void enterPip();
+      else if (document.pictureInPictureElement) void document.exitPictureInPicture().catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      if (document.pictureInPictureElement) void document.exitPictureInPicture().catch(() => undefined);
+    };
+  }, [enterPip]);
 
   // ----- keyboard shortcuts (ignored while typing) -----
   useEffect(() => {
@@ -166,7 +228,15 @@ export function MeetingRoom({
     return () => window.removeEventListener('keydown', onKey);
   }, [huddle]);
 
-  const tiles = useMemo(() => huddle.participants, [huddle.participants]);
+  // In breakouts, the meeting view shows only the people in your own room (which
+  // is also the only group your mesh is connected to).
+  const tiles = useMemo(
+    () =>
+      huddle.breakoutsOpen
+        ? huddle.participants.filter((p) => (p.breakoutId ?? null) === huddle.myBreakoutId)
+        : huddle.participants,
+    [huddle.participants, huddle.breakoutsOpen, huddle.myBreakoutId],
+  );
 
   if (minimized) {
     return (
@@ -185,6 +255,40 @@ export function MeetingRoom({
     );
   }
 
+  // Waiting room: held until a host admits (or denied). No mesh is built yet.
+  if (huddle.admitStatus === 'waiting' || huddle.admitStatus === 'denied') {
+    const denied = huddle.admitStatus === 'denied';
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-gray-950 text-white"
+        data-testid="meeting-waiting"
+      >
+        <div className="flex flex-col items-center gap-3 rounded-2xl bg-white/5 px-10 py-8 text-center">
+          {denied ? (
+            <DoorOpen size={32} className="text-red-400" />
+          ) : (
+            <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+          )}
+          <h2 className="text-[16px] font-semibold">
+            {denied ? 'You weren’t admitted' : `Waiting to join ${label ?? 'the huddle'}`}
+          </h2>
+          <p className="max-w-xs text-[13px] text-white/60">
+            {denied
+              ? 'The host didn’t let you into this meeting.'
+              : 'The host has a waiting room on. You’ll join automatically once they admit you.'}
+          </p>
+          <button
+            onClick={huddle.leave}
+            className="mt-1 flex items-center gap-1.5 rounded-full bg-red-600 px-4 py-2 text-[13px] font-semibold text-white hover:bg-red-700"
+            data-testid="waiting-leave"
+          >
+            <PhoneOff size={15} /> {denied ? 'Close' : 'Cancel'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gray-950 text-white" data-testid="meeting-room">
       <ReactionAnimations />
@@ -192,6 +296,14 @@ export function MeetingRoom({
       {Object.entries(huddle.remoteStreams).map(([id, s]) => (
         <RemoteAudio key={id} stream={s} />
       ))}
+      {/* Off-screen video that backs Picture-in-Picture (kept renderable, not
+          display:none, so the browser can attach a PiP window to it). */}
+      <video
+        ref={pipVideoRef}
+        muted
+        playsInline
+        style={{ position: 'fixed', right: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+      />
 
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-white/10 px-4">
@@ -205,6 +317,9 @@ export function MeetingRoom({
           )}
           <LayoutBtn active={layout === 'gallery'} onClick={() => setLayout('gallery')} icon={<LayoutGrid size={14} />} label="Gallery" />
           <LayoutBtn active={layout === 'focus'} onClick={() => setLayout('focus')} icon={<Focus size={14} />} label="Focus" />
+          {wbOn && (
+            <LayoutBtn active={layout === 'whiteboard'} onClick={() => setLayout('whiteboard')} icon={<Presentation size={14} />} label="Board" />
+          )}
         </div>
         <button onClick={() => setMinimized(true)} className="rounded-lg p-1.5 text-white/70 hover:bg-white/10" aria-label="Minimize meeting">
           <Minimize2 size={16} />
@@ -214,13 +329,50 @@ export function MeetingRoom({
       {/* Body: stage/gallery + optional side panel */}
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col p-3">
+          {/* Waiting room: people a host can admit or deny. */}
+          {isMod && huddle.waitingList.length > 0 && (
+            <div className="mb-2 space-y-1.5" data-testid="waiting-admit">
+              {huddle.waitingList.map((w) => (
+                <div key={w.userId} className="flex items-center gap-2 rounded-lg bg-blue-500/15 px-3 py-2 text-[13px] text-blue-100">
+                  <DoorOpen size={14} />
+                  <span className="flex-1">
+                    <strong>{w.displayName}</strong> is waiting to join.
+                  </span>
+                  <button onClick={() => huddle.admit(w.userId, 'admit')} className="rounded-md bg-green-600 px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-green-700">
+                    Admit
+                  </button>
+                  <button onClick={() => huddle.admit(w.userId, 'deny')} className="rounded-md bg-white/10 px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-white/20">
+                    Deny
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Breakout banner: which room I'm in + a shortcut to manage. */}
+          {huddle.breakoutsOpen && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg bg-indigo-500/15 px-3 py-1.5 text-[12px] text-indigo-100" data-testid="breakout-banner">
+              <Split size={13} />
+              <span className="flex-1">
+                {myBreakoutName ? (
+                  <>You’re in <strong>{myBreakoutName}</strong>.</>
+                ) : (
+                  <>Breakouts are open — you’re in the main room.</>
+                )}
+              </span>
+              <button onClick={() => setPanel('breakout')} className="rounded px-2 py-0.5 font-medium hover:bg-white/10">
+                Manage
+              </button>
+            </div>
+          )}
+
           {/* Incoming remote-control requests (I'm the presenter) */}
           {huddle.controlRequests.length > 0 && (
             <div className="mb-2 space-y-1.5">
               {huddle.controlRequests.map((r) => (
                 <div key={r.requesterId} className="flex items-center gap-2 rounded-lg bg-amber-500/15 px-3 py-2 text-[13px] text-amber-100">
                   <span className="flex-1">
-                    <strong>{r.requesterName}</strong> wants to control your shared screen.
+                    <strong>{r.requesterName}</strong> wants to draw/point on your shared screen.
                   </span>
                   <button onClick={() => huddle.respondControl(r.requesterId, 'grant')} className="rounded-md bg-green-600 px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-green-700">
                     Allow
@@ -233,7 +385,34 @@ export function MeetingRoom({
             </div>
           )}
 
-          {effectiveLayout === 'stage' && hasScreen ? (
+          {effectiveLayout === 'whiteboard' ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-2">
+              <div className="min-h-0 flex-1">
+                <WhiteboardStage
+                  shapes={huddle.whiteboard}
+                  canDraw={huddle.canAnnotate}
+                  isModerator={isMod}
+                  myId={myId}
+                  onOp={huddle.sendWhiteboardOp}
+                  onClear={huddle.clearWhiteboard}
+                />
+              </div>
+              <div className="flex h-24 shrink-0 gap-2 overflow-x-auto">
+                {tiles.map((p) => (
+                  <div key={p.userId} className="aspect-video h-full shrink-0">
+                    <ParticipantTile
+                      participant={p}
+                      stream={huddle.remoteStreams[p.userId]}
+                      local={p.userId === myId}
+                      localVideo={huddle.localVideo}
+                      speaking={huddle.speaking[p.userId]}
+                      compact
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : effectiveLayout === 'stage' && hasScreen ? (
             <div className="flex min-h-0 flex-1 flex-col gap-2">
               <div className="min-h-0 flex-1">
                 <ScreenStage
@@ -264,15 +443,11 @@ export function MeetingRoom({
                   />
                 </DraggablePip>
               )}
-              {/* Filmstrip */}
+              {/* Filmstrip — non-interactive so the shared screen stays the focus.
+                  Use the Focus layout to spotlight a person instead. */}
               <div className="flex h-24 shrink-0 gap-2 overflow-x-auto">
                 {tiles.map((p) => (
-                  <button
-                    key={p.userId}
-                    onClick={() => { setFocusedId(p.userId); setLayout('focus'); }}
-                    className="aspect-video h-full shrink-0"
-                    title={`Focus ${p.displayName}`}
-                  >
+                  <div key={p.userId} className="aspect-video h-full shrink-0">
                     <ParticipantTile
                       participant={p}
                       stream={huddle.remoteStreams[p.userId]}
@@ -281,7 +456,7 @@ export function MeetingRoom({
                       speaking={huddle.speaking[p.userId]}
                       compact
                     />
-                  </button>
+                  </div>
                 ))}
               </div>
               {/* Request-control affordance for viewers of someone else's screen.
@@ -290,40 +465,69 @@ export function MeetingRoom({
               {!huddle.screenSharing && stageSharerId && !huddle.control && (
                 <button
                   onClick={() => huddle.requestControl(stageSharerId)}
-                  title="Ask the presenter to let you annotate/point on their screen (browser-scoped — does not control their computer)"
+                  title="Ask the presenter to let you draw/point on their shared screen. Note: a browser cannot control their actual computer — that needs a remote-desktop app."
                   className="mx-auto rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[12px] font-medium text-white/90 hover:bg-white/20"
                 >
-                  Request control (annotate)
+                  Request pointer access
                 </button>
               )}
               {huddle.control && huddle.control.controllerId !== myId && huddle.control.presenterId !== myId && (
                 <p className="mx-auto text-[11px] text-white/50">
-                  {huddle.participants.find((p) => p.userId === huddle.control!.controllerId)?.displayName ?? 'Someone'} has control
+                  {huddle.participants.find((p) => p.userId === huddle.control!.controllerId)?.displayName ?? 'Someone'} can draw on this screen
                 </p>
               )}
               {huddle.control?.presenterId === myId && (
                 <button onClick={huddle.revokeControl} className="mx-auto rounded-full bg-red-600/80 px-3 py-1 text-[12px] font-semibold text-white hover:bg-red-600">
-                  Stop remote control
+                  Stop pointer access
                 </button>
               )}
             </div>
-          ) : effectiveLayout === 'focus' && focusTarget ? (
+          ) : effectiveLayout === 'focus' && (focusOnScreen || focusTarget) ? (
             <div className="flex min-h-0 flex-1 flex-col gap-2">
               <div className="min-h-0 flex-1">
-                <ParticipantTile
-                  participant={focusTarget}
-                  stream={huddle.remoteStreams[focusTarget.userId]}
-                  local={focusTarget.userId === myId}
-                  localVideo={huddle.localVideo}
-                  speaking={huddle.speaking[focusTarget.userId]}
-                />
+                {focusOnScreen && stageStream ? (
+                  <ScreenStage
+                    stream={stageStream}
+                    label={stageSharerName}
+                    live
+                    selfPreview={huddle.screenSharing}
+                    annotations={huddle.annotations}
+                    lasers={huddle.lasers}
+                    canAnnotate={huddle.canAnnotate}
+                    isModerator={isMod}
+                    myId={myId}
+                    controlLabel={controlLabel}
+                    onOp={huddle.sendAnnotation}
+                    onLaser={huddle.sendLaser}
+                    onClear={huddle.clearAnnotations}
+                  />
+                ) : focusTarget ? (
+                  <ParticipantTile
+                    participant={focusTarget}
+                    stream={huddle.remoteStreams[focusTarget.userId]}
+                    local={focusTarget.userId === myId}
+                    localVideo={huddle.localVideo}
+                    speaking={huddle.speaking[focusTarget.userId]}
+                  />
+                ) : null}
               </div>
               <div className="flex h-24 shrink-0 gap-2 overflow-x-auto">
+                {hasScreen && (
+                  <button
+                    onClick={() => setFocusedId(null)}
+                    title="Focus the shared screen"
+                    className={`aspect-video h-full shrink-0 rounded-xl ${focusOnScreen ? 'ring-2 ring-accent' : ''}`}
+                  >
+                    <div className="flex h-full w-full items-center justify-center rounded-xl bg-gray-800 text-white/70">
+                      <MonitorUp size={18} />
+                    </div>
+                  </button>
+                )}
                 {tiles.map((p) => (
                   <button
                     key={p.userId}
                     onClick={() => setFocusedId(p.userId)}
-                    className={`aspect-video h-full shrink-0 rounded-xl ${p.userId === focusTarget.userId ? 'ring-2 ring-accent' : ''}`}
+                    className={`aspect-video h-full shrink-0 rounded-xl ${!focusOnScreen && p.userId === focusTarget?.userId ? 'ring-2 ring-accent' : ''}`}
                   >
                     <ParticipantTile
                       participant={p}
@@ -363,6 +567,7 @@ export function MeetingRoom({
                 {panel === 'participants' && `People (${huddle.participants.length})`}
                 {panel === 'notes' && 'Notes'}
                 {panel === 'poll' && 'Poll'}
+                {panel === 'breakout' && 'Breakout rooms'}
               </span>
               <button onClick={() => setPanel('none')} className="rounded p-1 text-ink-3 hover:bg-hovered" aria-label="Close panel">
                 <ChevronDown size={16} />
@@ -373,6 +578,7 @@ export function MeetingRoom({
               {panel === 'participants' && <ParticipantsPanel huddle={huddle} myId={myId} />}
               {panel === 'notes' && <NotesPanel huddle={huddle} />}
               {panel === 'poll' && <PollPanel huddle={huddle} />}
+              {panel === 'breakout' && <BreakoutPanel huddle={huddle} myId={myId} />}
             </div>
           </aside>
         )}
@@ -411,6 +617,20 @@ export function MeetingRoom({
         </div>
       )}
 
+      {/* Push-to-talk indicator */}
+      {huddle.pttEnabled && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-32 z-10 flex justify-center" data-testid="ptt-indicator">
+          <div
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ${
+              huddle.pttActive ? 'bg-green-600 text-white' : 'bg-black/70 text-white/80'
+            }`}
+          >
+            <Radio size={13} />
+            {huddle.pttActive ? 'Talking…' : 'Push-to-talk — hold Space to speak'}
+          </div>
+        </div>
+      )}
+
       {/* Control bar */}
       <footer className="relative flex h-16 shrink-0 items-center justify-center gap-1.5 border-t border-white/10 px-3">
         <Ctrl label={huddle.muted ? 'Unmute (M)' : 'Mute (M)'} active={!huddle.muted} danger={huddle.muted} onClick={huddle.toggleMute} icon={huddle.muted ? <MicOff size={18} /> : <Mic size={18} />} testId="ctrl-mic" />
@@ -434,15 +654,72 @@ export function MeetingRoom({
         {huddle.captionsSupported && (
           <Ctrl label="Live captions" active={huddle.captionsOn} onClick={huddle.toggleCaptions} icon={<Captions size={18} />} testId="ctrl-captions" />
         )}
+        {huddle.blurSupported && (
+          <Ctrl
+            label={huddle.blurEnabled ? 'Turn off background blur' : 'Blur my background'}
+            active={huddle.blurEnabled}
+            onClick={() => void huddle.toggleBlur()}
+            icon={<Aperture size={18} />}
+            testId="ctrl-blur"
+          />
+        )}
+        <Ctrl
+          label={huddle.pttEnabled ? 'Push-to-talk on — hold Space to speak' : 'Enable push-to-talk'}
+          active={huddle.pttEnabled}
+          danger={huddle.pttEnabled && huddle.pttActive}
+          onClick={() => huddle.setPttEnabled(!huddle.pttEnabled)}
+          icon={<Radio size={18} />}
+          testId="ctrl-ptt"
+        />
+        <Ctrl
+          label="Pop out (Picture-in-Picture)"
+          onClick={() => void enterPip()}
+          icon={<PictureInPicture2 size={18} />}
+          testId="ctrl-pip"
+        />
         <Ctrl label="Chat (C)" active={panel === 'chat'} badge={huddle.unreadChat} onClick={() => setPanel((p) => (p === 'chat' ? 'none' : 'chat'))} icon={<MessageSquare size={18} />} testId="ctrl-chat" />
         <Ctrl label="People (P)" active={panel === 'participants'} onClick={() => setPanel((p) => (p === 'participants' ? 'none' : 'participants'))} icon={<Users size={18} />} testId="ctrl-people" />
 
         <div className="relative">
           <Ctrl label="More" onClick={() => setMoreMenu((v) => !v)} icon={<MoreHorizontal size={18} />} testId="ctrl-more" />
           {moreMenu && (
-            <div className="absolute bottom-14 right-0 w-48 rounded-lg border border-white/10 bg-gray-800 py-1 text-[13px] shadow-pop">
+            <div className="absolute bottom-14 right-0 w-56 rounded-lg border border-white/10 bg-gray-800 py-1 text-[13px] shadow-pop">
               <MoreItem icon={<StickyNote size={14} />} onClick={() => { setPanel('notes'); setMoreMenu(false); }}>Meeting notes</MoreItem>
               <MoreItem icon={<Vote size={14} />} onClick={() => { setPanel('poll'); setMoreMenu(false); }}>Polls</MoreItem>
+              {wbOn && (
+                <MoreItem icon={<Presentation size={14} />} onClick={() => { setLayout('whiteboard'); setMoreMenu(false); }}>
+                  View whiteboard
+                </MoreItem>
+              )}
+              {isMod && (
+                <MoreItem
+                  icon={<Presentation size={14} />}
+                  onClick={() => { huddle.updateSettings({ whiteboardOn: !wbOn }); if (!wbOn) setLayout('whiteboard'); setMoreMenu(false); }}
+                >
+                  {wbOn ? 'Stop whiteboard' : 'Start whiteboard'}
+                </MoreItem>
+              )}
+              {isMod && (
+                <MoreItem icon={<Split size={14} />} onClick={() => { setPanel('breakout'); setMoreMenu(false); }}>
+                  Breakout rooms
+                </MoreItem>
+              )}
+              {isMod && (
+                <MoreItem
+                  icon={<DoorOpen size={14} />}
+                  onClick={() => { huddle.updateSettings({ waitingRoomEnabled: !huddle.settings.waitingRoomEnabled }); setMoreMenu(false); }}
+                >
+                  {huddle.settings.waitingRoomEnabled ? 'Turn off waiting room' : 'Turn on waiting room'}
+                </MoreItem>
+              )}
+              {isMod && (
+                <MoreItem
+                  icon={huddle.settings.locked ? <LockOpen size={14} /> : <Lock size={14} />}
+                  onClick={() => { huddle.updateSettings({ locked: !huddle.settings.locked }); setMoreMenu(false); }}
+                >
+                  {huddle.settings.locked ? 'Unlock meeting' : 'Lock meeting'}
+                </MoreItem>
+              )}
               {isMod && (
                 <MoreItem icon={<Sparkles size={14} />} onClick={() => { runRecap(); setMoreMenu(false); }}>
                   {recap.isPending ? 'Generating recap…' : 'AI recap → channel'}

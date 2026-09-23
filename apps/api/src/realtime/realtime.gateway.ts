@@ -26,8 +26,13 @@ import {
   ClientHuddleNotesPayload,
   ClientHuddleModerationPayload,
   ClientHuddleCaptionPayload,
+  ClientHuddleSettingsPayload,
+  ClientHuddleAdmitPayload,
+  ClientHuddleWhiteboardPayload,
+  ClientHuddleBreakoutPayload,
   ClientTypingPayload,
   SOCKET_EVENTS,
+  type BreakoutRoom,
   type SocketEventName,
 } from '@backstages/shared';
 import { randomUUID } from 'crypto';
@@ -129,6 +134,10 @@ export class RealtimeGateway
         await this.huddleSession.leave(key, socket.data.userId);
         await this.broadcastHuddle(key);
       }
+      // Drop the socket from any waiting rooms and refresh moderators' lists.
+      for (const key of this.huddle.removeWaitingSocket(socket.data.userId, socket.id)) {
+        await this.broadcastWaiting(key);
+      }
       await this.presence.disconnected(socket.data.userId);
     }
   }
@@ -151,9 +160,98 @@ export class RealtimeGateway
     const key = this.huddleKey(body);
     // Only members of the channel/DM (who are in its room) may join its huddle.
     if (!key || !socket.rooms.has(key)) return;
-    this.huddle.join(key, socket.data.userId, socket.id);
-    await this.huddleSession.join(key, socket.data.userId);
+    const userId = socket.data.userId;
+    const settings = this.huddle.getSettings(key);
+    const alreadyPresent = this.huddle.isPresent(key, userId);
+    // The very first person into an empty huddle is always admitted (they become
+    // host). Lock and waiting room only gate later joiners who aren't yet present.
+    const roomHasMembers = this.huddle.userIds(key).length > 0;
+
+    if (!alreadyPresent && roomHasMembers) {
+      if (settings.locked) {
+        this.emitWaitingStatus(socket, key, 'denied');
+        return;
+      }
+      if (settings.waitingRoomEnabled) {
+        const isNew = this.huddle.addWaiting(key, userId, socket.id);
+        this.emitWaitingStatus(socket, key, 'waiting');
+        if (isNew) await this.broadcastWaiting(key);
+        return;
+      }
+    }
+
+    this.huddle.join(key, userId, socket.id);
+    await this.huddleSession.join(key, userId);
     await this.broadcastHuddle(key);
+    // Hand the newcomer the current room state (settings, whiteboard, breakouts),
+    // and confirm admission so a client that showed a waiting screen can proceed.
+    this.emitRoomStateTo(userId, key);
+    this.emitWaitingStatus(socket, key, 'admitted');
+    if (this.huddle.waitingUserIds(key).length) await this.broadcastWaiting(key);
+  }
+
+  /** channel:/conversation: room key → the id field echoed on every huddle event. */
+  private idFieldForKey(key: string): { channelId?: string; conversationId?: string } {
+    return key.startsWith('channel:')
+      ? { channelId: key.slice('channel:'.length) }
+      : { conversationId: key.slice('conversation:'.length) };
+  }
+
+  /** Personal waiting-room status to a single joining socket. */
+  private emitWaitingStatus(socket: AuthedSocket, key: string, status: 'waiting' | 'admitted' | 'denied') {
+    socket.emit(SOCKET_EVENTS.HUDDLE_WAITING, { ...this.idFieldForKey(key), waiting: [], status });
+  }
+
+  /** Push the pending waiting-room list to every present moderator. */
+  private async broadcastWaiting(key: string) {
+    const waitingIds = this.huddle.waitingUserIds(key);
+    const users = waitingIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: waitingIds } },
+          select: { id: true, displayName: true, avatarUrl: true },
+        })
+      : [];
+    const waiting = users.map((u) => ({ userId: u.id, displayName: u.displayName, avatarUrl: u.avatarUrl }));
+    const idField = this.idFieldForKey(key);
+    for (const uid of this.huddle.userIds(key)) {
+      if (this.huddle.isModerator(key, uid)) {
+        this.realtime.emitToUser(uid, SOCKET_EVENTS.HUDDLE_WAITING, { ...idField, waiting });
+      }
+    }
+  }
+
+  /** Send room-scoped state (settings, breakouts, whiteboard replay) to one user. */
+  private emitRoomStateTo(userId: string, key: string) {
+    const idField = this.idFieldForKey(key);
+    this.realtime.emitToUser(userId, SOCKET_EVENTS.HUDDLE_SETTINGS, {
+      ...idField,
+      ...this.huddle.getSettings(key),
+    });
+    this.realtime.emitToUser(userId, SOCKET_EVENTS.HUDDLE_BREAKOUT, {
+      ...idField,
+      ...this.huddle.getBreakouts(key),
+    });
+    const shapes = this.huddle.whiteboardShapes(key);
+    if (shapes.length) {
+      this.realtime.emitToUser(userId, SOCKET_EVENTS.HUDDLE_WHITEBOARD, {
+        ...idField,
+        userId: 'server',
+        op: { kind: 'sync', shapes },
+      });
+    }
+    const annShapes = this.huddle.annotationShapes(key);
+    if (annShapes.length) {
+      this.realtime.emitToUser(userId, SOCKET_EVENTS.HUDDLE_ANNOTATION, {
+        ...idField,
+        userId: 'server',
+        op: { kind: 'sync', shapes: annShapes },
+      });
+    }
+  }
+
+  private broadcastBreakouts(key: string) {
+    const b = this.huddle.getBreakouts(key);
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_BREAKOUT, (idField) => ({ ...idField, ...b }));
   }
 
   @SubscribeMessage(CLIENT_EVENTS.HUDDLE_LEAVE)
@@ -201,6 +299,7 @@ export class RealtimeGateway
         canAnnotate: st?.canAnnotate ?? true,
         cameraStreamId: st?.cameraStreamId ?? null,
         screenStreamId: st?.screenStreamId ?? null,
+        breakoutId: this.huddle.breakoutOf(key, u.id),
       };
     });
     this.emitToKey(key, SOCKET_EVENTS.HUDDLE_PARTICIPANTS, (idField) => ({ ...idField, participants }));
@@ -259,6 +358,19 @@ export class RealtimeGateway
       screenStreamId: body.screenStreamId,
     });
     await this.broadcastHuddle(key);
+    // Annotations belong to a shared screen — when the last share stops, wipe them
+    // so they don't linger (misaligned) over the next share.
+    if (body.screenSharing === false) {
+      const anyShare = this.huddle.userIds(key).some((uid) => this.huddle.stateOf(key, uid)?.screenSharing);
+      if (!anyShare && this.huddle.annotationShapes(key).length) {
+        this.huddle.clearAnnotationOwners(key);
+        this.emitToKey(key, SOCKET_EVENTS.HUDDLE_ANNOTATION, (idField) => ({
+          ...idField,
+          userId: 'server',
+          op: { kind: 'clear' },
+        }));
+      }
+    }
   }
 
   // ---------- huddle: chat ----------
@@ -312,13 +424,16 @@ export class RealtimeGateway
     } else if (op.kind === 'create') {
       if (!this.huddle.canAnnotate(key, me)) return;
       this.huddle.recordAnnotation(key, op.shape.id, me);
+      this.huddle.putAnnotation(key, op.shape);
     } else if (op.kind === 'update' || op.kind === 'delete') {
       if (!this.huddle.canAnnotate(key, me)) return;
       const id = op.kind === 'update' ? op.shape.id : op.id;
       const owner = this.huddle.annotationOwner(key, id);
       if (owner && owner !== me && !mod) return;
-      if (op.kind === 'delete') this.huddle.deleteAnnotation(key, id);
+      if (op.kind === 'update') this.huddle.putAnnotation(key, op.shape);
+      else this.huddle.deleteAnnotation(key, id);
     } else {
+      // 'sync' is server→client only; ignore anything else.
       return;
     }
     this.emitToKey(key, SOCKET_EVENTS.HUDDLE_ANNOTATION, (idField) => ({
@@ -453,6 +568,127 @@ export class RealtimeGateway
       role: body.role,
       by: me,
     });
+  }
+
+  // ---------- huddle: room settings (waiting room / lock / whiteboard) ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_SETTINGS)
+  async onHuddleSettings(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: ClientHuddleSettingsPayload,
+  ) {
+    const key = this.huddleGuard(socket, body);
+    if (!key || !this.huddle.isModerator(key, socket.data.userId)) return;
+    const before = this.huddle.getSettings(key);
+    const next = this.huddle.setSettings(key, {
+      waitingRoomEnabled: body.waitingRoomEnabled,
+      locked: body.locked,
+      whiteboardOn: body.whiteboardOn,
+    });
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_SETTINGS, (idField) => ({ ...idField, ...next }));
+    // Turning the waiting room off admits everyone currently held.
+    if (before.waitingRoomEnabled && !next.waitingRoomEnabled) {
+      for (const uid of this.huddle.waitingUserIds(key)) {
+        const sockets = this.huddle.removeWaiting(key, uid);
+        for (const sid of sockets) this.huddle.join(key, uid, sid);
+        if (sockets.length) {
+          await this.huddleSession.join(key, uid);
+          this.realtime.emitToUser(uid, SOCKET_EVENTS.HUDDLE_WAITING, {
+            ...this.idFieldForKey(key),
+            waiting: [],
+            status: 'admitted',
+          });
+          this.emitRoomStateTo(uid, key);
+        }
+      }
+      await this.broadcastHuddle(key);
+      await this.broadcastWaiting(key);
+    }
+  }
+
+  // ---------- huddle: waiting-room admission (host/co-host only) ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_ADMIT)
+  async onHuddleAdmit(@ConnectedSocket() socket: AuthedSocket, @MessageBody() body: ClientHuddleAdmitPayload) {
+    const key = this.huddleGuard(socket, body);
+    if (!key || !this.huddle.isModerator(key, socket.data.userId) || !body.targetUserId) return;
+    const target = body.targetUserId;
+    if (!this.huddle.isWaiting(key, target)) return;
+    const sockets = this.huddle.removeWaiting(key, target);
+    const idField = this.idFieldForKey(key);
+    if (body.action === 'admit') {
+      for (const sid of sockets) this.huddle.join(key, target, sid);
+      await this.huddleSession.join(key, target);
+      await this.broadcastHuddle(key);
+      this.realtime.emitToUser(target, SOCKET_EVENTS.HUDDLE_WAITING, { ...idField, waiting: [], status: 'admitted' });
+      this.emitRoomStateTo(target, key);
+    } else {
+      this.realtime.emitToUser(target, SOCKET_EVENTS.HUDDLE_WAITING, { ...idField, waiting: [], status: 'denied' });
+    }
+    await this.broadcastWaiting(key);
+  }
+
+  // ---------- huddle: shared whiteboard ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_WHITEBOARD)
+  onHuddleWhiteboard(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: ClientHuddleWhiteboardPayload,
+  ) {
+    const key = this.huddleGuard(socket, body);
+    if (!key) return;
+    const op = body.op;
+    const me = socket.data.userId;
+    const mod = this.huddle.isModerator(key, me);
+    // Same ownership model as screen annotations: anyone with annotate permission
+    // may draw; only the author (or a moderator) may edit/delete a shape; clear is
+    // moderator-only. `sync` is server→client only and never accepted here.
+    if (op.kind === 'clear') {
+      if (!mod) return;
+      this.huddle.whiteboardClear(key);
+    } else if (op.kind === 'create') {
+      if (!this.huddle.canAnnotate(key, me)) return;
+      this.huddle.whiteboardCreate(key, op.shape, me);
+    } else if (op.kind === 'update' || op.kind === 'delete') {
+      if (!this.huddle.canAnnotate(key, me)) return;
+      const id = op.kind === 'update' ? op.shape.id : op.id;
+      const owner = this.huddle.whiteboardOwner(key, id);
+      if (owner && owner !== me && !mod) return;
+      if (op.kind === 'update') this.huddle.whiteboardUpdate(key, op.shape);
+      else this.huddle.whiteboardDelete(key, id);
+    } else {
+      return;
+    }
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_WHITEBOARD, (idField) => ({ ...idField, userId: me, op }));
+  }
+
+  // ---------- huddle: breakout rooms (host/co-host only) ----------
+  @SubscribeMessage(CLIENT_EVENTS.HUDDLE_BREAKOUT)
+  async onHuddleBreakout(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: ClientHuddleBreakoutPayload,
+  ) {
+    const key = this.huddleGuard(socket, body);
+    if (!key || !this.huddle.isModerator(key, socket.data.userId)) return;
+    if (body.action === 'open') {
+      const count = Math.max(2, Math.min(8, Math.floor(body.count ?? 2)));
+      const rooms: BreakoutRoom[] = Array.from({ length: count }, (_, i) => ({
+        id: randomUUID(),
+        name: `Room ${i + 1}`,
+      }));
+      const assignments: Record<string, string> = {};
+      if (body.autoAssign) {
+        this.huddle.userIds(key).forEach((uid, i) => {
+          assignments[uid] = rooms[i % rooms.length].id;
+        });
+      }
+      this.huddle.openBreakouts(key, rooms, assignments);
+    } else if (body.action === 'assign' && body.targetUserId) {
+      this.huddle.assignBreakout(key, body.targetUserId, body.roomId ?? null);
+    } else if (body.action === 'close') {
+      this.huddle.closeBreakouts(key);
+    } else {
+      return;
+    }
+    await this.broadcastHuddle(key);
+    this.broadcastBreakouts(key);
   }
 
   @SubscribeMessage('presence:heartbeat')

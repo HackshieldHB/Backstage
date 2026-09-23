@@ -144,6 +144,7 @@ model User {
   oncallShifts            OncallShift[]
   calendarLink            CalendarLink?
   recommendationFeedback  RecommendationFeedback[]
+  scheduledHuddles        ScheduledHuddle[]    @relation("ScheduledHuddleCreator")
 }
 
 model ShareLink {
@@ -227,6 +228,7 @@ model Workspace {
   incidents              Incident[]
   oncallShifts           OncallShift[]
   recommendationFeedback RecommendationFeedback[]
+  scheduledHuddles       ScheduledHuddle[]
 }
 
 model CustomEmoji {
@@ -328,6 +330,7 @@ model Channel {
   decisions              Decision[]
   weeklyReports          WeeklyReport[]
   jiraAlertRules         JiraAlertRule[]
+  scheduledHuddles       ScheduledHuddle[]
 
   @@unique([workspaceId, name])
 }
@@ -364,6 +367,7 @@ model Conversation {
   messages          Message[]
   notifications     Notification[]
   scheduledMessages ScheduledMessage[]
+  scheduledHuddles  ScheduledHuddle[]
 
   @@unique([workspaceId, memberKey])
 }
@@ -849,6 +853,33 @@ model HuddleParticipant {
 
   @@index([sessionId])
   @@index([userId])
+}
+
+/// A huddle planned for a future time in a channel or DM. A background queue
+/// fires a "starting now" reminder to every member when `scheduledFor` arrives
+/// (marking `notifiedAt`), then keeps the row briefly for the upcoming list.
+model ScheduledHuddle {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  channelId      String?
+  conversationId String?
+  createdById    String
+  title          String
+  scheduledFor   DateTime
+  durationMins   Int?
+  /// Set once the start reminder has been delivered, so it fires exactly once.
+  notifiedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel      Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdBy    User          @relation("ScheduledHuddleCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([scheduledFor])
+  @@index([workspaceId])
+  @@index([channelId])
+  @@index([conversationId])
 }
 
 /// A user-entered timesheet entry, mirrored locally and pushed to Jira as a

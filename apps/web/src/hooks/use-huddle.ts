@@ -19,13 +19,24 @@ import {
   type HuddleModerationPayload,
   type HuddleCaptionPayload,
   type HuddleRole,
+  type HuddleSettings,
+  type HuddleSettingsPayload,
+  type HuddleWaitingPayload,
+  type HuddleWaitingEntry,
+  type HuddleWhiteboardPayload,
+  type HuddleWhiteboardOp,
+  type HuddleBreakoutPayload,
+  type BreakoutRoom,
 } from '@backstages/shared';
 import { getSocket } from '@/lib/socket';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
+import { BackgroundBlurProcessor, backgroundBlurSupported } from '@/lib/background-blur';
 import type { Container } from '@/hooks/queries';
 
 export type ConnectionState = 'connected' | 'reconnecting' | 'unstable';
+/** My own admission state relative to a waiting-room-gated huddle. */
+export type AdmitStatus = 'pending' | 'waiting' | 'admitted' | 'denied';
 
 /** A remote laser pointer position, with a timestamp so stale pointers fade out. */
 export interface LaserState {
@@ -126,6 +137,20 @@ function buildIceServers(): RTCIceServer[] {
       username: process.env.NEXT_PUBLIC_TURN_USERNAME,
       credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
     });
+  } else {
+    // No private relay configured — fall back to Metered's free public TURN so
+    // huddles still connect through strict/symmetric NATs and firewalls that block
+    // peer-to-peer (STUN-only) media. For production, provision a dedicated relay
+    // and set NEXT_PUBLIC_TURN_URLS / _USERNAME / _CREDENTIAL to override this.
+    servers.push({
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp',
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    });
   }
   return servers;
 }
@@ -193,6 +218,36 @@ export interface HuddleController {
   captions: Record<string, CaptionState>;
   captionsOn: boolean;
   captionsSupported: boolean;
+  // ----- room settings / waiting room -----
+  settings: HuddleSettings;
+  /** My admission status (waiting room). 'admitted' once I'm in the meeting. */
+  admitStatus: AdmitStatus;
+  /** People waiting to be admitted (populated for moderators only). */
+  waitingList: HuddleWaitingEntry[];
+  updateSettings: (patch: Partial<HuddleSettings>) => void;
+  admit: (userId: string, action: 'admit' | 'deny') => void;
+  // ----- whiteboard -----
+  whiteboard: HuddleAnnotationShape[];
+  sendWhiteboardOp: (op: HuddleWhiteboardOp) => void;
+  clearWhiteboard: () => void;
+  // ----- breakout rooms -----
+  breakoutRooms: BreakoutRoom[];
+  breakoutsOpen: boolean;
+  breakoutAssignments: Record<string, string>;
+  /** The breakout room I'm currently in (null = main room). */
+  myBreakoutId: string | null;
+  openBreakouts: (count: number, autoAssign: boolean) => void;
+  assignBreakout: (userId: string, roomId: string | null) => void;
+  closeBreakouts: () => void;
+  // ----- background blur -----
+  blurEnabled: boolean;
+  blurSupported: boolean;
+  toggleBlur: () => Promise<void>;
+  // ----- push-to-talk -----
+  pttEnabled: boolean;
+  /** True while the PTT key is held and the mic is live. */
+  pttActive: boolean;
+  setPttEnabled: (enabled: boolean) => void;
   /** Start (or join) a huddle in the given channel/DM. */
   join: (target: Container) => Promise<void>;
   leave: () => void;
@@ -262,6 +317,28 @@ export function useHuddle(): HuddleController {
   const [captions, setCaptions] = useState<Record<string, CaptionState>>({});
   const [captionsOn, setCaptionsOn] = useState(false);
   const captionsOnRef = useRef(false);
+  // Room settings / waiting room / whiteboard / breakouts
+  const [settings, setSettings] = useState<HuddleSettings>({
+    waitingRoomEnabled: false,
+    locked: false,
+    whiteboardOn: false,
+  });
+  const [admitStatus, setAdmitStatus] = useState<AdmitStatus>('pending');
+  const admitStatusRef = useRef<AdmitStatus>('pending');
+  const [waitingList, setWaitingList] = useState<HuddleWaitingEntry[]>([]);
+  const [whiteboard, setWhiteboard] = useState<HuddleAnnotationShape[]>([]);
+  const [breakoutRooms, setBreakoutRooms] = useState<BreakoutRoom[]>([]);
+  const [breakoutsOpen, setBreakoutsOpen] = useState(false);
+  const [breakoutAssignments, setBreakoutAssignments] = useState<Record<string, string>>({});
+  // Background blur
+  const [blurEnabled, setBlurEnabled] = useState(false);
+  const blurEnabledRef = useRef(false);
+  const blurProcessor = useRef<BackgroundBlurProcessor | null>(null);
+  const rawCamTrack = useRef<MediaStreamTrack | null>(null);
+  // Push-to-talk
+  const [pttEnabled, setPttEnabledState] = useState(false);
+  const pttEnabledRef = useRef(false);
+  const [pttActive, setPttActive] = useState(false);
 
   const cameraTrack = useRef<MediaStreamTrack | null>(null);
   const mutedRef = useRef(false);
@@ -520,7 +597,7 @@ export function useHuddle(): HuddleController {
     // silently fall out of the meeting after a network blip (§21 resilience).
     const onReconnect = () => {
       const target = activeTargetRef.current;
-      if (!joinedRef.current || !target) return;
+      if (!joinedRef.current || !target || admitStatusRef.current === 'denied') return;
       for (const peerId of [...peers.current.keys()]) closePeer(peerId);
       pendingIce.current.clear();
       screenReoffered.current.clear();
@@ -558,6 +635,9 @@ export function useHuddle(): HuddleController {
   useEffect(() => {
     handRaisedRef.current = handRaised;
   }, [handRaised]);
+  useEffect(() => {
+    admitStatusRef.current = admitStatus;
+  }, [admitStatus]);
 
   // Keep the authoritative source map in sync with server state and reclassify any
   // video streams that arrived before their map (or were placed optimistically).
@@ -588,18 +668,27 @@ export function useHuddle(): HuddleController {
   const myRole: HuddleRole = me_?.role ?? 'participant';
   const canAnnotate = me_?.canAnnotate ?? true;
 
+  const myBreakoutId = me_?.breakoutId ?? null;
+
   // Reconcile the mesh whenever the active huddle's participant set changes.
+  // Peers are only connected within the SAME breakout group, so each breakout is
+  // an isolated audio/video space. While waiting to be admitted we build nothing.
   useEffect(() => {
-    if (!joinedRef.current) return;
-    const present = new Set(participants.map((p) => p.userId));
+    if (!joinedRef.current || admitStatus !== 'admitted') return;
+    const sameGroup = (p: HuddleParticipant) => (p.breakoutId ?? null) === myBreakoutId;
     for (const p of participants) {
       if (p.userId === myId) continue;
-      if (!peers.current.has(p.userId) && myId < p.userId) createPeer(p.userId, true);
+      if (sameGroup(p)) {
+        if (!peers.current.has(p.userId) && myId < p.userId) createPeer(p.userId, true);
+      } else if (peers.current.has(p.userId)) {
+        closePeer(p.userId); // moved to another breakout — drop the connection
+      }
     }
     for (const peerId of [...peers.current.keys()]) {
-      if (!present.has(peerId)) closePeer(peerId);
+      const stillHere = participants.some((p) => p.userId === peerId && sameGroup(p));
+      if (!stillHere) closePeer(peerId);
     }
-  }, [participants, myId, createPeer, closePeer]);
+  }, [participants, myId, myBreakoutId, admitStatus, createPeer, closePeer]);
 
   // Screen/camera renegotiation is always driven by the sharer, so peers only
   // ever answer (the existing offer→answer path). Guard against a negotiation
@@ -733,6 +822,19 @@ export function useHuddle(): HuddleController {
     setCaptions({});
     setCaptionsOn(false);
     captionsOnRef.current = false;
+    setAdmitStatus('pending');
+    admitStatusRef.current = 'pending';
+    setWaitingList([]);
+    setWhiteboard([]);
+    setBreakoutRooms([]);
+    setBreakoutsOpen(false);
+    setBreakoutAssignments({});
+    setSettings({ waitingRoomEnabled: false, locked: false, whiteboardOn: false });
+    // Tear down the blur pipeline; the raw device track is stopped with the mesh.
+    blurProcessor.current?.stop();
+    blurProcessor.current = null;
+    rawCamTrack.current = null;
+    setPttActive(false);
   }, [bodyFor, closePeer, stopScreenShare]);
 
   const join = useCallback(
@@ -749,7 +851,12 @@ export function useHuddle(): HuddleController {
         activeTargetRef.current = target;
         setActiveTarget(target);
         setJoined(true);
-        setMuted(false);
+        setAdmitStatus('pending');
+        admitStatusRef.current = 'pending';
+        // Push-to-talk starts muted (hold the key to speak); otherwise live.
+        const startMuted = pttEnabledRef.current;
+        stream.getAudioTracks().forEach((t) => (t.enabled = !startMuted));
+        setMuted(startMuted);
         getSocket().emit(CLIENT_EVENTS.HUDDLE_JOIN, bodyFor(target));
       } catch {
         useUiStore
@@ -803,6 +910,11 @@ export function useHuddle(): HuddleController {
         }
       }
       existing.stop();
+      // Also tear down the blur pipeline and the underlying raw device track.
+      rawCamTrack.current?.stop();
+      rawCamTrack.current = null;
+      blurProcessor.current?.stop();
+      blurProcessor.current = null;
       localStream.current?.removeTrack(existing);
       cameraTrack.current = null;
       setCameraOn(false);
@@ -817,26 +929,84 @@ export function useHuddle(): HuddleController {
       useUiStore.getState().pushToast('Camera unavailable. Check browser permissions.', 'error');
       return;
     }
-    const track = cam.getVideoTracks()[0];
-    cameraTrack.current = track;
-    // Put the camera track into the A/V stream so remote peers can tell it apart
+    const rawTrack = cam.getVideoTracks()[0];
+    rawCamTrack.current = rawTrack;
+    // If background blur is on, run the raw camera through the segmentation
+    // pipeline and send the processed track instead (falls back to raw on error).
+    let sentTrack = rawTrack;
+    if (blurEnabledRef.current) {
+      try {
+        const proc = new BackgroundBlurProcessor();
+        sentTrack = await proc.start(rawTrack);
+        blurProcessor.current = proc;
+      } catch {
+        useUiStore.getState().pushToast('Background blur is unavailable; using your normal camera.', 'error');
+        setBlurEnabled(false);
+        blurEnabledRef.current = false;
+      }
+    }
+    cameraTrack.current = sentTrack;
+    // Put the sent track into the A/V stream so remote peers can tell it apart
     // from the (audio-less) screen share.
-    localStream.current?.addTrack(track);
-    setLocalVideo(new MediaStream([track]));
+    localStream.current?.addTrack(sentTrack);
+    setLocalVideo(new MediaStream([sentTrack]));
     setCameraOn(true);
-    track.addEventListener('ended', () => {
-      // Camera unplugged/revoked mid-call — reflect the off state.
+    // The raw device track is the one that 'ends' on unplug/revoke.
+    rawTrack.addEventListener('ended', () => {
       cameraTrack.current = null;
+      rawCamTrack.current = null;
+      blurProcessor.current?.stop();
+      blurProcessor.current = null;
       setCameraOn(false);
       setLocalVideo(null);
       emit(CLIENT_EVENTS.HUDDLE_STATE, { videoEnabled: false, cameraStreamId: null });
     });
     for (const [peerId, pc] of peers.current) {
-      pc.addTrack(track, localStream.current!);
+      pc.addTrack(sentTrack, localStream.current!);
       await renegotiate(peerId);
     }
     emit(CLIENT_EVENTS.HUDDLE_STATE, { videoEnabled: true, cameraStreamId: localStream.current?.id ?? null });
   }, [renegotiate, emit]);
+
+  /** Toggle background blur. When the camera is live, swap the outgoing track in
+   *  place (replaceTrack keeps the transceiver, so no renegotiation is needed). */
+  const toggleBlur = useCallback(async () => {
+    const next = !blurEnabledRef.current;
+    blurEnabledRef.current = next;
+    setBlurEnabled(next);
+    const raw = rawCamTrack.current;
+    if (!cameraOn || !raw) return; // applies when the camera is next turned on
+    try {
+      let newSent: MediaStreamTrack;
+      if (next) {
+        const proc = new BackgroundBlurProcessor();
+        newSent = await proc.start(raw);
+        blurProcessor.current = proc;
+      } else {
+        blurProcessor.current?.stop();
+        blurProcessor.current = null;
+        newSent = raw;
+      }
+      const old = cameraTrack.current;
+      for (const [, pc] of peers.current) {
+        const sender = pc.getSenders().find((s) => s.track === old);
+        if (sender) await sender.replaceTrack(newSent);
+      }
+      if (old && old !== raw) {
+        localStream.current?.removeTrack(old);
+        old.stop();
+      }
+      if (!localStream.current?.getVideoTracks().includes(newSent)) {
+        localStream.current?.addTrack(newSent);
+      }
+      cameraTrack.current = newSent;
+      setLocalVideo(new MediaStream([newSent]));
+    } catch {
+      useUiStore.getState().pushToast('Background blur is unavailable on this device.', 'error');
+      blurEnabledRef.current = false;
+      setBlurEnabled(false);
+    }
+  }, [cameraOn]);
 
   const toggleHand = useCallback(() => {
     setHandRaised((h) => {
@@ -925,6 +1095,56 @@ export function useHuddle(): HuddleController {
     [emit],
   );
 
+  // ----- room settings / waiting room -----
+  const updateSettings = useCallback(
+    (patch: Partial<HuddleSettings>) => emit(CLIENT_EVENTS.HUDDLE_SETTINGS, patch),
+    [emit],
+  );
+  const admit = useCallback(
+    (userId: string, action: 'admit' | 'deny') =>
+      emit(CLIENT_EVENTS.HUDDLE_ADMIT, { targetUserId: userId, action }),
+    [emit],
+  );
+
+  // ----- whiteboard -----
+  const sendWhiteboardOp = useCallback(
+    (op: HuddleWhiteboardOp) => emit(CLIENT_EVENTS.HUDDLE_WHITEBOARD, { op }),
+    [emit],
+  );
+  const clearWhiteboard = useCallback(
+    () => emit(CLIENT_EVENTS.HUDDLE_WHITEBOARD, { op: { kind: 'clear' } }),
+    [emit],
+  );
+
+  // ----- breakout rooms -----
+  const openBreakouts = useCallback(
+    (count: number, autoAssign: boolean) =>
+      emit(CLIENT_EVENTS.HUDDLE_BREAKOUT, { action: 'open', count, autoAssign }),
+    [emit],
+  );
+  const assignBreakout = useCallback(
+    (userId: string, roomId: string | null) =>
+      emit(CLIENT_EVENTS.HUDDLE_BREAKOUT, { action: 'assign', targetUserId: userId, roomId }),
+    [emit],
+  );
+  const closeBreakouts = useCallback(() => emit(CLIENT_EVENTS.HUDDLE_BREAKOUT, { action: 'close' }), [emit]);
+
+  // ----- push-to-talk -----
+  const setPttEnabled = useCallback(
+    (enabled: boolean) => {
+      pttEnabledRef.current = enabled;
+      setPttEnabledState(enabled);
+      // Entering PTT mode mutes until the key is held; leaving it stays as-is.
+      if (enabled) {
+        localStream.current?.getAudioTracks().forEach((t) => (t.enabled = false));
+        setMuted(true);
+        setPttActive(false);
+        emit(CLIENT_EVENTS.HUDDLE_STATE, { audioEnabled: false });
+      }
+    },
+    [emit],
+  );
+
   // ---- collaboration listeners (chat / reactions / annotation / laser /
   //      control / poll / notes / moderation), all scoped to the active huddle ----
   useEffect(() => {
@@ -965,7 +1185,10 @@ export function useHuddle(): HuddleController {
       if (!forActive(p)) return;
       const op = p.op;
       if (op.kind === 'clear') setAnnotations([]);
-      else if (op.kind === 'create') setAnnotations((s) => [...s, op.shape]);
+      else if (op.kind === 'sync') setAnnotations(op.shapes);
+      else if (op.kind === 'create')
+        // Idempotent: a re-broadcast create must not duplicate the shape.
+        setAnnotations((s) => (s.some((x) => x.id === op.shape.id) ? s.map((x) => (x.id === op.shape.id ? op.shape : x)) : [...s, op.shape]));
       else if (op.kind === 'update')
         setAnnotations((s) => s.map((sh) => (sh.id === op.shape.id ? op.shape : sh)));
       else if (op.kind === 'delete') setAnnotations((s) => s.filter((sh) => sh.id !== op.id));
@@ -996,7 +1219,7 @@ export function useHuddle(): HuddleController {
       } else if (p.action === 'grant') {
         setControl({ controllerId: p.requesterId, presenterId: p.presenterId });
         setControlRequests((s) => s.filter((r) => r.requesterId !== p.requesterId));
-        if (p.requesterId === my) toast('You were granted control of the shared screen (browser-scoped).', 'success');
+        if (p.requesterId === my) toast('You can now draw and point on the shared screen.', 'success');
       } else if (p.action === 'deny') {
         if (p.requesterId === my) toast('Your control request was declined.', 'info');
         setControlRequests((s) => s.filter((r) => r.requesterId !== p.requesterId));
@@ -1056,6 +1279,98 @@ export function useHuddle(): HuddleController {
       socket.off(SOCKET_EVENTS.HUDDLE_CAPTION, onCaption);
     };
   }, [me, emit, leaveInternal]);
+
+  // ---- settings / waiting room / whiteboard / breakout listeners ----
+  useEffect(() => {
+    if (!me) return;
+    const socket = getSocket();
+    const forActive = (p: { channelId?: string; conversationId?: string }) => {
+      const target = activeTargetRef.current;
+      const containerId = p.channelId ?? p.conversationId;
+      return !!target && joinedRef.current && containerId === target.id;
+    };
+
+    const onSettings = (p: HuddleSettingsPayload) => {
+      if (!forActive(p)) return;
+      setSettings({ waitingRoomEnabled: p.waitingRoomEnabled, locked: p.locked, whiteboardOn: p.whiteboardOn });
+    };
+    const onWaiting = (p: HuddleWaitingPayload) => {
+      if (!forActive(p)) return;
+      if (p.status) {
+        // A personal admission update (waiting / admitted / denied).
+        setAdmitStatus(p.status);
+        admitStatusRef.current = p.status;
+        if (p.status === 'denied') {
+          useUiStore.getState().pushToast('The host did not admit you to the huddle.', 'info');
+        }
+      } else {
+        // The moderator's live pending list.
+        setWaitingList(p.waiting);
+      }
+    };
+    const onWhiteboard = (p: HuddleWhiteboardPayload) => {
+      if (!forActive(p)) return;
+      const op = p.op;
+      if (op.kind === 'sync') setWhiteboard(op.shapes);
+      else if (op.kind === 'clear') setWhiteboard([]);
+      else if (op.kind === 'create') setWhiteboard((s) => [...s, op.shape]);
+      else if (op.kind === 'update')
+        setWhiteboard((s) => s.map((sh) => (sh.id === op.shape.id ? op.shape : sh)));
+      else if (op.kind === 'delete') setWhiteboard((s) => s.filter((sh) => sh.id !== op.id));
+    };
+    const onBreakout = (p: HuddleBreakoutPayload) => {
+      if (!forActive(p)) return;
+      setBreakoutsOpen(p.open);
+      setBreakoutRooms(p.rooms);
+      setBreakoutAssignments(p.assignments);
+    };
+
+    socket.on(SOCKET_EVENTS.HUDDLE_SETTINGS, onSettings);
+    socket.on(SOCKET_EVENTS.HUDDLE_WAITING, onWaiting);
+    socket.on(SOCKET_EVENTS.HUDDLE_WHITEBOARD, onWhiteboard);
+    socket.on(SOCKET_EVENTS.HUDDLE_BREAKOUT, onBreakout);
+    return () => {
+      socket.off(SOCKET_EVENTS.HUDDLE_SETTINGS, onSettings);
+      socket.off(SOCKET_EVENTS.HUDDLE_WAITING, onWaiting);
+      socket.off(SOCKET_EVENTS.HUDDLE_WHITEBOARD, onWhiteboard);
+      socket.off(SOCKET_EVENTS.HUDDLE_BREAKOUT, onBreakout);
+    };
+  }, [me]);
+
+  // ---- push-to-talk: hold Space (or the PTT key) to speak while in PTT mode ----
+  useEffect(() => {
+    if (!joined || !pttEnabled) return;
+    const isTyping = () => {
+      const el = document.activeElement as HTMLElement | null;
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    };
+    const talk = (on: boolean) => {
+      localStream.current?.getAudioTracks().forEach((t) => (t.enabled = on));
+      setPttActive(on);
+      setMuted(!on);
+      emit(CLIENT_EVENTS.HUDDLE_STATE, { audioEnabled: on });
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat || isTyping()) return;
+      e.preventDefault();
+      talk(true);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      e.preventDefault();
+      talk(false);
+    };
+    // Releasing focus/blur must also drop the mic so it isn't left hot.
+    const blur = () => talk(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, [joined, pttEnabled, emit]);
 
   // ---- active-speaker detection via WebAudio (throttled, audio-activity based) ----
   // One AudioContext + rAF loop for the life of the huddle; the loop reads from a
@@ -1274,6 +1589,27 @@ export function useHuddle(): HuddleController {
     captions,
     captionsOn,
     captionsSupported,
+    settings,
+    admitStatus,
+    waitingList,
+    updateSettings,
+    admit,
+    whiteboard,
+    sendWhiteboardOp,
+    clearWhiteboard,
+    breakoutRooms,
+    breakoutsOpen,
+    breakoutAssignments,
+    myBreakoutId,
+    openBreakouts,
+    assignBreakout,
+    closeBreakouts,
+    blurEnabled,
+    blurSupported: backgroundBlurSupported(),
+    toggleBlur,
+    pttEnabled,
+    pttActive,
+    setPttEnabled,
     join,
     leave,
     toggleMute,

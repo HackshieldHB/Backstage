@@ -352,3 +352,106 @@ export function PollPanel({ huddle }: { huddle: HuddleController }) {
     </form>
   );
 }
+
+/** Breakout rooms — hosts split the meeting into isolated audio/video groups and
+ *  can reassign or return people; everyone sees which room they are in. */
+export function BreakoutPanel({ huddle, myId }: { huddle: HuddleController; myId: string }) {
+  const isMod = huddle.myRole === 'host' || huddle.myRole === 'cohost';
+  const [count, setCount] = useState(2);
+  const [autoAssign, setAutoAssign] = useState(true);
+
+  const roomName = (id: string | null) =>
+    id ? (huddle.breakoutRooms.find((r) => r.id === id)?.name ?? 'a breakout') : 'Main room';
+
+  if (!huddle.breakoutsOpen) {
+    if (!isMod) return <p className="p-4 text-center text-[13px] text-ink-3">Breakout rooms are closed.</p>;
+    return (
+      <div className="flex h-full flex-col gap-3 p-3">
+        <p className="text-[13px] text-ink-2">
+          Split the meeting into separate rooms. Each room is its own audio/video space; you can move
+          between them and close breakouts to bring everyone back.
+        </p>
+        <label className="flex items-center justify-between text-[13px] text-ink">
+          Number of rooms
+          <select
+            value={count}
+            onChange={(e) => setCount(Number(e.target.value))}
+            className="rounded-lg border border-line-strong bg-elevated px-2 py-1 text-[13px] text-ink"
+          >
+            {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-[13px] text-ink">
+          <input type="checkbox" checked={autoAssign} onChange={(e) => setAutoAssign(e.target.checked)} />
+          Distribute everyone automatically
+        </label>
+        <button
+          onClick={() => huddle.openBreakouts(count, autoAssign)}
+          className="mt-auto rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-white hover:bg-accent-hover"
+        >
+          Open breakout rooms
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="thin-scrollbar flex-1 space-y-3 overflow-y-auto p-3">
+        {/* Main room bucket + each breakout, with the people currently in them. */}
+        {[{ id: null as string | null, name: 'Main room' }, ...huddle.breakoutRooms].map((room) => {
+          const members = huddle.participants.filter(
+            (p) => (huddle.breakoutAssignments[p.userId] ?? null) === room.id,
+          );
+          return (
+            <div key={room.id ?? 'main'} className="rounded-lg border border-line">
+              <div className="border-b border-line px-3 py-1.5 text-[12px] font-semibold text-ink-2">
+                {room.name} · {members.length}
+              </div>
+              <div className="divide-y divide-line">
+                {members.map((p) => (
+                  <div key={p.userId} className="flex items-center gap-2 px-3 py-1.5">
+                    <Avatar user={{ id: p.userId, displayName: p.displayName, avatarUrl: p.avatarUrl }} size="xs" />
+                    <span className="flex-1 truncate text-[13px] text-ink">
+                      {p.displayName}
+                      {p.userId === myId && ' (you)'}
+                    </span>
+                    {isMod && (
+                      <select
+                        value={room.id ?? 'main'}
+                        onChange={(e) =>
+                          huddle.assignBreakout(p.userId, e.target.value === 'main' ? null : e.target.value)
+                        }
+                        aria-label={`Move ${p.displayName}`}
+                        className="rounded border border-line-strong bg-elevated px-1.5 py-0.5 text-[11px] text-ink"
+                      >
+                        <option value="main">Main</option>
+                        {huddle.breakoutRooms.map((r) => (
+                          <option key={r.id} value={r.id}>{r.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                ))}
+                {members.length === 0 && <p className="px-3 py-1.5 text-[12px] text-ink-3">Empty</p>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="border-t border-line p-2 text-[12px] text-ink-3">
+        You are in <span className="font-semibold text-ink-2">{roomName(huddle.myBreakoutId)}</span>.
+      </div>
+      {isMod && (
+        <button
+          onClick={huddle.closeBreakouts}
+          className="m-2 rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 hover:bg-hovered"
+        >
+          Close breakout rooms
+        </button>
+      )}
+    </div>
+  );
+}

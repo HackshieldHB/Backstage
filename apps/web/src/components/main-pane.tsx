@@ -1,6 +1,6 @@
 'use client';
 
-import { Hash, Headphones, Info, Lightbulb, Lock, Menu, NotebookPen, Pin, Sparkles, Users } from 'lucide-react';
+import { CalendarClock, Hash, Headphones, Info, Lightbulb, Lock, Menu, NotebookPen, Pin, Sparkles, Users } from 'lucide-react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -13,6 +13,7 @@ import { Composer, TypingIndicator } from './composer';
 import { CheatSheetDialog } from './cheat-sheet-dialog';
 import { Tooltip } from './tooltip';
 import { Dialog } from './dialog';
+import { ScheduleHuddleDialog, UpcomingHuddles } from './schedule-huddle';
 
 export function MainPane({
   workspaceId,
@@ -32,6 +33,7 @@ export function MainPane({
   const pushToast = useUiStore((s) => s.pushToast);
   const ai = useAiStatus();
   const [tipsOpen, setTipsOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const [summarizing, setSummarizing] = useState(false);
   const pins = usePins(container.kind === 'channel' ? container.id : null);
@@ -101,6 +103,16 @@ export function MainPane({
               </button>
             </Tooltip>
           ))}
+        <Tooltip label="Schedule a huddle for later">
+          <button
+            onClick={() => setScheduleOpen(true)}
+            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            data-testid="schedule-huddle"
+            aria-label="Schedule a huddle"
+          >
+            <CalendarClock size={16} />
+          </button>
+        </Tooltip>
         {container.kind === 'channel' && (
           <>
             {(pins.data?.length ?? 0) > 0 && (
@@ -190,6 +202,12 @@ export function MainPane({
       {tipsOpen && (
         <CheatSheetDialog workspaceId={workspaceId} onClose={() => setTipsOpen(false)} />
       )}
+
+      {scheduleOpen && (
+        <ScheduleHuddleDialog container={container} onClose={() => setScheduleOpen(false)} />
+      )}
+
+      <UpcomingHuddles container={container} huddle={huddle} />
 
       {(summary !== null || summarizing) && (
         <Dialog title="Channel summary" onClose={() => setSummary(null)}>

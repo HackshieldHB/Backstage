@@ -8,7 +8,7 @@ import type {
 } from '@backstages/shared';
 import type { LaserState } from '@/hooks/use-huddle';
 
-export type AnnotationToolId = HuddleAnnotationTool | 'laser' | 'eraser';
+export type AnnotationToolId = HuddleAnnotationTool | 'laser' | 'eraser' | 'cursor';
 
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -104,7 +104,9 @@ export function AnnotationLayer({
     };
   }, []);
 
-  const interactive = tool === 'laser' ? true : canDraw && tool !== undefined;
+  // 'cursor' is a plain pointer: the overlay ignores pointer events entirely so the
+  // mouse keeps its normal shape and clicks reach the video (fullscreen, controls).
+  const interactive = tool === 'cursor' ? false : tool === 'laser' ? true : canDraw && tool !== undefined;
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!interactive) return;

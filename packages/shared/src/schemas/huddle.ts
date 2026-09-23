@@ -27,3 +27,31 @@ export const HuddleSaveNotesSchema = z.object({
   notes: z.string().min(1).max(20000),
 });
 export type HuddleSaveNotesInput = z.infer<typeof HuddleSaveNotesSchema>;
+
+// ---------------------------------------------------------------------------
+// Scheduled huddles (DB-backed, queue-delivered reminders)
+// ---------------------------------------------------------------------------
+
+/** Create a scheduled huddle in a channel or DM. The target is taken from the
+ *  route (channel/conversation id), so only the title/time/duration are posted. */
+export const ScheduleHuddleSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  /** ISO 8601 timestamp; must be in the future. */
+  scheduledFor: z.string().datetime(),
+  /** Planned length in minutes (informational). */
+  durationMins: z.number().int().min(5).max(600).optional(),
+});
+export type ScheduleHuddleInput = z.infer<typeof ScheduleHuddleSchema>;
+
+export interface ScheduledHuddleDto {
+  id: string;
+  channelId: string | null;
+  conversationId: string | null;
+  title: string;
+  scheduledFor: string;
+  durationMins: number | null;
+  createdById: string;
+  createdByName: string;
+  /** True once the "starting now" reminder has fired. */
+  notified: boolean;
+}

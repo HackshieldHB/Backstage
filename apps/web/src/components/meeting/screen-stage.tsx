@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Circle,
+  Crosshair,
   Eraser,
   Maximize2,
   MinusCircle,
@@ -25,7 +26,8 @@ import { AnnotationLayer, type AnnotationToolId } from './annotation-layer';
 const COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ffffff'];
 
 const TOOLS: { id: AnnotationToolId; icon: typeof Pencil; label: string; draw?: boolean }[] = [
-  { id: 'laser', icon: MousePointer2, label: 'Laser pointer' },
+  { id: 'cursor', icon: MousePointer2, label: 'Cursor (normal pointer)' },
+  { id: 'laser', icon: Crosshair, label: 'Laser pointer' },
   { id: 'pen', icon: Pencil, label: 'Pen', draw: true },
   { id: 'highlighter', icon: Highlighter, label: 'Highlighter', draw: true },
   { id: 'arrow', icon: ArrowUpRight, label: 'Arrow', draw: true },
@@ -35,6 +37,13 @@ const TOOLS: { id: AnnotationToolId; icon: typeof Pencil; label: string; draw?: 
   { id: 'text', icon: TypeIcon, label: 'Text', draw: true },
   { id: 'eraser', icon: Eraser, label: 'Eraser', draw: true },
 ];
+
+interface Box {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
 
 export function ScreenStage({
   stream,
@@ -62,7 +71,7 @@ export function ScreenStage({
   canAnnotate: boolean;
   isModerator: boolean;
   myId: string;
-  /** e.g. "Kevin" when someone has browser-control; null otherwise. */
+  /** e.g. "Kevin" when someone has pointer-control; null otherwise. */
   controlLabel: string | null;
   onOp: (op: HuddleAnnotationOp) => void;
   onLaser: (p: { x: number; y: number } | null) => void;
@@ -70,9 +79,16 @@ export function ScreenStage({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [tool, setTool] = useState<AnnotationToolId>('laser');
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [tool, setTool] = useState<AnnotationToolId>('cursor');
   const [color, setColor] = useState(COLORS[0]);
   const [zoom, setZoom] = useState(1);
+  // Aspect ratio of the shared video, and the exact rectangle it occupies inside
+  // the (object-contain) container. The annotation overlay is positioned on THIS
+  // rectangle so drawings line up with the video content across every viewer,
+  // regardless of differing window sizes / letterboxing.
+  const [aspect, setAspect] = useState<number | null>(null);
+  const [box, setBox] = useState<Box | null>(null);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -84,6 +100,40 @@ export function ScreenStage({
       el.srcObject = null;
     }
   }, [stream]);
+
+  const recomputeBox = useCallback(() => {
+    const el = contentRef.current;
+    if (!el || !aspect) return;
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    if (!cw || !ch) return;
+    const containerAspect = cw / ch;
+    let w: number;
+    let h: number;
+    if (containerAspect > aspect) {
+      h = ch;
+      w = ch * aspect;
+    } else {
+      w = cw;
+      h = cw / aspect;
+    }
+    setBox({ left: (cw - w) / 2, top: (ch - h) / 2, width: w, height: h });
+  }, [aspect]);
+
+  // Recompute the video rectangle whenever the container resizes or aspect changes.
+  useEffect(() => {
+    recomputeBox();
+    const el = contentRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => recomputeBox());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [recomputeBox]);
+
+  const onMeta = () => {
+    const v = videoRef.current;
+    if (v && v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
+  };
 
   const fullscreen = () => {
     const el = wrapRef.current;
@@ -104,23 +154,37 @@ export function ScreenStage({
   return (
     <div ref={wrapRef} className="group relative flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-black">
       <div
-        className="relative flex h-full w-full items-center justify-center"
+        ref={contentRef}
+        className="relative h-full w-full"
         style={{ transform: `scale(${zoom})`, transition: 'transform 120ms' }}
       >
-        <video ref={videoRef} autoPlay playsInline muted={selfPreview} className="h-full w-full object-contain" />
-        {/* Annotation + laser overlay sits exactly over the video box. */}
-        <div className="absolute inset-0">
-          <AnnotationLayer
-            annotations={annotations}
-            lasers={lasers}
-            tool={tool}
-            color={color}
-            canDraw={canAnnotate}
-            myId={myId}
-            onOp={onOp}
-            onLaser={onLaser}
-          />
-        </div>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={selfPreview}
+          onLoadedMetadata={onMeta}
+          onResize={onMeta}
+          className="h-full w-full object-contain"
+        />
+        {/* Annotation + laser overlay sits exactly over the rendered video box. */}
+        {box && (
+          <div
+            className="absolute"
+            style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+          >
+            <AnnotationLayer
+              annotations={annotations}
+              lasers={lasers}
+              tool={tool}
+              color={color}
+              canDraw={canAnnotate}
+              myId={myId}
+              onOp={onOp}
+              onLaser={onLaser}
+            />
+          </div>
+        )}
       </div>
 
       {/* Sharing label */}
@@ -129,10 +193,10 @@ export function ScreenStage({
         {label}
       </div>
 
-      {/* Remote-control indicator (§26 — browser-scoped, never hidden) */}
+      {/* Pointer-control indicator (browser-scoped: annotate/point, never OS control) */}
       {controlLabel && (
         <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-md bg-red-600/90 px-2 py-1 text-[12px] font-semibold text-white">
-          <span className="h-2 w-2 rounded-full bg-white" /> Control: {controlLabel}
+          <span className="h-2 w-2 rounded-full bg-white" /> Pointer: {controlLabel}
         </div>
       )}
 

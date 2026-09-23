@@ -44,6 +44,7 @@ import { EnvelopeInterceptor } from './common/envelope.interceptor';
 import { GlobalExceptionFilter } from './common/http-exception.filter';
 import { ObservabilityModule } from './observability/observability.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
+import { ScheduledHuddlesModule } from './scheduled-huddles/scheduled-huddles.module';
 import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
@@ -90,6 +91,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     IncidentsModule,
     CalendarModule,
     RecommendationsModule,
+    ScheduledHuddlesModule,
   ],
   controllers: [HealthController],
   providers: [

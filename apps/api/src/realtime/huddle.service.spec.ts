@@ -235,4 +235,98 @@ describe('HuddleService', () => {
       expect(svc.userIds(A)).toEqual([]);
     });
   });
+
+  describe('room settings', () => {
+    it('defaults every setting to off and merges partial patches', () => {
+      expect(svc.getSettings(A)).toEqual({ waitingRoomEnabled: false, locked: false, whiteboardOn: false });
+      svc.setSettings(A, { waitingRoomEnabled: true });
+      svc.setSettings(A, { whiteboardOn: true });
+      expect(svc.getSettings(A)).toEqual({ waitingRoomEnabled: true, locked: false, whiteboardOn: true });
+    });
+  });
+
+  describe('waiting room', () => {
+    it('tracks waiters per socket and reports the pending list', () => {
+      expect(svc.addWaiting(A, 'u2', 's2')).toBe(true); // new
+      expect(svc.addWaiting(A, 'u2', 's2b')).toBe(false); // same user, another tab
+      expect(svc.isWaiting(A, 'u2')).toBe(true);
+      expect(svc.waitingUserIds(A)).toEqual(['u2']);
+    });
+
+    it('removeWaiting returns every held socket and clears the entry', () => {
+      svc.addWaiting(A, 'u2', 's2');
+      svc.addWaiting(A, 'u2', 's2b');
+      expect(svc.removeWaiting(A, 'u2').sort()).toEqual(['s2', 's2b'].sort());
+      expect(svc.isWaiting(A, 'u2')).toBe(false);
+      expect(svc.removeWaiting(A, 'unknown')).toEqual([]);
+    });
+
+    it('removeWaitingSocket drops one socket from every room it waited in', () => {
+      svc.addWaiting(A, 'u2', 's2');
+      svc.addWaiting(B, 'u2', 's2');
+      expect(svc.removeWaitingSocket('u2', 's2').sort()).toEqual([A, B].sort());
+      expect(svc.isWaiting(A, 'u2')).toBe(false);
+      expect(svc.isWaiting(B, 'u2')).toBe(false);
+    });
+  });
+
+  describe('whiteboard', () => {
+    it('stores shapes in order, enforces ownership tracking, and replays via shapes()', () => {
+      const shape = (id: string, userId: string) => ({
+        id,
+        userId,
+        tool: 'pen' as const,
+        color: '#fff',
+        points: [{ x: 0, y: 0 }],
+        createdAt: 1,
+      });
+      svc.whiteboardCreate(A, shape('s1', 'u1'), 'u1');
+      svc.whiteboardCreate(A, shape('s2', 'u2'), 'u2');
+      expect(svc.whiteboardShapes(A).map((s) => s.id)).toEqual(['s1', 's2']);
+      expect(svc.whiteboardOwner(A, 's1')).toBe('u1');
+      svc.whiteboardUpdate(A, { ...shape('s1', 'u1'), color: '#000' });
+      expect(svc.whiteboardShapes(A).find((s) => s.id === 's1')!.color).toBe('#000');
+      svc.whiteboardDelete(A, 's1');
+      expect(svc.whiteboardOwner(A, 's1')).toBeUndefined();
+      svc.whiteboardClear(A);
+      expect(svc.whiteboardShapes(A)).toEqual([]);
+    });
+  });
+
+  describe('breakout rooms', () => {
+    const rooms = [
+      { id: 'r1', name: 'Room 1' },
+      { id: 'r2', name: 'Room 2' },
+    ];
+
+    it('opens with filtered assignments and reports per-user breakout', () => {
+      svc.openBreakouts(A, rooms, { u1: 'r1', u2: 'r2', ghost: 'bad-room' });
+      const b = svc.getBreakouts(A);
+      expect(b.open).toBe(true);
+      expect(b.assignments).toEqual({ u1: 'r1', u2: 'r2' }); // invalid room dropped
+      expect(svc.breakoutOf(A, 'u1')).toBe('r1');
+      expect(svc.breakoutOf(A, 'nobody')).toBeNull();
+    });
+
+    it('reassigns and returns a user to the main room with null', () => {
+      svc.openBreakouts(A, rooms, {});
+      svc.assignBreakout(A, 'u1', 'r2');
+      expect(svc.breakoutOf(A, 'u1')).toBe('r2');
+      svc.assignBreakout(A, 'u1', 'unknown'); // ignored
+      expect(svc.breakoutOf(A, 'u1')).toBe('r2');
+      svc.assignBreakout(A, 'u1', null);
+      expect(svc.breakoutOf(A, 'u1')).toBeNull();
+    });
+
+    it('closing clears breakouts and a leaving member drops their assignment', () => {
+      svc.join(A, 'u1', 's1');
+      svc.openBreakouts(A, rooms, { u1: 'r1' });
+      svc.leave(A, 'u1', 's1'); // cleanupMember drops assignment (and empties the room)
+      expect(svc.getBreakouts(A).open).toBe(false);
+      svc.join(A, 'u1', 's1');
+      svc.openBreakouts(A, rooms, { u1: 'r1' });
+      svc.closeBreakouts(A);
+      expect(svc.getBreakouts(A)).toEqual({ open: false, rooms: [], assignments: {} });
+    });
+  });
 });

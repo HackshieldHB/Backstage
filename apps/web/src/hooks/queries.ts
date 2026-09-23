@@ -59,6 +59,8 @@ import type {
   FollowupsDto,
   RecommendationFeedbackInput,
   HuddleRecapDto,
+  ScheduledHuddleDto,
+  ScheduleHuddleInput,
 } from '@backstages/shared';
 import { api } from '@/lib/api';
 
@@ -480,6 +482,35 @@ export function useScheduledMessages(workspaceId: string, enabled = true) {
     queryFn: () =>
       api<ScheduledMessageDto[]>('GET', `/workspaces/${workspaceId}/scheduled`),
     enabled: enabled && !!workspaceId,
+  });
+}
+
+// ---------- scheduled huddles ----------
+
+export function useScheduledHuddles(container: Container | null) {
+  return useQuery({
+    queryKey: ['scheduled-huddles', container?.id ?? 'none'],
+    queryFn: () => api<ScheduledHuddleDto[]>('GET', `${containerPath(container!)}/scheduled-huddles`),
+    enabled: !!container,
+    // Reminders fire server-side; refresh occasionally so start times stay fresh.
+    refetchInterval: 60000,
+  });
+}
+
+export function useScheduleHuddle(container: Container) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ScheduleHuddleInput) =>
+      api<ScheduledHuddleDto>('POST', `${containerPath(container)}/scheduled-huddles`, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['scheduled-huddles', container.id] }),
+  });
+}
+
+export function useCancelScheduledHuddle(container: Container) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<{ ok: boolean }>('DELETE', `/scheduled-huddles/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['scheduled-huddles', container.id] }),
   });
 }
 

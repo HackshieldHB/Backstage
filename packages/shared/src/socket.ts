@@ -43,6 +43,14 @@ export const SOCKET_EVENTS = {
   HUDDLE_MODERATION: 'huddle:moderation',
   /** A live caption (speech-to-text) line from a participant (ephemeral). */
   HUDDLE_CAPTION: 'huddle:caption',
+  /** Room-level meeting settings changed (waiting room / lock / whiteboard). */
+  HUDDLE_SETTINGS: 'huddle:settings',
+  /** Waiting-room state: to hosts the pending list, to a joiner their own status. */
+  HUDDLE_WAITING: 'huddle:waiting',
+  /** A collaborative op on the standalone shared whiteboard (incl. late-join sync). */
+  HUDDLE_WHITEBOARD: 'huddle:whiteboard',
+  /** Breakout-room configuration + per-participant assignments. */
+  HUDDLE_BREAKOUT: 'huddle:breakout',
 } as const;
 
 export type SocketEventName = (typeof SOCKET_EVENTS)[keyof typeof SOCKET_EVENTS];
@@ -137,6 +145,10 @@ export interface HuddleParticipant {
    *  instead of guessing from audio-track presence. Null when that source is off. */
   cameraStreamId?: string | null;
   screenStreamId?: string | null;
+  /** Breakout room this participant is currently assigned to (null/undefined =
+   *  the main room). The mesh only connects peers that share a breakout id, so
+   *  each breakout is an isolated audio/video space. */
+  breakoutId?: string | null;
 }
 
 /** Client→server: the caller's own media/hand state changed. */
@@ -216,7 +228,9 @@ export type HuddleAnnotationOp =
   | { kind: 'create'; shape: HuddleAnnotationShape }
   | { kind: 'update'; shape: HuddleAnnotationShape }
   | { kind: 'delete'; id: string }
-  | { kind: 'clear' };
+  | { kind: 'clear' }
+  /** Server→client only: replay the full annotation set to a late joiner. */
+  | { kind: 'sync'; shapes: HuddleAnnotationShape[] };
 
 export interface HuddleAnnotationPayload {
   channelId?: string;
@@ -376,6 +390,14 @@ export const CLIENT_EVENTS = {
   HUDDLE_NOTES: 'huddle:notes',
   HUDDLE_MODERATION: 'huddle:moderation',
   HUDDLE_CAPTION: 'huddle:caption',
+  /** Host toggles room settings (waiting room / lock / whiteboard). */
+  HUDDLE_SETTINGS: 'huddle:settings',
+  /** Host admits or denies a waiting participant. */
+  HUDDLE_ADMIT: 'huddle:admit',
+  /** A collaborative op on the shared whiteboard. */
+  HUDDLE_WHITEBOARD: 'huddle:whiteboard',
+  /** Host opens/assigns/closes breakout rooms. */
+  HUDDLE_BREAKOUT: 'huddle:breakout',
 } as const;
 
 export interface ClientTypingPayload {
@@ -393,4 +415,110 @@ export interface ClientHuddleSignalPayload {
   conversationId?: string;
   toUserId: string;
   data: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Waiting room, meeting settings, whiteboard and breakout rooms
+// ---------------------------------------------------------------------------
+
+/** Room-level meeting settings, controlled by a moderator. */
+export interface HuddleSettings {
+  /** When true, non-moderator joiners land in the waiting room until admitted. */
+  waitingRoomEnabled: boolean;
+  /** When true, no new participant may join (existing ones stay). */
+  locked: boolean;
+  /** When true, the shared whiteboard surface is available in the meeting. */
+  whiteboardOn: boolean;
+}
+
+export interface HuddleSettingsPayload extends HuddleSettings {
+  channelId?: string;
+  conversationId?: string;
+}
+
+/** Client→server: a moderator changes one or more room settings (partial patch). */
+export interface ClientHuddleSettingsPayload {
+  channelId?: string;
+  conversationId?: string;
+  waitingRoomEnabled?: boolean;
+  locked?: boolean;
+  whiteboardOn?: boolean;
+}
+
+/** One participant waiting to be admitted. */
+export interface HuddleWaitingEntry {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+/** Server→client. To moderators: the current `waiting` list. To a specific
+ *  joiner: their own `status` (whether they are held, admitted or denied). */
+export interface HuddleWaitingPayload {
+  channelId?: string;
+  conversationId?: string;
+  waiting: HuddleWaitingEntry[];
+  /** Present only on the personal notification to the joiner it concerns. */
+  status?: 'waiting' | 'admitted' | 'denied';
+}
+
+/** Client→server: a moderator admits or denies a waiting participant. */
+export interface ClientHuddleAdmitPayload {
+  channelId?: string;
+  conversationId?: string;
+  targetUserId: string;
+  action: 'admit' | 'deny';
+}
+
+/** Whiteboard shapes reuse the annotation shape/tool model but live on a blank
+ *  collaborative surface. `sync` replays the full board to a late joiner. */
+export type HuddleWhiteboardOp =
+  | { kind: 'create'; shape: HuddleAnnotationShape }
+  | { kind: 'update'; shape: HuddleAnnotationShape }
+  | { kind: 'delete'; id: string }
+  | { kind: 'clear' }
+  | { kind: 'sync'; shapes: HuddleAnnotationShape[] };
+
+export interface HuddleWhiteboardPayload {
+  channelId?: string;
+  conversationId?: string;
+  userId: string;
+  op: HuddleWhiteboardOp;
+}
+export interface ClientHuddleWhiteboardPayload {
+  channelId?: string;
+  conversationId?: string;
+  op: HuddleWhiteboardOp;
+}
+
+/** A single breakout room. */
+export interface BreakoutRoom {
+  id: string;
+  name: string;
+}
+
+/** Server→client: the full breakout configuration for the huddle. */
+export interface HuddleBreakoutPayload {
+  channelId?: string;
+  conversationId?: string;
+  /** Whether breakouts are currently open. */
+  open: boolean;
+  rooms: BreakoutRoom[];
+  /** userId → roomId. A user not present here is in the main room. */
+  assignments: Record<string, string>;
+}
+
+/** Client→server: a moderator manages breakout rooms. */
+export interface ClientHuddleBreakoutPayload {
+  channelId?: string;
+  conversationId?: string;
+  action: 'open' | 'assign' | 'close';
+  /** open: how many rooms to create (2–8). */
+  count?: number;
+  /** open: distribute the present participants across the new rooms. */
+  autoAssign?: boolean;
+  /** assign: who to move. */
+  targetUserId?: string;
+  /** assign: destination room id, or null for the main room. */
+  roomId?: string | null;
 }

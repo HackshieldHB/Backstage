@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { HuddleRole } from '@backstages/shared';
+import type { BreakoutRoom, HuddleAnnotationShape, HuddleRole, HuddleSettings } from '@backstages/shared';
 
 /** Authoritative per-participant meeting state (server is the source of truth for
  *  moderation and UI). Media flags are advisory (the client owns its tracks) but
@@ -30,6 +30,16 @@ export interface HuddlePoll {
 interface ControlSession {
   controllerId: string;
   presenterId: string;
+}
+
+interface BreakoutState {
+  rooms: BreakoutRoom[];
+  /** userId → roomId. Absent = the main room. */
+  assignments: Map<string, string>;
+}
+
+function defaultSettings(): HuddleSettings {
+  return { waitingRoomEnabled: false, locked: false, whiteboardOn: false };
 }
 
 function defaultState(role: HuddleRole): HuddleMemberState {
@@ -74,8 +84,21 @@ export class HuddleService {
   /** key -> (annotation shape id -> owner userId), so only the author (or a
    *  moderator) can edit/delete a given annotation. */
   private readonly annotationOwners = new Map<string, Map<string, string>>();
+  /** key -> ordered screen-annotation shapes, so late joiners can be synced and
+   *  the presenter always sees what others draw on their shared screen. */
+  private readonly annotations = new Map<string, Map<string, HuddleAnnotationShape>>();
   /** key -> active remote-control session (permission only; see gateway). */
   private readonly control = new Map<string, ControlSession>();
+  /** key -> room-level meeting settings (waiting room / lock / whiteboard). */
+  private readonly settings = new Map<string, HuddleSettings>();
+  /** key -> (waiting userId -> their socket ids), for the waiting room. */
+  private readonly waiting = new Map<string, Map<string, Set<string>>>();
+  /** key -> ordered whiteboard shapes (insertion order preserved by Map). */
+  private readonly whiteboard = new Map<string, Map<string, HuddleAnnotationShape>>();
+  /** key -> (whiteboard shape id -> owner userId). */
+  private readonly whiteboardOwners = new Map<string, Map<string, string>>();
+  /** key -> breakout configuration (rooms + per-user assignments). */
+  private readonly breakouts = new Map<string, BreakoutState>();
 
   join(key: string, userId: string, socketId: string): void {
     let room = this.rooms.get(key);
@@ -148,6 +171,8 @@ export class HuddleService {
     if (session && (session.controllerId === userId || session.presenterId === userId)) {
       this.control.delete(key);
     }
+    // A leaving member relinquishes any breakout assignment they held.
+    this.breakouts.get(key)?.assignments.delete(userId);
   }
 
   private cleanupRoom(key: string): void {
@@ -158,6 +183,12 @@ export class HuddleService {
     this.notes.delete(key);
     this.control.delete(key);
     this.annotationOwners.delete(key);
+    this.annotations.delete(key);
+    this.settings.delete(key);
+    this.waiting.delete(key);
+    this.whiteboard.delete(key);
+    this.whiteboardOwners.delete(key);
+    this.breakouts.delete(key);
   }
 
   userIds(key: string): string[] {
@@ -255,9 +286,24 @@ export class HuddleService {
   }
   deleteAnnotation(key: string, shapeId: string): void {
     this.annotationOwners.get(key)?.delete(shapeId);
+    this.annotations.get(key)?.delete(shapeId);
   }
   clearAnnotationOwners(key: string): void {
     this.annotationOwners.delete(key);
+    this.annotations.delete(key);
+  }
+
+  // ----- annotation shape store (for late-join sync) -----
+  annotationShapes(key: string): HuddleAnnotationShape[] {
+    return [...(this.annotations.get(key)?.values() ?? [])];
+  }
+  putAnnotation(key: string, shape: HuddleAnnotationShape): void {
+    let shapes = this.annotations.get(key);
+    if (!shapes) {
+      shapes = new Map();
+      this.annotations.set(key, shapes);
+    }
+    shapes.set(shape.id, shape);
   }
 
   // ----- polls -----
@@ -295,5 +341,127 @@ export class HuddleService {
   }
   revokeControl(key: string): void {
     this.control.delete(key);
+  }
+
+  // ----- room settings (waiting room / lock / whiteboard) -----
+  getSettings(key: string): HuddleSettings {
+    return this.settings.get(key) ?? defaultSettings();
+  }
+  setSettings(key: string, patch: Partial<HuddleSettings>): HuddleSettings {
+    const current = this.settings.get(key) ?? defaultSettings();
+    const next: HuddleSettings = {
+      waitingRoomEnabled: patch.waitingRoomEnabled ?? current.waitingRoomEnabled,
+      locked: patch.locked ?? current.locked,
+      whiteboardOn: patch.whiteboardOn ?? current.whiteboardOn,
+    };
+    this.settings.set(key, next);
+    return next;
+  }
+
+  // ----- waiting room -----
+  /** Hold a socket in the waiting room. Returns true if this is a new waiter. */
+  addWaiting(key: string, userId: string, socketId: string): boolean {
+    let room = this.waiting.get(key);
+    if (!room) {
+      room = new Map();
+      this.waiting.set(key, room);
+    }
+    const isNew = !room.has(userId);
+    let sockets = room.get(userId);
+    if (!sockets) {
+      sockets = new Set();
+      room.set(userId, sockets);
+    }
+    sockets.add(socketId);
+    return isNew;
+  }
+  isWaiting(key: string, userId: string): boolean {
+    return this.waiting.get(key)?.has(userId) ?? false;
+  }
+  waitingUserIds(key: string): string[] {
+    return [...(this.waiting.get(key)?.keys() ?? [])];
+  }
+  /** Remove a user from the waiting room, returning the socket ids they held. */
+  removeWaiting(key: string, userId: string): string[] {
+    const room = this.waiting.get(key);
+    const sockets = room?.get(userId);
+    if (!room || !sockets) return [];
+    room.delete(userId);
+    if (room.size === 0) this.waiting.delete(key);
+    return [...sockets];
+  }
+  /** Drop a socket from every waiting room it was in; returns keys that changed. */
+  removeWaitingSocket(userId: string, socketId: string): string[] {
+    const affected: string[] = [];
+    for (const [key, room] of this.waiting) {
+      const sockets = room.get(userId);
+      if (sockets?.delete(socketId)) {
+        affected.push(key);
+        if (sockets.size === 0) room.delete(userId);
+        if (room.size === 0) this.waiting.delete(key);
+      }
+    }
+    return affected;
+  }
+
+  // ----- whiteboard (standalone shared surface) -----
+  whiteboardShapes(key: string): HuddleAnnotationShape[] {
+    return [...(this.whiteboard.get(key)?.values() ?? [])];
+  }
+  whiteboardCreate(key: string, shape: HuddleAnnotationShape, userId: string): void {
+    let shapes = this.whiteboard.get(key);
+    if (!shapes) {
+      shapes = new Map();
+      this.whiteboard.set(key, shapes);
+    }
+    shapes.set(shape.id, shape);
+    let owners = this.whiteboardOwners.get(key);
+    if (!owners) {
+      owners = new Map();
+      this.whiteboardOwners.set(key, owners);
+    }
+    owners.set(shape.id, userId);
+  }
+  whiteboardUpdate(key: string, shape: HuddleAnnotationShape): void {
+    const shapes = this.whiteboard.get(key);
+    if (shapes?.has(shape.id)) shapes.set(shape.id, shape);
+  }
+  whiteboardDelete(key: string, id: string): void {
+    this.whiteboard.get(key)?.delete(id);
+    this.whiteboardOwners.get(key)?.delete(id);
+  }
+  whiteboardClear(key: string): void {
+    this.whiteboard.delete(key);
+    this.whiteboardOwners.delete(key);
+  }
+  whiteboardOwner(key: string, id: string): string | undefined {
+    return this.whiteboardOwners.get(key)?.get(id);
+  }
+
+  // ----- breakout rooms -----
+  getBreakouts(key: string): { open: boolean; rooms: BreakoutRoom[]; assignments: Record<string, string> } {
+    const b = this.breakouts.get(key);
+    if (!b) return { open: false, rooms: [], assignments: {} };
+    return { open: true, rooms: b.rooms, assignments: Object.fromEntries(b.assignments) };
+  }
+  openBreakouts(key: string, rooms: BreakoutRoom[], assignments: Record<string, string>): void {
+    const valid = new Set(rooms.map((r) => r.id));
+    const map = new Map<string, string>();
+    for (const [userId, roomId] of Object.entries(assignments)) {
+      if (valid.has(roomId)) map.set(userId, roomId);
+    }
+    this.breakouts.set(key, { rooms, assignments: map });
+  }
+  assignBreakout(key: string, userId: string, roomId: string | null): void {
+    const b = this.breakouts.get(key);
+    if (!b) return;
+    if (roomId === null) b.assignments.delete(userId);
+    else if (b.rooms.some((r) => r.id === roomId)) b.assignments.set(userId, roomId);
+  }
+  closeBreakouts(key: string): void {
+    this.breakouts.delete(key);
+  }
+  breakoutOf(key: string, userId: string): string | null {
+    return this.breakouts.get(key)?.assignments.get(userId) ?? null;
   }
 }
