@@ -320,6 +320,23 @@ export function useMembers(workspaceId: string) {
   });
 }
 
+export function useUpdateMemberRole(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: 'ADMIN' | 'MEMBER' | 'GUEST' }) =>
+      api<WorkspaceMemberDto>('PATCH', `/workspaces/${workspaceId}/members/${userId}`, { role }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.members(workspaceId) }),
+  });
+}
+
+export function useRemoveMember(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => api<{ ok: boolean }>('DELETE', `/workspaces/${workspaceId}/members/${userId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.members(workspaceId) }),
+  });
+}
+
 export function useUnreads(workspaceId: string) {
   return useQuery({
     queryKey: keys.unreads(workspaceId),
