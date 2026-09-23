@@ -55,7 +55,7 @@ function loadMediaPipe(): Promise<SelfieSegmentationCtor> {
   return scriptPromise;
 }
 
-/** True when the browser can run the blur pipeline at all. */
+/** True when the browser can run the segmentation pipeline at all. */
 export function backgroundBlurSupported(): boolean {
   return (
     typeof window !== 'undefined' &&
@@ -63,6 +63,8 @@ export function backgroundBlurSupported(): boolean {
     typeof HTMLCanvasElement.prototype.captureStream === 'function'
   );
 }
+
+export type BackgroundKind = 'blur' | 'image';
 
 export class BackgroundBlurProcessor {
   private video: HTMLVideoElement | null = null;
@@ -72,9 +74,22 @@ export class BackgroundBlurProcessor {
   private output: MediaStream | null = null;
   private raf = 0;
   private stopped = false;
+  private kind: BackgroundKind = 'blur';
+  private image: HTMLImageElement | null = null;
+
+  /** Change the background live (blur ⇄ image) without rebuilding the pipeline. */
+  setBackground(kind: BackgroundKind, image?: HTMLImageElement | null) {
+    this.kind = kind;
+    if (image !== undefined) this.image = image;
+  }
 
   /** Build the pipeline from a raw camera track; returns the processed track. */
-  async start(inputTrack: MediaStreamTrack): Promise<MediaStreamTrack> {
+  async start(
+    inputTrack: MediaStreamTrack,
+    opts: { kind?: BackgroundKind; image?: HTMLImageElement | null } = {},
+  ): Promise<MediaStreamTrack> {
+    this.kind = opts.kind ?? 'blur';
+    this.image = opts.image ?? null;
     const Ctor = await loadMediaPipe();
     this.stopped = false;
 
@@ -128,14 +143,34 @@ export class BackgroundBlurProcessor {
     ctx.save();
     ctx.clearRect(0, 0, w, h);
     // 1) draw the segmentation mask, 2) keep only the person where the mask is,
-    // 3) paint a blurred copy of the frame behind them.
+    // 3) paint the chosen background behind them (blurred frame, or a cover-fit image).
     ctx.drawImage(results.segmentationMask, 0, 0, w, h);
     ctx.globalCompositeOperation = 'source-in';
     ctx.drawImage(results.image, 0, 0, w, h);
     ctx.globalCompositeOperation = 'destination-over';
-    ctx.filter = 'blur(10px)';
-    ctx.drawImage(results.image, 0, 0, w, h);
+    if (this.kind === 'image' && this.image && this.image.complete && this.image.naturalWidth) {
+      this.drawCover(ctx, this.image, w, h);
+    } else {
+      ctx.filter = 'blur(10px)';
+      ctx.drawImage(results.image, 0, 0, w, h);
+    }
     ctx.restore();
+  }
+
+  /** Draw an image so it covers the whole canvas (object-fit: cover), centered. */
+  private drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, w: number, h: number) {
+    const ir = img.naturalWidth / img.naturalHeight;
+    const cr = w / h;
+    let dw = w;
+    let dh = h;
+    if (ir > cr) {
+      dh = h;
+      dw = h * ir;
+    } else {
+      dw = w;
+      dh = w / ir;
+    }
+    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
   }
 
   stop() {

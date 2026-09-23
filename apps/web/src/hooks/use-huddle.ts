@@ -172,6 +172,20 @@ async function tuneScreenSender(sender: RTCRtpSender): Promise<void> {
   }
 }
 
+/** Load a user-picked file into an HTMLImageElement for use as a virtual background. */
+function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve(img); // keep the object URL alive for the image's lifetime
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('image load failed'));
+    };
+    img.src = url;
+  });
+}
+
 type SignalData =
   | { kind: 'sdp'; description: RTCSessionDescriptionInit }
   | { kind: 'ice'; candidate: RTCIceCandidateInit };
@@ -239,10 +253,14 @@ export interface HuddleController {
   openBreakouts: (count: number, autoAssign: boolean) => void;
   assignBreakout: (userId: string, roomId: string | null) => void;
   closeBreakouts: () => void;
-  // ----- background blur -----
-  blurEnabled: boolean;
-  blurSupported: boolean;
-  toggleBlur: () => Promise<void>;
+  // ----- virtual background -----
+  /** Current virtual background: none, blur, or an uploaded image. */
+  background: 'none' | 'blur' | 'image';
+  backgroundSupported: boolean;
+  /** Set the background to 'none' or 'blur' (use setBackgroundImage for an image). */
+  applyBackground: (mode: 'none' | 'blur') => Promise<void>;
+  /** Use an uploaded image file as the virtual background. */
+  setBackgroundImage: (file: File) => Promise<void>;
   // ----- push-to-talk -----
   pttEnabled: boolean;
   /** True while the PTT key is held and the mic is live. */
@@ -330,9 +348,10 @@ export function useHuddle(): HuddleController {
   const [breakoutRooms, setBreakoutRooms] = useState<BreakoutRoom[]>([]);
   const [breakoutsOpen, setBreakoutsOpen] = useState(false);
   const [breakoutAssignments, setBreakoutAssignments] = useState<Record<string, string>>({});
-  // Background blur
-  const [blurEnabled, setBlurEnabled] = useState(false);
-  const blurEnabledRef = useRef(false);
+  // Virtual background (blur or uploaded image), via MediaPipe segmentation
+  const [background, setBackgroundState] = useState<'none' | 'blur' | 'image'>('none');
+  const backgroundRef = useRef<'none' | 'blur' | 'image'>('none');
+  const bgImageRef = useRef<HTMLImageElement | null>(null);
   const blurProcessor = useRef<BackgroundBlurProcessor | null>(null);
   const rawCamTrack = useRef<MediaStreamTrack | null>(null);
   // Push-to-talk
@@ -830,10 +849,13 @@ export function useHuddle(): HuddleController {
     setBreakoutsOpen(false);
     setBreakoutAssignments({});
     setSettings({ waitingRoomEnabled: false, locked: false, whiteboardOn: false });
-    // Tear down the blur pipeline; the raw device track is stopped with the mesh.
+    // Tear down the segmentation pipeline; the raw device track is stopped with the mesh.
     blurProcessor.current?.stop();
     blurProcessor.current = null;
     rawCamTrack.current = null;
+    bgImageRef.current = null;
+    setBackgroundState('none');
+    backgroundRef.current = 'none';
     setPttActive(false);
   }, [bodyFor, closePeer, stopScreenShare]);
 
@@ -931,18 +953,21 @@ export function useHuddle(): HuddleController {
     }
     const rawTrack = cam.getVideoTracks()[0];
     rawCamTrack.current = rawTrack;
-    // If background blur is on, run the raw camera through the segmentation
+    // If a virtual background is set, run the raw camera through the segmentation
     // pipeline and send the processed track instead (falls back to raw on error).
     let sentTrack = rawTrack;
-    if (blurEnabledRef.current) {
+    if (backgroundRef.current !== 'none') {
       try {
         const proc = new BackgroundBlurProcessor();
-        sentTrack = await proc.start(rawTrack);
+        sentTrack = await proc.start(rawTrack, {
+          kind: backgroundRef.current === 'image' ? 'image' : 'blur',
+          image: bgImageRef.current,
+        });
         blurProcessor.current = proc;
       } catch {
-        useUiStore.getState().pushToast('Background blur is unavailable; using your normal camera.', 'error');
-        setBlurEnabled(false);
-        blurEnabledRef.current = false;
+        useUiStore.getState().pushToast('Virtual background is unavailable; using your normal camera.', 'error');
+        setBackgroundState('none');
+        backgroundRef.current = 'none';
       }
     }
     cameraTrack.current = sentTrack;
@@ -968,45 +993,78 @@ export function useHuddle(): HuddleController {
     emit(CLIENT_EVENTS.HUDDLE_STATE, { videoEnabled: true, cameraStreamId: localStream.current?.id ?? null });
   }, [renegotiate, emit]);
 
-  /** Toggle background blur. When the camera is live, swap the outgoing track in
-   *  place (replaceTrack keeps the transceiver, so no renegotiation is needed). */
-  const toggleBlur = useCallback(async () => {
-    const next = !blurEnabledRef.current;
-    blurEnabledRef.current = next;
-    setBlurEnabled(next);
-    const raw = rawCamTrack.current;
-    if (!cameraOn || !raw) return; // applies when the camera is next turned on
-    try {
-      let newSent: MediaStreamTrack;
-      if (next) {
-        const proc = new BackgroundBlurProcessor();
-        newSent = await proc.start(raw);
-        blurProcessor.current = proc;
-      } else {
-        blurProcessor.current?.stop();
-        blurProcessor.current = null;
-        newSent = raw;
-      }
-      const old = cameraTrack.current;
-      for (const [, pc] of peers.current) {
-        const sender = pc.getSenders().find((s) => s.track === old);
-        if (sender) await sender.replaceTrack(newSent);
-      }
-      if (old && old !== raw) {
-        localStream.current?.removeTrack(old);
-        old.stop();
-      }
-      if (!localStream.current?.getVideoTracks().includes(newSent)) {
-        localStream.current?.addTrack(newSent);
-      }
-      cameraTrack.current = newSent;
-      setLocalVideo(new MediaStream([newSent]));
-    } catch {
-      useUiStore.getState().pushToast('Background blur is unavailable on this device.', 'error');
-      blurEnabledRef.current = false;
-      setBlurEnabled(false);
+  /** Swap the outgoing camera track in place (replaceTrack keeps the transceiver,
+   *  so no renegotiation) and refresh the local self-view + localStream. */
+  const swapCameraTrack = useCallback(async (newTrack: MediaStreamTrack) => {
+    const old = cameraTrack.current;
+    if (old === newTrack) return;
+    for (const [, pc] of peers.current) {
+      const sender = pc.getSenders().find((s) => s.track === old);
+      if (sender) await sender.replaceTrack(newTrack);
     }
-  }, [cameraOn]);
+    // Stop the previous *processed* track (a canvas capture), never the raw device.
+    if (old && old !== rawCamTrack.current) {
+      localStream.current?.removeTrack(old);
+      old.stop();
+    }
+    if (localStream.current && !localStream.current.getVideoTracks().includes(newTrack)) {
+      localStream.current.addTrack(newTrack);
+    }
+    cameraTrack.current = newTrack;
+    setLocalVideo(new MediaStream([newTrack]));
+  }, []);
+
+  /** Core: apply a background. Live-updates a running processor between blur/image;
+   *  when the camera is on it swaps the outgoing track; otherwise it takes effect
+   *  the next time the camera is turned on. */
+  const setBg = useCallback(
+    async (mode: 'none' | 'blur' | 'image') => {
+      backgroundRef.current = mode;
+      setBackgroundState(mode);
+      const raw = rawCamTrack.current;
+      // A processor is already running and we're staying non-none: just retune it.
+      if (blurProcessor.current && mode !== 'none') {
+        blurProcessor.current.setBackground(mode === 'image' ? 'image' : 'blur', bgImageRef.current);
+        return;
+      }
+      if (!cameraOn || !raw) return; // applies on next camera-on
+      try {
+        if (mode === 'none') {
+          blurProcessor.current?.stop();
+          blurProcessor.current = null;
+          await swapCameraTrack(raw);
+        } else {
+          const proc = new BackgroundBlurProcessor();
+          const track = await proc.start(raw, {
+            kind: mode === 'image' ? 'image' : 'blur',
+            image: bgImageRef.current,
+          });
+          blurProcessor.current = proc;
+          await swapCameraTrack(track);
+        }
+      } catch {
+        useUiStore.getState().pushToast('Virtual background is unavailable on this device.', 'error');
+        backgroundRef.current = 'none';
+        setBackgroundState('none');
+      }
+    },
+    [cameraOn, swapCameraTrack],
+  );
+
+  const applyBackground = useCallback((mode: 'none' | 'blur') => setBg(mode), [setBg]);
+
+  const setBackgroundImage = useCallback(
+    async (file: File) => {
+      try {
+        const img = await loadImageFromFile(file);
+        bgImageRef.current = img;
+        await setBg('image');
+      } catch {
+        useUiStore.getState().pushToast('Could not load that image.', 'error');
+      }
+    },
+    [setBg],
+  );
 
   const toggleHand = useCallback(() => {
     setHandRaised((h) => {
@@ -1604,9 +1662,10 @@ export function useHuddle(): HuddleController {
     openBreakouts,
     assignBreakout,
     closeBreakouts,
-    blurEnabled,
-    blurSupported: backgroundBlurSupported(),
-    toggleBlur,
+    background,
+    backgroundSupported: backgroundBlurSupported(),
+    applyBackground,
+    setBackgroundImage,
     pttEnabled,
     pttActive,
     setPttEnabled,

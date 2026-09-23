@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Aperture,
+  Ban,
   Captions,
   ChevronDown,
   DoorOpen,
   Focus,
+  Image as ImageIcon,
   Hand,
   LayoutGrid,
   Lock,
@@ -170,6 +172,7 @@ export function MeetingRoom({
 
   // ----- Picture-in-Picture (float the meeting when you switch tabs, like Meet) --
   const pipVideoRef = useRef<HTMLVideoElement>(null);
+  const bgFileRef = useRef<HTMLInputElement>(null);
   const pickPipStream = useCallback((): MediaStream | null => {
     // Prefer a shared screen, then any camera with a live video track.
     const screen = huddle.localScreen ?? Object.values(huddle.remoteScreens)[0] ?? null;
@@ -341,6 +344,18 @@ export function MeetingRoom({
         muted
         playsInline
         style={{ position: 'fixed', right: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+      />
+      {/* Hidden picker for an uploaded virtual-background image */}
+      <input
+        ref={bgFileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void huddle.setBackgroundImage(f);
+          e.currentTarget.value = '';
+        }}
       />
 
       {/* Header */}
@@ -668,10 +683,23 @@ export function MeetingRoom({
               <MoreItem icon={<Radio size={14} />} onClick={() => { huddle.setPttEnabled(!huddle.pttEnabled); setMoreMenu(false); }}>
                 {huddle.pttEnabled ? 'Disable push-to-talk' : 'Enable push-to-talk'}
               </MoreItem>
-              {huddle.blurSupported && (
-                <MoreItem icon={<Aperture size={14} />} onClick={() => { void huddle.toggleBlur(); setMoreMenu(false); }}>
-                  {huddle.blurEnabled ? 'Turn off background blur' : 'Blur my background'}
-                </MoreItem>
+              {huddle.backgroundSupported && (
+                <>
+                  <MoreItem
+                    icon={<Aperture size={14} />}
+                    onClick={() => { void huddle.applyBackground(huddle.background === 'blur' ? 'none' : 'blur'); setMoreMenu(false); }}
+                  >
+                    {huddle.background === 'blur' ? 'Turn off blur' : 'Blur background'}
+                  </MoreItem>
+                  <MoreItem icon={<ImageIcon size={14} />} onClick={() => { bgFileRef.current?.click(); setMoreMenu(false); }}>
+                    {huddle.background === 'image' ? 'Change image background' : 'Image background'}
+                  </MoreItem>
+                  {huddle.background !== 'none' && (
+                    <MoreItem icon={<Ban size={14} />} onClick={() => { void huddle.applyBackground('none'); setMoreMenu(false); }}>
+                      No background
+                    </MoreItem>
+                  )}
+                </>
               )}
               {wbOn && (
                 <MoreItem icon={<Presentation size={14} />} onClick={() => { setLayout('whiteboard'); setMoreMenu(false); }}>

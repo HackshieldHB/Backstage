@@ -45,6 +45,7 @@ import { GlobalExceptionFilter } from './common/http-exception.filter';
 import { ObservabilityModule } from './observability/observability.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { ScheduledHuddlesModule } from './scheduled-huddles/scheduled-huddles.module';
+import { MeetingInsightsModule } from './meeting-insights/meeting-insights.module';
 import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
@@ -92,6 +93,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     CalendarModule,
     RecommendationsModule,
     ScheduledHuddlesModule,
+    MeetingInsightsModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -514,6 +514,19 @@ export function useCancelScheduledHuddle(container: Container) {
   });
 }
 
+export function useMeetingInsights(workspaceId: string, days: number, enabled = true) {
+  return useQuery({
+    queryKey: ['meeting-insights', workspaceId, days],
+    queryFn: () =>
+      api<import('@backstages/shared').MeetingInsightsDto>(
+        'GET',
+        `/workspaces/${workspaceId}/meeting-insights?days=${days}`,
+      ),
+    enabled: enabled && !!workspaceId,
+    staleTime: 60000,
+  });
+}
+
 export function useMyThreads(workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: keys.myThreads(workspaceId),

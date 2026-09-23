@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from 'react';
 import { Timer } from 'lucide-react';
-import type { ActivityKind, TimelineMemberDto, UtilizationRowDto } from '@backstages/shared';
+import type { ActivityKind, MeetingInsightsDto, TimelineMemberDto, UtilizationRowDto } from '@backstages/shared';
 import { api } from '@/lib/api';
 import { useUiStore } from '@/stores/ui-store';
-import { useMyTimesheet, useTeamTimeline, useUtilization } from '@/hooks/queries';
+import { useMeetingInsights, useMyTimesheet, useTeamTimeline, useUtilization } from '@/hooks/queries';
 import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from './avatar';
 import { LogTimeDialog } from './log-time-dialog';
@@ -57,18 +57,20 @@ const segBtn = (active: boolean) =>
 
 export function TeamTimelinePane({ workspaceId }: { workspaceId: string }) {
   const [range, setRange] = useState<RangeKey>('today');
-  const [tab, setTab] = useState<'timeline' | 'utilization' | 'mine'>('timeline');
+  const [tab, setTab] = useState<'timeline' | 'utilization' | 'meetings' | 'mine'>('timeline');
+  const [mDays, setMDays] = useState(7);
   const { from, to } = useMemo(() => rangeFor(range), [range]);
 
   const timeline = useTeamTimeline(workspaceId, from, to, tab === 'timeline');
   const utilization = useUtilization(workspaceId, from, to, tab === 'utilization');
+  const meetings = useMeetingInsights(workspaceId, mDays, tab === 'meetings');
 
   return (
     <PaneShell icon={<Timer size={18} className="text-accent" />} title="Team timeline & utilization">
       <div className="mx-auto max-w-5xl">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div className="flex gap-1 rounded-md bg-gray-100 p-0.5 dark:bg-gray-800">
-            {(['timeline', 'utilization', 'mine'] as const).map((t) => (
+            {(['timeline', 'utilization', 'meetings', 'mine'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -79,11 +81,20 @@ export function TeamTimelinePane({ workspaceId }: { workspaceId: string }) {
               </button>
             ))}
           </div>
-          {tab !== 'mine' && (
+          {(tab === 'timeline' || tab === 'utilization') && (
             <div className="flex gap-1 rounded-md bg-gray-100 p-0.5 dark:bg-gray-800">
               {(['today', '24h', '7d'] as const).map((r) => (
                 <button key={r} onClick={() => setRange(r)} className={segBtn(range === r)}>
                   {r === 'today' ? 'Today' : r === '24h' ? '24h' : '7 days'}
+                </button>
+              ))}
+            </div>
+          )}
+          {tab === 'meetings' && (
+            <div className="flex gap-1 rounded-md bg-gray-100 p-0.5 dark:bg-gray-800">
+              {[7, 30].map((d) => (
+                <button key={d} onClick={() => setMDays(d)} className={segBtn(mDays === d)}>
+                  {d} days
                 </button>
               ))}
             </div>
@@ -105,6 +116,9 @@ export function TeamTimelinePane({ workspaceId }: { workspaceId: string }) {
             loading={utilization.isLoading}
             error={utilization.isError}
           />
+        )}
+        {tab === 'meetings' && (
+          <MeetingsView data={meetings.data} loading={meetings.isLoading} error={meetings.isError} />
         )}
         {tab === 'mine' && <MyTimesheet workspaceId={workspaceId} />}
 
@@ -289,6 +303,88 @@ function MyTimesheet({ workspaceId }: { workspaceId: string }) {
         </ul>
       )}
       {logOpen && <LogTimeDialog workspaceId={workspaceId} onClose={() => setLogOpen(false)} />}
+    </div>
+  );
+}
+
+function MeetingsView({
+  data,
+  loading,
+  error,
+}: {
+  data?: MeetingInsightsDto;
+  loading: boolean;
+  error: boolean;
+}) {
+  if (error) return <Empty>Couldn’t load meeting analytics.</Empty>;
+  if (loading || !data) return <Empty>Loading meeting analytics…</Empty>;
+  if (data.totalMeetings === 0) return <Empty>No huddles in this window yet.</Empty>;
+
+  const maxMember = Math.max(1, ...data.byMember.map((m) => m.minutes));
+  const maxDay = Math.max(1, ...data.byDay.map((d) => d.minutes));
+
+  return (
+    <div className="space-y-6">
+      {/* KPI tiles */}
+      <div className="grid grid-cols-3 gap-3">
+        <Kpi label="Meetings" value={String(data.totalMeetings)} sub={`in ${data.rangeDays} days`} />
+        <Kpi label="Total time" value={fmtDuration(data.totalMinutes * 60)} sub="participant-time" />
+        <Kpi label="Avg length" value={fmtDuration(data.avgMeetingMinutes * 60)} sub="per meeting" />
+      </div>
+
+      {/* Per-day meeting minutes */}
+      <div>
+        <h3 className="mb-2 text-[13px] font-semibold text-ink-2">Meeting time per day</h3>
+        <div className="flex items-end gap-1.5" style={{ height: 96 }}>
+          {data.byDay.map((d) => (
+            <div key={d.date} className="flex flex-1 flex-col items-center gap-1" title={`${d.date}: ${fmtDuration(d.minutes * 60)} · ${d.meetings} meeting(s)`}>
+              <div className="flex w-full flex-1 items-end">
+                <div
+                  className="w-full rounded-t bg-blue-500/80"
+                  style={{ height: `${(d.minutes / maxDay) * 100}%`, minHeight: d.minutes > 0 ? 3 : 0 }}
+                />
+              </div>
+              <span className="text-[9px] text-gray-400">{d.date.slice(5)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Per-member load */}
+      <div>
+        <h3 className="mb-2 text-[13px] font-semibold text-ink-2">Meeting load by person</h3>
+        <div className="space-y-2">
+          {data.byMember.map((m) => (
+            <div key={m.userId} className="flex items-center gap-2">
+              <div className="flex w-40 shrink-0 items-center gap-2">
+                <Avatar user={{ id: m.userId, displayName: m.displayName, avatarUrl: m.avatarUrl }} size="xs" />
+                <span className="truncate text-[13px]">{m.displayName}</span>
+              </div>
+              <div className="relative h-5 flex-1 overflow-hidden rounded bg-hovered">
+                <div className="absolute left-0 top-0 h-full rounded bg-blue-500/80" style={{ width: `${(m.minutes / maxMember) * 100}%` }} />
+              </div>
+              <span className="w-28 shrink-0 text-right text-[12px] text-gray-500">
+                {fmtDuration(m.minutes * 60)} · {m.meetings}×
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <p className="text-[11px] leading-snug text-gray-400">
+        Counts time spent in huddles (voice/video). “Participant-time” sums everyone’s minutes, so a
+        30-min call with 4 people is 2h of meeting load — useful for spotting meeting overload.
+      </p>
+    </div>
+  );
+}
+
+function Kpi({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-surface p-3">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="mt-0.5 text-[20px] font-semibold text-ink">{value}</div>
+      <div className="text-[11px] text-gray-400">{sub}</div>
     </div>
   );
 }
