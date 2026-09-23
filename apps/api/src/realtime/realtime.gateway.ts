@@ -46,6 +46,7 @@ import {
 } from './realtime.service';
 import { HuddleService } from './huddle.service';
 import { HuddleSessionService } from '../timesheet/huddle-session.service';
+import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { PresenceService } from '../presence/presence.service';
 import type { AccessTokenPayload } from '../auth/jwt-auth.guard';
 
@@ -69,6 +70,7 @@ export class RealtimeGateway
     private readonly presence: PresenceService,
     private readonly huddle: HuddleService,
     private readonly huddleSession: HuddleSessionService,
+    private readonly meetingMinutes: MeetingMinutesService,
   ) {}
 
   afterInit(server: Server) {
@@ -133,6 +135,7 @@ export class RealtimeGateway
       for (const key of this.huddle.removeSocket(socket.data.userId, socket.id)) {
         await this.huddleSession.leave(key, socket.data.userId);
         await this.broadcastHuddle(key);
+        await this.endMeetingIfEmpty(key);
       }
       // Drop the socket from any waiting rooms and refresh moderators' lists.
       for (const key of this.huddle.removeWaitingSocket(socket.data.userId, socket.id)) {
@@ -262,6 +265,16 @@ export class RealtimeGateway
     const fullyLeft = this.huddle.leave(key, socket.data.userId, socket.id);
     if (fullyLeft) await this.huddleSession.leave(key, socket.data.userId);
     await this.broadcastHuddle(key);
+    await this.endMeetingIfEmpty(key);
+  }
+
+  /** When the last participant leaves, persist the captured transcript + notes as a
+   *  MeetingRecord so the meeting leaves a durable, searchable artifact. */
+  private async endMeetingIfEmpty(key: string) {
+    if (this.huddle.userIds(key).length > 0) return;
+    const lines = this.huddle.takeTranscript(key);
+    const notes = this.huddle.takeNotes(key);
+    if (lines.length || notes.trim()) await this.meetingMinutes.persistFromHuddle(key, lines, notes);
   }
 
   @SubscribeMessage(CLIENT_EVENTS.HUDDLE_SIGNAL)
@@ -380,6 +393,13 @@ export class RealtimeGateway
     const text = (body.text ?? '').trim();
     if (!key || !text) return;
     const { displayName, avatarUrl } = await this.userInfo(socket);
+    this.huddle.appendTranscript(key, {
+      userId: socket.data.userId,
+      name: displayName,
+      text: text.slice(0, 2000),
+      at: Date.now(),
+      kind: 'chat',
+    });
     this.emitToKey(key, SOCKET_EVENTS.HUDDLE_CHAT, (idField) => ({
       ...idField,
       id: randomUUID(),
@@ -464,6 +484,17 @@ export class RealtimeGateway
     const text = (body.text ?? '').trim();
     if (!key || !text) return;
     const { displayName } = await this.userInfo(socket);
+    // Only finalised caption lines are captured into the transcript (interim lines
+    // update in place and would flood it).
+    if (body.final) {
+      this.huddle.appendTranscript(key, {
+        userId: socket.data.userId,
+        name: displayName,
+        text: text.slice(0, 500),
+        at: Date.now(),
+        kind: 'caption',
+      });
+    }
     this.emitToKey(key, SOCKET_EVENTS.HUDDLE_CAPTION, (idField) => ({
       ...idField,
       userId: socket.data.userId,

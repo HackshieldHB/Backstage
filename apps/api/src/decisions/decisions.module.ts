@@ -7,5 +7,6 @@ import { DecisionsService } from './decisions.service';
   imports: [MessagesModule],
   controllers: [DecisionsController],
   providers: [DecisionsService],
+  exports: [DecisionsService],
 })
 export class DecisionsModule {}

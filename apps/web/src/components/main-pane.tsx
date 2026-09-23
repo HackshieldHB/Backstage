@@ -1,6 +1,6 @@
 'use client';
 
-import { CalendarClock, Hash, Headphones, Info, Lightbulb, Lock, Menu, NotebookPen, Pin, Sparkles, Users } from 'lucide-react';
+import { CalendarClock, FileText, Hash, Headphones, Info, Lightbulb, Lock, Menu, NotebookPen, Pin, Sparkles, Users } from 'lucide-react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -14,6 +14,7 @@ import { CheatSheetDialog } from './cheat-sheet-dialog';
 import { Tooltip } from './tooltip';
 import { Dialog } from './dialog';
 import { ScheduleHuddleDialog, UpcomingHuddles } from './schedule-huddle';
+import { MeetingHistoryDialog } from './meeting-history-dialog';
 
 export function MainPane({
   workspaceId,
@@ -34,6 +35,7 @@ export function MainPane({
   const ai = useAiStatus();
   const [tipsOpen, setTipsOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const [summarizing, setSummarizing] = useState(false);
   const pins = usePins(container.kind === 'channel' ? container.id : null);
@@ -111,6 +113,16 @@ export function MainPane({
             aria-label="Schedule a huddle"
           >
             <CalendarClock size={16} />
+          </button>
+        </Tooltip>
+        <Tooltip label="Meeting history & minutes">
+          <button
+            onClick={() => setHistoryOpen(true)}
+            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            data-testid="meeting-history"
+            aria-label="Meeting history & minutes"
+          >
+            <FileText size={16} />
           </button>
         </Tooltip>
         {container.kind === 'channel' && (
@@ -205,6 +217,14 @@ export function MainPane({
 
       {scheduleOpen && (
         <ScheduleHuddleDialog container={container} onClose={() => setScheduleOpen(false)} />
+      )}
+
+      {historyOpen && (
+        <MeetingHistoryDialog
+          container={container}
+          workspaceId={workspaceId}
+          onClose={() => setHistoryOpen(false)}
+        />
       )}
 
       <UpcomingHuddles container={container} huddle={huddle} />

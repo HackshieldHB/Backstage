@@ -24,4 +24,5 @@ export * from './schemas/user-status';
 export * from './schemas/recommendations';
 export * from './schemas/huddle';
 export * from './schemas/meeting-insights';
+export * from './schemas/meeting-minutes';
 export * from './socket';

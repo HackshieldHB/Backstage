@@ -287,6 +287,37 @@ export class AiService {
     return { summary, actionItems, posted };
   }
 
+  /**
+   * Generate structured minutes from a meeting transcript (captions + chat + notes):
+   * a bulleted summary, the decisions reached, and concrete action items. Throws
+   * when AI isn't configured so the caller can surface a clear "not available".
+   */
+  async generateMinutes(
+    transcript: string,
+  ): Promise<{ summary: string; decisions: string[]; actionItems: string[] }> {
+    if (!this.enabled) throw new ServiceUnavailableException('AI features are not configured');
+    const text = transcript.slice(0, 24000).trim();
+    if (!text) return { summary: '', decisions: [], actionItems: [] };
+    const [summary, decisionsRaw, itemsRaw] = await Promise.all([
+      this.complete(
+        'You write concise minutes of a team meeting from its transcript. Reply with 3–6 bullet points (each starting with "- ") covering the key discussion. No preamble, no closing remarks.',
+        text,
+        700,
+      ),
+      this.complete(
+        'You list the concrete decisions a team reached in this meeting. One decision per line, no numbering, no preamble. Reply with the single word NONE if there are none.',
+        text,
+        400,
+      ),
+      this.complete(
+        'You extract concrete action items from a meeting. Reply with one action item per line in the imperative voice — prefix an owner when clearly named (e.g. "Kevin — review the config"). No numbering, no preamble. Reply with the single word NONE if there are none.',
+        text,
+        500,
+      ),
+    ]);
+    return { summary, decisions: parseActionItems(decisionsRaw), actionItems: parseActionItems(itemsRaw) };
+  }
+
   async translate(
     userId: string,
     messageId: string,

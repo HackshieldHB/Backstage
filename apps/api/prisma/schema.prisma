@@ -229,6 +229,7 @@ model Workspace {
   oncallShifts           OncallShift[]
   recommendationFeedback RecommendationFeedback[]
   scheduledHuddles       ScheduledHuddle[]
+  meetingRecords         MeetingRecord[]
 }
 
 model CustomEmoji {
@@ -331,6 +332,7 @@ model Channel {
   weeklyReports          WeeklyReport[]
   jiraAlertRules         JiraAlertRule[]
   scheduledHuddles       ScheduledHuddle[]
+  meetingRecords         MeetingRecord[]
 
   @@unique([workspaceId, name])
 }
@@ -368,6 +370,7 @@ model Conversation {
   notifications     Notification[]
   scheduledMessages ScheduledMessage[]
   scheduledHuddles  ScheduledHuddle[]
+  meetingRecords    MeetingRecord[]
 
   @@unique([workspaceId, memberKey])
 }
@@ -878,6 +881,40 @@ model ScheduledHuddle {
 
   @@index([scheduledFor])
   @@index([workspaceId])
+  @@index([channelId])
+  @@index([conversationId])
+}
+
+/// A finished huddle's captured transcript (live captions + in-meeting chat) plus
+/// AI-generated minutes. Persisted when the last participant leaves, so a meeting
+/// leaves a durable, searchable record even after the in-memory huddle is gone.
+model MeetingRecord {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  channelId          String?
+  conversationId     String?
+  /// Socket-room key: "channel:X" / "conversation:Y".
+  roomKey            String
+  startedAt          DateTime
+  endedAt            DateTime
+  /// Transcript lines: [{ userId, name, text, at, kind: 'caption'|'chat' }].
+  transcript         Json
+  /// Collaborative notes captured at meeting end.
+  notes              String?
+  /// AI minutes (null until generated on demand).
+  summary            String?
+  /// String[] of decisions reached.
+  decisions          Json?
+  /// String[] of action items (may carry an "Owner — task" prefix).
+  actionItems        Json?
+  minutesGeneratedAt DateTime?
+  createdAt          DateTime  @default(now())
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel      Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
   @@index([channelId])
   @@index([conversationId])
 }

@@ -527,6 +527,58 @@ export function useMeetingInsights(workspaceId: string, days: number, enabled = 
   });
 }
 
+// ---------- meeting records / AI minutes ----------
+
+export function useMeetingRecords(container: Container | null) {
+  return useQuery({
+    queryKey: ['meeting-records', container?.id ?? 'none'],
+    queryFn: () =>
+      api<import('@backstages/shared').MeetingRecordSummaryDto[]>(
+        'GET',
+        `${containerPath(container!)}/meeting-records`,
+      ),
+    enabled: !!container,
+  });
+}
+
+export function useMeetingRecord(id: string | null) {
+  return useQuery({
+    queryKey: ['meeting-record', id ?? 'none'],
+    queryFn: () => api<import('@backstages/shared').MeetingRecordDto>('GET', `/meeting-records/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useGenerateMinutes(container: Container) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<import('@backstages/shared').MeetingRecordDto>('POST', `/meeting-records/${id}/minutes`),
+    onSuccess: (r) => {
+      qc.setQueryData(['meeting-record', r.id], r);
+      void qc.invalidateQueries({ queryKey: ['meeting-records', container.id] });
+    },
+  });
+}
+
+export function useActionItemToDecision() {
+  return useMutation({
+    mutationFn: ({ id, index }: { id: string; index: number }) =>
+      api<import('@backstages/shared').DecisionDto>(
+        'POST',
+        `/meeting-records/${id}/action-items/${index}/decision`,
+      ),
+  });
+}
+
+export function useDeleteMeetingRecord(container: Container) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<{ ok: boolean }>('DELETE', `/meeting-records/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['meeting-records', container.id] }),
+  });
+}
+
 export function useMyThreads(workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: keys.myThreads(workspaceId),

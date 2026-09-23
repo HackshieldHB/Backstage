@@ -32,6 +32,17 @@ interface ControlSession {
   presenterId: string;
 }
 
+/** One captured line of a meeting's transcript (final caption or in-meeting chat). */
+export interface HuddleTranscriptLine {
+  userId: string;
+  name: string;
+  text: string;
+  at: number;
+  kind: 'caption' | 'chat';
+}
+
+const TRANSCRIPT_CAP = 3000;
+
 interface BreakoutState {
   rooms: BreakoutRoom[];
   /** userId → roomId. Absent = the main room. */
@@ -99,6 +110,10 @@ export class HuddleService {
   private readonly whiteboardOwners = new Map<string, Map<string, string>>();
   /** key -> breakout configuration (rooms + per-user assignments). */
   private readonly breakouts = new Map<string, BreakoutState>();
+  /** key -> captured transcript lines (final captions + chat). NOT cleared by
+   *  cleanupRoom — the gateway drains it via takeTranscript when the room empties,
+   *  so the meeting can be persisted after everyone has gone. */
+  private readonly transcripts = new Map<string, HuddleTranscriptLine[]>();
 
   join(key: string, userId: string, socketId: string): void {
     let room = this.rooms.get(key);
@@ -180,7 +195,8 @@ export class HuddleService {
     this.states.delete(key);
     this.annotationModes.delete(key);
     this.polls.delete(key);
-    this.notes.delete(key);
+    // notes + transcript are intentionally NOT deleted here — the gateway drains
+    // them via takeNotes/takeTranscript when the room empties, to persist the meeting.
     this.control.delete(key);
     this.annotationOwners.delete(key);
     this.annotations.delete(key);
@@ -331,6 +347,12 @@ export class HuddleService {
   setNotes(key: string, content: string): void {
     this.notes.set(key, content.slice(0, 20000));
   }
+  /** Return and remove the notes for a key (called when the room empties). */
+  takeNotes(key: string): string {
+    const notes = this.notes.get(key) ?? '';
+    this.notes.delete(key);
+    return notes;
+  }
 
   // ----- remote-control sessions -----
   getControl(key: string): ControlSession | null {
@@ -463,5 +485,22 @@ export class HuddleService {
   }
   breakoutOf(key: string, userId: string): string | null {
     return this.breakouts.get(key)?.assignments.get(userId) ?? null;
+  }
+
+  // ----- transcript capture (for persisted minutes) -----
+  appendTranscript(key: string, line: HuddleTranscriptLine): void {
+    let lines = this.transcripts.get(key);
+    if (!lines) {
+      lines = [];
+      this.transcripts.set(key, lines);
+    }
+    lines.push(line);
+    if (lines.length > TRANSCRIPT_CAP) lines.splice(0, lines.length - TRANSCRIPT_CAP);
+  }
+  /** Return and remove the transcript for a key (called when the room empties). */
+  takeTranscript(key: string): HuddleTranscriptLine[] {
+    const lines = this.transcripts.get(key) ?? [];
+    this.transcripts.delete(key);
+    return lines;
   }
 }

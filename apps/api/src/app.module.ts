@@ -46,6 +46,7 @@ import { ObservabilityModule } from './observability/observability.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { ScheduledHuddlesModule } from './scheduled-huddles/scheduled-huddles.module';
 import { MeetingInsightsModule } from './meeting-insights/meeting-insights.module';
+import { MeetingMinutesModule } from './meeting-minutes/meeting-minutes.module';
 import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
@@ -94,6 +95,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     RecommendationsModule,
     ScheduledHuddlesModule,
     MeetingInsightsModule,
+    MeetingMinutesModule,
   ],
   controllers: [HealthController],
   providers: [
