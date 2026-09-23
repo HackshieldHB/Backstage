@@ -19,7 +19,6 @@ import {
   MonitorX,
   MoreHorizontal,
   PhoneOff,
-  PictureInPicture2,
   Presentation,
   Radio,
   Smile,
@@ -206,6 +205,21 @@ export function MeetingRoom({
       document.removeEventListener('visibilitychange', onVis);
       if (document.pictureInPictureElement) void document.exitPictureInPicture().catch(() => undefined);
     };
+  }, [enterPip]);
+
+  // Register the media-session action so Chrome's automatic Picture-in-Picture
+  // (video-conferencing) can pop the meeting out on tab-switch — no visible button.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const set = (h: (() => void) | null) => {
+      try {
+        navigator.mediaSession.setActionHandler('enterpictureinpicture' as MediaSessionAction, h);
+      } catch {
+        /* action unsupported in this browser */
+      }
+    };
+    set(() => void enterPip());
+    return () => set(null);
   }, [enterPip]);
 
   // ----- keyboard shortcuts (ignored while typing) -----
@@ -651,9 +665,6 @@ export function MeetingRoom({
           )}
         </div>
 
-        {huddle.captionsSupported && (
-          <Ctrl label="Live captions" active={huddle.captionsOn} onClick={huddle.toggleCaptions} icon={<Captions size={18} />} testId="ctrl-captions" />
-        )}
         {huddle.blurSupported && (
           <Ctrl
             label={huddle.blurEnabled ? 'Turn off background blur' : 'Blur my background'}
@@ -663,20 +674,6 @@ export function MeetingRoom({
             testId="ctrl-blur"
           />
         )}
-        <Ctrl
-          label={huddle.pttEnabled ? 'Push-to-talk on — hold Space to speak' : 'Enable push-to-talk'}
-          active={huddle.pttEnabled}
-          danger={huddle.pttEnabled && huddle.pttActive}
-          onClick={() => huddle.setPttEnabled(!huddle.pttEnabled)}
-          icon={<Radio size={18} />}
-          testId="ctrl-ptt"
-        />
-        <Ctrl
-          label="Pop out (Picture-in-Picture)"
-          onClick={() => void enterPip()}
-          icon={<PictureInPicture2 size={18} />}
-          testId="ctrl-pip"
-        />
         <Ctrl label="Chat (C)" active={panel === 'chat'} badge={huddle.unreadChat} onClick={() => setPanel((p) => (p === 'chat' ? 'none' : 'chat'))} icon={<MessageSquare size={18} />} testId="ctrl-chat" />
         <Ctrl label="People (P)" active={panel === 'participants'} onClick={() => setPanel((p) => (p === 'participants' ? 'none' : 'participants'))} icon={<Users size={18} />} testId="ctrl-people" />
 
@@ -686,6 +683,14 @@ export function MeetingRoom({
             <div className="absolute bottom-14 right-0 w-56 rounded-lg border border-white/10 bg-gray-800 py-1 text-[13px] shadow-pop">
               <MoreItem icon={<StickyNote size={14} />} onClick={() => { setPanel('notes'); setMoreMenu(false); }}>Meeting notes</MoreItem>
               <MoreItem icon={<Vote size={14} />} onClick={() => { setPanel('poll'); setMoreMenu(false); }}>Polls</MoreItem>
+              {huddle.captionsSupported && (
+                <MoreItem icon={<Captions size={14} />} onClick={() => { huddle.toggleCaptions(); setMoreMenu(false); }}>
+                  {huddle.captionsOn ? 'Turn off captions' : 'Live captions'}
+                </MoreItem>
+              )}
+              <MoreItem icon={<Radio size={14} />} onClick={() => { huddle.setPttEnabled(!huddle.pttEnabled); setMoreMenu(false); }}>
+                {huddle.pttEnabled ? 'Disable push-to-talk' : 'Enable push-to-talk'}
+              </MoreItem>
               {wbOn && (
                 <MoreItem icon={<Presentation size={14} />} onClick={() => { setLayout('whiteboard'); setMoreMenu(false); }}>
                   View whiteboard
