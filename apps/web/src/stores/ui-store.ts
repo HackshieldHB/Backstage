@@ -13,7 +13,7 @@ export type RightPanel =
 
 /** Which full-pane view fills the main area. 'chat' shows channels/DMs; the
  *  others are dedicated Atlassian / insights sections that replace the chat pane. */
-export type MainView = 'chat' | 'jira' | 'confluence' | 'timeline' | 'projects' | 'incidents' | 'inbox' | 'discover';
+export type MainView = 'chat' | 'jira' | 'confluence' | 'timeline' | 'projects' | 'incidents' | 'inbox' | 'discover' | 'applications';
 
 interface TypingEntry {
   userId: string;

@@ -27,6 +27,7 @@ import { ProjectsPane } from '@/components/projects-pane';
 import { IncidentsPane } from '@/components/incidents-pane';
 import { InboxPane } from '@/components/inbox-pane';
 import { DiscoverPane } from '@/components/discover-pane';
+import { ApplicationsPane } from '@/components/applications/applications-pane';
 import { AskDialog } from '@/components/ask-dialog';
 import { SearchDialog } from '@/components/search-dialog';
 import { CommandPalette } from '@/components/command-palette';
@@ -194,6 +195,8 @@ function AppShell() {
             <InboxPane workspaceId={workspaceId} onNavigate={navigate} />
           ) : mainView === 'discover' ? (
             <DiscoverPane workspaceId={workspaceId} onNavigate={navigate} />
+          ) : mainView === 'applications' ? (
+            <ApplicationsPane />
           ) : container ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <GettingStarted workspaceId={workspaceId} />

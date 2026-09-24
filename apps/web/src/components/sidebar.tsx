@@ -9,7 +9,7 @@ import {
   Briefcase,
   CalendarClock,
   ChevronDown,
-  ClipboardCheck,
+  LayoutGrid,
   Clock,
   Webhook,
   FileText,
@@ -59,7 +59,6 @@ import { CatchUpDialog } from './catch-up-dialog';
 import { ScheduledDialog } from './scheduled-dialog';
 import { StandupsDialog } from './standups-dialog';
 import { IntegrationsDialog } from './integrations-dialog';
-import { DecisionsDialog } from './decisions-dialog';
 import { WeeklyReportsDialog } from './weekly-reports-dialog';
 import { ThemePicker } from './theme-picker';
 import { WellbeingCard, FocusCard, DigestToggle, CalendarLink } from './wellbeing-card';
@@ -331,10 +330,11 @@ export function Sidebar({
             testId="standups-button"
           />
           <SectionButton
-            icon={<ClipboardCheck size={15} />}
-            label={t('decisions')}
-            onClick={() => setDialog('decisions')}
-            testId="decisions-button"
+            icon={<LayoutGrid size={15} />}
+            label="Applications"
+            active={mainView === 'applications'}
+            onClick={() => setMainView('applications')}
+            testId="applications-button"
           />
           <SectionButton
             icon={<BarChart3 size={15} />}
@@ -582,9 +582,6 @@ export function Sidebar({
       )}
       {dialog === 'standups' && (
         <StandupsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
-      )}
-      {dialog === 'decisions' && (
-        <DecisionsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
       )}
       {dialog === 'weekly-reports' && (
         <WeeklyReportsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />

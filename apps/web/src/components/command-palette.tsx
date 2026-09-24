@@ -7,7 +7,7 @@ import {
   Bell,
   Briefcase,
   CalendarClock,
-  ClipboardCheck,
+  LayoutGrid,
   Clock,
   FileText,
   Inbox,
@@ -88,6 +88,7 @@ export function CommandPalette() {
       { id: 'v-timeline', label: 'Open Team timeline', group: 'Navigate', icon: BarChart3, keywords: 'activity utilization', run: go('timeline') },
       { id: 'v-projects', label: 'Open Clients & Projects', group: 'Navigate', icon: Briefcase, keywords: 'billability margin revenue budget', run: go('projects') },
       { id: 'v-incidents', label: 'Open Incidents', group: 'Navigate', icon: Siren, keywords: 'oncall on-call sev outage postmortem', run: go('incidents') },
+      { id: 'v-applications', label: 'Open Applications', group: 'Navigate', icon: LayoutGrid, keywords: 'apps hub tools miro launchdarkly atlassian datadog salesforce status monitoring', run: go('applications') },
       { id: 'search', label: 'Search messages, files & people…', group: 'Navigate', icon: Search, keywords: 'find', run: () => { setSearchOpen(true); setCommandOpen(false); } },
     ];
     const ask: Cmd = {
@@ -100,7 +101,6 @@ export function CommandPalette() {
     };
     const tools: Cmd[] = [
       { id: 't-standups', label: 'Standups', group: 'Work', icon: CalendarClock, run: tool('standups') },
-      { id: 't-decisions', label: 'Decisions', group: 'Work', icon: ClipboardCheck, run: tool('decisions') },
       { id: 't-weekly', label: 'Weekly reports', group: 'Work', icon: BarChart3, run: tool('weekly-reports') },
       { id: 't-workflows', label: 'Workflows', group: 'Work', icon: Workflow, run: tool('workflows') },
       { id: 't-scheduled', label: 'Scheduled messages', group: 'Work', icon: Clock, run: tool('scheduled') },
