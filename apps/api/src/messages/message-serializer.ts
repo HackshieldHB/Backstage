@@ -49,6 +49,7 @@ export function toMessageDto(message: MessageWithRelations): MessageDto {
     conversationId: message.conversationId,
     user: message.user ? toUserDto(message.user) : null,
     kind: message.kind,
+    appName: message.appName ?? null,
     // Tombstone: deleted content never leaves the server.
     contentJson: isDeleted ? null : message.contentJson,
     contentText: isDeleted ? '' : message.contentText,

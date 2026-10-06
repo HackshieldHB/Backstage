@@ -5,11 +5,13 @@ import type {
   MeetingRecordDto,
   MeetingRecordSummaryDto,
   MeetingTranscriptLine,
+  TaskDto,
 } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { AiService } from '../ai/ai.service';
 import { DecisionsService } from '../decisions/decisions.service';
+import { TasksService } from '../tasks/tasks.service';
 import type { HuddleTranscriptLine } from '../realtime/huddle.service';
 
 /**
@@ -26,6 +28,7 @@ export class MeetingMinutesService {
     private readonly policy: PolicyService,
     private readonly ai: AiService,
     private readonly decisions: DecisionsService,
+    private readonly tasks: TasksService,
   ) {}
 
   /** Persist a finished meeting's transcript. Best-effort — never throws upward. */
@@ -140,6 +143,17 @@ export class MeetingMinutesService {
       title: item.slice(0, 200),
       detail: `Captured from the meeting on ${record.startedAt.toLocaleString()}.`,
     });
+  }
+
+  // ---------- action item → Task ----------
+
+  /** Works for channel and DM meetings alike; a named owner is auto-assigned when unambiguous. */
+  async actionItemToTask(userId: string, id: string, index: number): Promise<TaskDto> {
+    const record = await this.load(userId, id);
+    const items = (record.actionItems as unknown as string[]) ?? [];
+    const item = Number.isInteger(index) ? items[index] : undefined;
+    if (!item) throw new NotFoundException('Action item not found');
+    return this.tasks.createFromMeetingItem(userId, record, item);
   }
 
   async remove(userId: string, id: string): Promise<{ ok: boolean }> {

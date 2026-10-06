@@ -27,6 +27,8 @@ import { toUserDto } from '../auth/auth.service';
 import { AppRegistry } from '../integrations/app-registry';
 import { WorkflowsService } from '../workflows/workflows.service';
 import { ActivityService } from '../timesheet/activity.service';
+import { PresenceService } from '../presence/presence.service';
+import { WorkflowEvents } from '../workflows/workflow-events';
 
 export type Container =
   | { channelId: string; conversationId: null }
@@ -59,6 +61,8 @@ export class MessagesService {
     @Inject(forwardRef(() => WorkflowsService))
     private readonly workflows: WorkflowsService,
     private readonly activity: ActivityService,
+    private readonly presence: PresenceService,
+    private readonly workflowEvents: WorkflowEvents,
   ) {}
 
   // ---------- access helpers ----------
@@ -144,8 +148,13 @@ export class MessagesService {
     const memberSet = new Set(memberIds);
     const mentionedUserIds = [...new Set([...directUserIds, ...groupMemberIds])];
     const explicitTargets = mentionedUserIds.filter((id) => memberSet.has(id) && id !== userId);
-    const broadcastTargets =
-      mentions.channel || mentions.here ? memberIds.filter((id) => id !== userId) : [];
+    // @channel reaches every member; @here only those present right now.
+    const others = memberIds.filter((id) => id !== userId);
+    const broadcastTargets = mentions.channel
+      ? others
+      : mentions.here
+        ? await this.presence.presentUserIds(others)
+        : [];
 
     const message = await this.prisma.$transaction(async (tx) => {
       const created = await tx.message.create({
@@ -700,6 +709,17 @@ export class MessagesService {
       // (e.g. ✅ on a Jira card → Done). Fire-and-forget: never block or fail
       // the reaction on an integration's behalf.
       void this.apps.onReaction(userId, message, input.emoji).catch(() => undefined);
+      if (message.channelId) {
+        void this.workflowEvents.emit({
+          type: 'reaction_added',
+          workspaceId: message.workspaceId,
+          channelId: message.channelId,
+          messageId: message.id,
+          userId,
+          emoji: input.emoji,
+          messageText: message.contentText,
+        });
+      }
       if (message.userId && message.userId !== userId) {
         const n = await this.prisma.notification.create({
           data: {

@@ -26,4 +26,6 @@ export * from './schemas/huddle';
 export * from './schemas/meeting-insights';
 export * from './schemas/meeting-minutes';
 export * from './schemas/availability';
+export * from './schemas/task';
+export * from './schemas/workflow';
 export * from './socket';

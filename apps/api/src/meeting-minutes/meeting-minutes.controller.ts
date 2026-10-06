@@ -31,6 +31,11 @@ export class MeetingMinutesController {
     return this.minutes.actionItemToDecision(user.id, id, Number(index));
   }
 
+  @Post('meeting-records/:id/action-items/:index/task')
+  toTask(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('index') index: string) {
+    return this.minutes.actionItemToTask(user.id, id, Number(index));
+  }
+
   @Delete('meeting-records/:id')
   remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.minutes.remove(user.id, id);

@@ -282,6 +282,19 @@ describe('files, search, presence, activity (e2e)', () => {
       expect(past.body.data.messages).toHaveLength(2);
     });
 
+    it('supports "quoted phrases" and -excluded terms', async () => {
+      const q = (s: string) =>
+        http().get(`/workspaces/${workspaceId}/search?q=${encodeURIComponent(s)}`).set(auth(bob)).expect(200);
+
+      const phrase = await q(`"migratory zeppelin-${run}"`);
+      expect(phrase.body.data.messages).toHaveLength(1);
+      expect(phrase.body.data.messages[0].contentText).toContain('migratory');
+
+      const excluded = await q(`zeppelin-${run} -maintenance`);
+      expect(excluded.body.data.messages).toHaveLength(1);
+      expect(excluded.body.data.messages[0].contentText).not.toContain('maintenance');
+    });
+
     it('files/channels/people tabs are scoped too', async () => {
       const res = await http()
         .get(`/workspaces/${workspaceId}/search?q=fsp`)
@@ -304,7 +317,7 @@ describe('files, search, presence, activity (e2e)', () => {
       const plan = await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
         return tx.$queryRaw<Array<{ 'QUERY PLAN': string }>>(
-          Prisma.sql`EXPLAIN SELECT id FROM "Message" WHERE "searchVector" @@ plainto_tsquery('english', ${'zeppelin'})`,
+          Prisma.sql`EXPLAIN SELECT id FROM "Message" WHERE "searchVector" @@ websearch_to_tsquery('english', ${'zeppelin'})`,
         );
       });
       const planText = plan.map((r) => r['QUERY PLAN']).join('\n');

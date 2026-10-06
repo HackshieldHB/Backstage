@@ -4,7 +4,9 @@ import { useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
 import {
+  AlarmClock,
   Bookmark,
+  CheckSquare,
   Forward,
   Languages,
   MessageSquareText,
@@ -39,6 +41,7 @@ import { Tooltip } from './tooltip';
 import { ConfirmDialog, PromptDialog } from './confirm-dialog';
 import { Emoji } from './custom-emoji';
 import { ForwardDialog } from './forward-dialog';
+import { CreateTaskFromMessageDialog, RemindMeDialog } from './message-task-dialogs';
 
 const QUICK_EMOJI = ['thumbsup', 'heart', 'joy', 'eyes', 'tada'];
 
@@ -67,6 +70,8 @@ export function MessageItem({
   const [localEditing, setLocalEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [forwardOpen, setForwardOpen] = useState(false);
+  const [taskOpen, setTaskOpen] = useState(false);
+  const [remindOpen, setRemindOpen] = useState(false);
   const [translation, setTranslation] = useState<string | null>(null);
   const ai = useAiStatus();
   const pushToast = useUiStore((s) => s.pushToast);
@@ -130,7 +135,11 @@ export function MessageItem({
           {time}
         </span>
       ) : message.kind === 'INTEGRATION' ? (
-        <JiraAvatar className="mt-0.5" />
+        message.appName ? (
+          <AppAvatar name={message.appName} className="mt-0.5" />
+        ) : (
+          <JiraAvatar className="mt-0.5" />
+        )
       ) : message.user ? (
         <button
           type="button"
@@ -150,7 +159,7 @@ export function MessageItem({
           <div className="flex items-baseline gap-2">
             <span className="text-[15px] font-semibold text-ink">
               {message.kind === 'INTEGRATION'
-                ? 'Jira'
+                ? (message.appName ?? 'Jira')
                 : (message.user?.displayName ?? (message.pending ? me?.displayName : 'Unknown user'))}
             </span>
             <span className="text-[11px] text-ink-3">{time}</span>
@@ -275,6 +284,12 @@ export function MessageItem({
           <ToolbarButton title="Forward" onClick={() => setForwardOpen(true)} testId="forward-message">
             <Forward size={15} />
           </ToolbarButton>
+          <ToolbarButton title="Create task" onClick={() => setTaskOpen(true)} testId="create-task-from-message">
+            <CheckSquare size={15} />
+          </ToolbarButton>
+          <ToolbarButton title="Remind me about this" onClick={() => setRemindOpen(true)} testId="remind-me-message">
+            <AlarmClock size={15} />
+          </ToolbarButton>
           {ai.data?.enabled && (
             <ToolbarButton
               title="Translate to English"
@@ -352,6 +367,23 @@ export function MessageItem({
         />
       )}
 
+      {taskOpen && (
+        <CreateTaskFromMessageDialog
+          workspaceId={message.workspaceId}
+          messageId={message.id}
+          messageText={message.contentText}
+          onClose={() => setTaskOpen(false)}
+        />
+      )}
+
+      {remindOpen && (
+        <RemindMeDialog
+          workspaceId={message.workspaceId}
+          messageId={message.id}
+          onClose={() => setRemindOpen(false)}
+        />
+      )}
+
       {deleteOpen && (
         <ConfirmDialog
           title="Delete message"
@@ -414,6 +446,21 @@ function PollCard({
         {poll.allowMultiple ? ' · multiple choice' : ''}
       </div>
     </div>
+  );
+}
+
+/** App identity for non-Jira INTEGRATION messages (workflows, AI, Confluence…): the app's initial. */
+function AppAvatar({ name, className }: { name: string; className?: string }) {
+  return (
+    <span
+      className={clsx(
+        'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-[15px] font-semibold text-accent',
+        className,
+      )}
+      aria-hidden
+    >
+      {name.trim().charAt(0).toUpperCase() || '•'}
+    </span>
   );
 }
 

@@ -180,6 +180,7 @@ export class BitbucketEventsService {
     if (!existing) {
       const message = await this.integrationMessages.post(channelContainer(sub.channelId), {
         workspaceId: sub.workspaceId,
+        appName: 'Bitbucket',
         contentText: text,
         contentJson: doc(text, url),
         unfurls: unfurl ? [unfurl] : undefined,
@@ -195,6 +196,7 @@ export class BitbucketEventsService {
     } else {
       await this.integrationMessages.post(channelContainer(sub.channelId), {
         workspaceId: sub.workspaceId,
+        appName: 'Bitbucket',
         contentText: text,
         contentJson: doc(text, url),
         parentId: existing.messageId,

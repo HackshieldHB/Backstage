@@ -238,6 +238,7 @@ export class ConfluenceService {
     await this.integrationMessages.post(channelContainer(message.channelId), {
       workspaceId: channel.workspaceId,
       contentText: text,
+      appName: 'Confluence',
       contentJson: {
         type: 'doc',
         content: [

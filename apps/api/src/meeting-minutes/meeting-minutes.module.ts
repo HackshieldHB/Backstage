@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module';
 import { DecisionsModule } from '../decisions/decisions.module';
+import { TasksModule } from '../tasks/tasks.module';
 import { MeetingMinutesController } from './meeting-minutes.controller';
 import { MeetingMinutesService } from './meeting-minutes.service';
 
@@ -8,7 +9,7 @@ import { MeetingMinutesService } from './meeting-minutes.service';
  *  without a module import cycle (mirrors TimesheetModule). */
 @Global()
 @Module({
-  imports: [AiModule, DecisionsModule],
+  imports: [AiModule, DecisionsModule, TasksModule],
   controllers: [MeetingMinutesController],
   providers: [MeetingMinutesService],
   exports: [MeetingMinutesService],

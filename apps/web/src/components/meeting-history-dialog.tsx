@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowLeft, ChevronRight, ClipboardCheck, FileText, Loader2, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronRight, CheckSquare, FileText, Loader2, Sparkles, Trash2 } from 'lucide-react';
 import type { Container } from '@/hooks/queries';
 import {
   useAiStatus,
-  useActionItemToDecision,
+  useActionItemToTask,
   useDeleteMeetingRecord,
   useGenerateMinutes,
   useMeetingRecord,
@@ -28,6 +28,7 @@ function durationLabel(startIso: string, endIso: string): string {
 
 export function MeetingHistoryDialog({
   container,
+  workspaceId,
   onClose,
 }: {
   container: Container;
@@ -40,7 +41,7 @@ export function MeetingHistoryDialog({
   return (
     <Dialog title={selectedId ? 'Meeting minutes' : 'Meeting history'} onClose={onClose}>
       {selectedId ? (
-        <MeetingDetail id={selectedId} container={container} onBack={() => setSelectedId(null)} />
+        <MeetingDetail id={selectedId} container={container} workspaceId={workspaceId} onBack={() => setSelectedId(null)} />
       ) : (
         <div className="min-w-[320px]">
           {records.isLoading ? (
@@ -84,11 +85,22 @@ export function MeetingHistoryDialog({
   );
 }
 
-function MeetingDetail({ id, container, onBack }: { id: string; container: Container; onBack: () => void }) {
+function MeetingDetail({
+  id,
+  container,
+  workspaceId,
+  onBack,
+}: {
+  id: string;
+  container: Container;
+  workspaceId: string;
+  onBack: () => void;
+}) {
   const record = useMeetingRecord(id);
   const ai = useAiStatus();
   const generate = useGenerateMinutes(container);
-  const toDecision = useActionItemToDecision();
+  const toTask = useActionItemToTask(workspaceId);
+  const [taskCreated, setTaskCreated] = useState<Set<number>>(new Set());
   const del = useDeleteMeetingRecord(container);
   const pushToast = useUiStore((s) => s.pushToast);
   const [showTranscript, setShowTranscript] = useState(false);
@@ -167,23 +179,29 @@ function MeetingDetail({ id, container, onBack }: { id: string; container: Conta
                     {r.actionItems.map((item, i) => (
                       <li key={i} className="flex items-start gap-2 text-[13px] text-ink">
                         <span className="flex-1">{item}</span>
-                        {container.kind === 'channel' && (
-                          <button
-                            onClick={() =>
-                              toDecision.mutate(
-                                { id: r.id, index: i },
-                                {
-                                  onSuccess: () => pushToast('Added to Decisions.', 'success'),
-                                  onError: () => pushToast('Could not add to Decisions.', 'error'),
+                        <button
+                          onClick={() =>
+                            toTask.mutate(
+                              { id: r.id, index: i },
+                              {
+                                onSuccess: (task) => {
+                                  setTaskCreated((s) => new Set(s).add(i));
+                                  pushToast(
+                                    task.assignee ? `Task created for ${task.assignee.displayName}.` : 'Task created.',
+                                    'success',
+                                  );
                                 },
-                              )
-                            }
-                            title="Turn into a Decision"
-                            className="flex shrink-0 items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[11px] font-medium text-ink-2 hover:bg-hovered"
-                          >
-                            <ClipboardCheck size={12} /> Decision
-                          </button>
-                        )}
+                                onError: () => pushToast('Could not create the task.', 'error'),
+                              },
+                            )
+                          }
+                          disabled={toTask.isPending || taskCreated.has(i)}
+                          title="Turn into a task (a named owner is assigned automatically)"
+                          data-testid={`action-item-task-${i}`}
+                          className="flex shrink-0 items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[11px] font-medium text-ink-2 hover:bg-hovered disabled:opacity-50"
+                        >
+                          <CheckSquare size={12} /> {taskCreated.has(i) ? 'Added' : 'Task'}
+                        </button>
                       </li>
                     ))}
                   </ul>

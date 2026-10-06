@@ -61,6 +61,10 @@ import type {
   HuddleRecapDto,
   ScheduledHuddleDto,
   ScheduleHuddleInput,
+  TaskDto,
+  CreateTaskInput,
+  UpdateTaskInput,
+  WorkflowDto,
 } from '@backstages/shared';
 import { api } from '@/lib/api';
 
@@ -130,6 +134,7 @@ export const keys = {
   recsBestTime: (ws: string, target: string) => ['recs-best-time', ws, target] as const,
   recsExperts: (ws: string, q: string) => ['recs-experts', ws, q] as const,
   recsKnowledge: (messageId: string) => ['recs-knowledge', messageId] as const,
+  tasks: (ws: string) => ['tasks', ws] as const,
 };
 
 export function useWorkspaces() {
@@ -476,14 +481,7 @@ export function useCustomEmoji(workspaceId: string) {
   });
 }
 
-export interface WorkflowView {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: string;
-  config: { channelId: string; keyword?: string; actionChannelId: string; actionText: string };
-  createdAt: string;
-}
+export type WorkflowView = WorkflowDto;
 
 export function useWorkflows(workspaceId: string, enabled = true) {
   return useQuery({
@@ -578,13 +576,62 @@ export function useGenerateMinutes(container: Container) {
   });
 }
 
-export function useActionItemToDecision() {
+export function useActionItemToTask(workspaceId: string) {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, index }: { id: string; index: number }) =>
-      api<import('@backstages/shared').DecisionDto>(
-        'POST',
-        `/meeting-records/${id}/action-items/${index}/decision`,
-      ),
+      api<TaskDto>('POST', `/meeting-records/${id}/action-items/${index}/task`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.tasks(workspaceId) }),
+  });
+}
+
+// ---------- tasks ----------
+
+export function useTasks(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.tasks(workspaceId),
+    queryFn: () => api<TaskDto[]>('GET', `/workspaces/${workspaceId}/tasks`),
+    enabled: enabled && !!workspaceId,
+  });
+}
+
+export function useCreateTask(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateTaskInput) => api<TaskDto>('POST', `/workspaces/${workspaceId}/tasks`, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.tasks(workspaceId) }),
+  });
+}
+
+export function useUpdateTask(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: UpdateTaskInput & { id: string }) =>
+      api<TaskDto>('PATCH', `/tasks/${id}`, input),
+    onSuccess: (task) => {
+      qc.setQueryData<TaskDto[]>(keys.tasks(workspaceId), (old) =>
+        old?.map((t) => (t.id === task.id ? task : t)),
+      );
+      void qc.invalidateQueries({ queryKey: keys.tasks(workspaceId) });
+    },
+  });
+}
+
+export function useDeleteTask(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<{ ok: boolean }>('DELETE', `/tasks/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.tasks(workspaceId) }),
+  });
+}
+
+/** "Remind me about this message" at a given time. */
+export function useRemindAboutMessage(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, remindAt }: { messageId: string; remindAt: string }) =>
+      api<ScheduledMessageDto>('POST', `/messages/${messageId}/remind`, { remindAt }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.scheduled(workspaceId) }),
   });
 }
 

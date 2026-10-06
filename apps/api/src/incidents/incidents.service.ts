@@ -13,6 +13,7 @@ import type {
 } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
+import { WorkflowEvents } from '../workflows/workflow-events';
 
 const userSelect = { select: { id: true, displayName: true, avatarUrl: true } };
 const incidentInclude = {
@@ -26,6 +27,7 @@ export class IncidentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
+    private readonly workflowEvents: WorkflowEvents,
   ) {}
 
   async list(userId: string, workspaceId: string): Promise<IncidentDto[]> {
@@ -56,6 +58,14 @@ export class IncidentsService {
         },
       },
       include: incidentInclude,
+    });
+    void this.workflowEvents.emit({
+      type: 'incident_declared',
+      workspaceId,
+      incidentId: row.id,
+      title: row.title,
+      severity: input.severity,
+      userId,
     });
     return toDto(row);
   }

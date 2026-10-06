@@ -17,4 +17,13 @@ export interface ScheduledMessageDto {
   scheduledFor: string;
   /** True when it has no channel/DM target — a personal /remind reminder. */
   isReminder: boolean;
+  /** For a message reminder: the message it points at. */
+  messageId: string | null;
 }
+
+/** "Remind me about this message" — a personal reminder that links back to it. */
+export const RemindAboutMessageSchema = z.object({
+  /** ISO 8601 timestamp; must be in the future. */
+  remindAt: z.string().datetime(),
+});
+export type RemindAboutMessageInput = z.infer<typeof RemindAboutMessageSchema>;

@@ -26,6 +26,8 @@ export class IntegrationMessagesService {
       unfurls?: unknown;
       /** Skip unread push for these members (e.g. dedup rule for DM'd users). */
       suppressUnreadFor?: string[];
+      /** Display name of the posting app (omit for Jira, the original integration). */
+      appName?: string;
     },
   ): Promise<MessageDto> {
     const message = await this.prisma.message.create({
@@ -35,6 +37,7 @@ export class IntegrationMessagesService {
         conversationId: container.conversationId,
         userId: null,
         kind: 'INTEGRATION',
+        appName: input.appName ?? null,
         contentJson: (input.contentJson ?? {}) as Prisma.InputJsonValue,
         contentText: input.contentText,
         parentId: input.parentId ?? null,

@@ -6,6 +6,8 @@ import {
   ListMessagesQuerySchema,
   MarkReadInput,
   MarkReadSchema,
+  RemindAboutMessageInput,
+  RemindAboutMessageSchema,
   ScheduleMessageInput,
   ScheduleMessageSchema,
   SendMessageInput,
@@ -180,6 +182,15 @@ export class MessagesController {
     @Body(new ZodValidationPipe(ScheduleMessageSchema)) body: ScheduleMessageInput,
   ) {
     return this.scheduled.scheduleForConversation(user.id, conversationId, body);
+  }
+
+  @Post('messages/:id/remind')
+  remindAboutMessage(
+    @CurrentUser() user: AuthUser,
+    @Param('id') messageId: string,
+    @Body(new ZodValidationPipe(RemindAboutMessageSchema)) body: RemindAboutMessageInput,
+  ) {
+    return this.scheduled.remindAboutMessage(user.id, messageId, new Date(body.remindAt));
   }
 
   @Get('workspaces/:id/scheduled')

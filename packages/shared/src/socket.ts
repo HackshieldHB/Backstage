@@ -51,6 +51,8 @@ export const SOCKET_EVENTS = {
   HUDDLE_WHITEBOARD: 'huddle:whiteboard',
   /** Breakout-room configuration + per-participant assignments. */
   HUDDLE_BREAKOUT: 'huddle:breakout',
+  /** A task the recipient can see was created, updated or deleted. */
+  TASK_CHANGED: 'task:changed',
 } as const;
 
 export type SocketEventName = (typeof SOCKET_EVENTS)[keyof typeof SOCKET_EVENTS];

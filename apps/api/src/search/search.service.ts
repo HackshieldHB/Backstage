@@ -109,7 +109,7 @@ export class SearchService {
 
     if (parsed.text) {
       conditions.push(
-        Prisma.sql`m."searchVector" @@ plainto_tsquery('english', ${parsed.text})`,
+        Prisma.sql`m."searchVector" @@ websearch_to_tsquery('english', ${parsed.text})`,
       );
     }
     if (parsed.from) {
@@ -146,7 +146,7 @@ export class SearchService {
 
     const where = Prisma.join(conditions, ' AND ');
     const order = parsed.text
-      ? Prisma.sql`ts_rank(m."searchVector", plainto_tsquery('english', ${parsed.text})) DESC, m."createdAt" DESC`
+      ? Prisma.sql`ts_rank(m."searchVector", websearch_to_tsquery('english', ${parsed.text})) DESC, m."createdAt" DESC`
       : Prisma.sql`m."createdAt" DESC`;
 
     const rows = await this.prisma.$queryRaw<Array<{ id: string }>>(

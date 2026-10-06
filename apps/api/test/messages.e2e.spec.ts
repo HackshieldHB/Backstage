@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ScheduledMessagesService, parseRemind } from '../src/messages/scheduled-messages.service';
+import { PresenceService } from '../src/presence/presence.service';
 
 describe('messages (e2e)', () => {
   let app: INestApplication;
@@ -407,6 +408,43 @@ describe('messages (e2e)', () => {
       });
       expect(mentionRows).toBe(1);
       expect(notificationRows).toBe(1);
+    });
+
+    it('@here notifies only members who are present; @channel notifies everyone', async () => {
+      const c = await http()
+        .post(`/workspaces/${workspaceId}/channels`)
+        .set(auth(alice))
+        .send({ name: `here-test-${run}` })
+        .expect(201);
+      const cid = c.body.data.id;
+      await http().post(`/channels/${cid}/join`).set(auth(bob)).expect(200);
+      const special = (id: 'here' | 'channel') => ({
+        clientMsgId: randomUUID(),
+        contentJson: {
+          type: 'doc',
+          content: [{ type: 'paragraph', content: [{ type: 'mention', attrs: { id, label: id } }] }],
+        },
+        contentText: `@${id} ping`,
+      });
+      const bobMentions = () => prisma.mention.count({ where: { userId: bob.id, message: { channelId: cid } } });
+      const presence = app.get(PresenceService);
+
+      // Bob has no live socket → offline → @here skips him.
+      await http().post(`/channels/${cid}/messages`).set(auth(alice)).send(special('here')).expect(201);
+      expect(await bobMentions()).toBe(0);
+
+      // Once Bob is online, @here reaches him.
+      await presence.heartbeat(bob.id);
+      try {
+        await http().post(`/channels/${cid}/messages`).set(auth(alice)).send(special('here')).expect(201);
+        expect(await bobMentions()).toBe(1);
+      } finally {
+        await presence.disconnected(bob.id);
+      }
+
+      // @channel ignores presence.
+      await http().post(`/channels/${cid}/messages`).set(auth(alice)).send(special('channel')).expect(201);
+      expect(await bobMentions()).toBe(2);
     });
   });
 

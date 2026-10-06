@@ -30,7 +30,7 @@ function makeService(role: 'OWNER' | 'ADMIN' | 'MEMBER' = 'MEMBER') {
     workspaceMember: { findUnique: jest.fn(async () => ({ id: 'm1' })) },
   } as any;
   const policy = { requireWorkspaceMember: jest.fn(async () => ({ role })) } as any;
-  return { svc: new IncidentsService(prisma, policy), prisma, update };
+  return { svc: new IncidentsService(prisma, policy, { emit: jest.fn(async () => undefined) } as any), prisma, update };
 }
 
 describe('IncidentsService.addUpdate', () => {

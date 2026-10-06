@@ -3,9 +3,10 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
-import { ArrowLeft, AtSign, Bell, BellOff, Clock, FileText, Hash, Link2, ListChecks, MessageSquareText, Reply, Smile, Sparkles, SquareKanban, Trash2, X } from 'lucide-react';
+import { AlarmClock, ArrowLeft, AtSign, Bell, BellOff, CheckSquare, Clock, FileText, Hash, Link2, ListChecks, MessageSquareText, Reply, Smile, Sparkles, SquareKanban, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, fileUrl } from '@/lib/api';
+import { taskOrReminderText } from '@/lib/notification-text';
 import { useUiStore, type RightPanel } from '@/stores/ui-store';
 import {
   keys,
@@ -639,6 +640,7 @@ function DetailsPanel({
 
 interface NotifPayload {
   source?: string;
+  text?: string;
   action?: string;
   issueKey?: string;
   title?: string;
@@ -649,6 +651,8 @@ interface NotifPayload {
 }
 
 function iconForNotification(type: string, pl: NotifPayload) {
+  if (type === 'SYSTEM' && pl.source === 'task') return <CheckSquare size={14} className="text-accent" />;
+  if (type === 'SYSTEM' && pl.source === 'reminder') return <AlarmClock size={14} className="text-amber-500" />;
   if (type === 'SYSTEM' && pl.source === 'jira')
     return <SquareKanban size={14} className="text-[#2684FF]" />;
   if (type === 'SYSTEM' && pl.source === 'confluence')
@@ -678,6 +682,7 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
   const qc = useQueryClient();
   const muted = useUiStore((s) => s.notificationsMuted);
   const setMuted = useUiStore((s) => s.setNotificationsMuted);
+  const setMainView = useUiStore((s) => s.setMainView);
   const [priorityOnly, setPriorityOnly] = useState(false);
 
   const all = notifications.data?.notifications ?? [];
@@ -723,8 +728,12 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
       </div>
       {items.map((n) => {
         const pl = (n.payload ?? {}) as NotifPayload;
-        const sysText = n.type === 'SYSTEM' ? systemText(pl) : null;
+        const sysText = n.type === 'SYSTEM' ? (taskOrReminderText(pl, n.actor?.displayName) ?? systemText(pl)) : null;
         const open = () => {
+          if (pl.source === 'task') {
+            setMainView('tasks');
+            return;
+          }
           if (pl.url) window.open(pl.url, '_blank', 'noopener');
           else if (n.channelId) onNavigate({ kind: 'channel', id: n.channelId }, n.messageId ?? undefined);
           else if (n.conversationId)

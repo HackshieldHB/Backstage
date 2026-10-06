@@ -8,6 +8,7 @@ import {
   Bookmark,
   Briefcase,
   CalendarClock,
+  CheckSquare,
   ChevronDown,
   LayoutGrid,
   Clock,
@@ -42,6 +43,7 @@ import {
   useMembers,
   useNotifications,
   usePresence,
+  useTasks,
   useUnreads,
   useWorkspaces,
   type ChannelWithMeta,
@@ -126,6 +128,18 @@ export function Sidebar({
     unreads.data?.find((u) => (u.channelId ?? u.conversationId) === id) ?? { unread: 0, mentions: 0 };
 
   const activityBadge = notifications.data?.unreadCount ?? 0;
+  const tasks = useTasks(workspaceId);
+  // Badge = your open tasks that are already overdue.
+  const overdueTasks = useMemo(() => {
+    const now = Date.now();
+    return (tasks.data ?? []).filter(
+      (t) =>
+        t.status === 'OPEN' &&
+        !!t.dueAt &&
+        new Date(t.dueAt).getTime() < now &&
+        (t.assignee ? t.assignee.id === me?.id : t.createdBy.id === me?.id),
+    ).length;
+  }, [tasks.data, me?.id]);
 
   const ungroupedChannels = useMemo(() => channels.filter((c) => !c.groupKey), [channels]);
   const groupedChannels = useMemo(() => {
@@ -242,6 +256,14 @@ export function Sidebar({
           active={mainView === 'discover'}
           onClick={() => setMainView('discover')}
           testId="discover-button"
+        />
+        <SectionButton
+          icon={<CheckSquare size={15} />}
+          label="Tasks"
+          badge={overdueTasks}
+          active={mainView === 'tasks'}
+          onClick={() => setMainView('tasks')}
+          testId="tasks-button"
         />
         <SectionButton
           icon={<MessageSquare size={15} />}
@@ -568,6 +590,7 @@ export function Sidebar({
         <WorkflowsDialog
           workspaceId={workspaceId}
           channels={channels}
+          canManage={isAdmin}
           onClose={() => setDialog('none')}
         />
       )}

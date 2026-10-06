@@ -10,6 +10,7 @@ import {
   type NotificationNewPayload,
   type PresenceChangedPayload,
   type ReactionChangedPayload,
+  type TaskChangedPayload,
   type ThreadReplyPayload,
   type TypingPayload,
   type UnreadUpdatedPayload,
@@ -18,6 +19,7 @@ import {
 } from '@backstages/shared';
 import type { InfiniteData } from '@tanstack/react-query';
 import { getSocket } from '@/lib/socket';
+import { taskOrReminderText } from '@/lib/notification-text';
 import { useUiStore } from '@/stores/ui-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { appendMessage, isQuietNow, keys, patchMessage, replaceMessage, useAvailability } from './queries';
@@ -146,9 +148,11 @@ export function useRealtime(workspaceId: string | null) {
         issueKey?: string;
         title?: string;
         direction?: string;
+        text?: string;
       };
       const title =
-        pl.action === 'created' && pl.source === 'jira'
+        taskOrReminderText(pl, p.actor?.displayName) ??
+        (pl.action === 'created' && pl.source === 'jira'
           ? `Jira issue created: ${pl.issueKey ?? ''}`
           : pl.action === 'created' && pl.source === 'confluence'
             ? `Confluence page created: ${pl.title ?? ''}`
@@ -164,7 +168,7 @@ export function useRealtime(workspaceId: string | null) {
                     ? `New message from ${p.actor?.displayName ?? 'someone'}`
                     : p.type === 'REACTION'
                       ? `${p.actor?.displayName ?? 'Someone'} reacted to your message`
-                      : 'New activity in Backstages';
+                      : 'New activity in Backstages');
 
       const focused = typeof document !== 'undefined' && document.hasFocus();
       if (focused) {
@@ -212,6 +216,10 @@ export function useRealtime(workspaceId: string | null) {
       qc.invalidateQueries({ queryKey: keys.browse(workspaceId) });
     };
 
+    const onTaskChanged = (p: TaskChangedPayload) => {
+      qc.invalidateQueries({ queryKey: keys.tasks(p.workspaceId) });
+    };
+
     socket.on(SOCKET_EVENTS.MESSAGE_NEW, onMessageNew);
     socket.on(SOCKET_EVENTS.MESSAGE_UPDATED, onMessageUpdated);
     socket.on(SOCKET_EVENTS.MESSAGE_DELETED, onMessageDeleted);
@@ -227,6 +235,7 @@ export function useRealtime(workspaceId: string | null) {
     socket.on(SOCKET_EVENTS.CHANNEL_UPDATED, onChannelsChanged);
     socket.on(SOCKET_EVENTS.MEMBER_JOINED, onChannelsChanged);
     socket.on(SOCKET_EVENTS.MEMBER_LEFT, onChannelsChanged);
+    socket.on(SOCKET_EVENTS.TASK_CHANGED, onTaskChanged);
 
     return () => {
       socket.off(SOCKET_EVENTS.MESSAGE_NEW, onMessageNew);
@@ -244,6 +253,7 @@ export function useRealtime(workspaceId: string | null) {
       socket.off(SOCKET_EVENTS.CHANNEL_UPDATED, onChannelsChanged);
       socket.off(SOCKET_EVENTS.MEMBER_JOINED, onChannelsChanged);
       socket.off(SOCKET_EVENTS.MEMBER_LEFT, onChannelsChanged);
+      socket.off(SOCKET_EVENTS.TASK_CHANGED, onTaskChanged);
     };
   }, [workspaceId, me, qc, upsertTyping, removeTyping]);
 }

@@ -17,6 +17,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { AuditService } from '../admin/audit.service';
 import { EmailService } from '../email/email.service';
+import { WorkflowEvents } from '../workflows/workflow-events';
 import { sha256 } from '../auth/token.service';
 import { toUserDto } from '../auth/auth.service';
 
@@ -29,6 +30,7 @@ export class WorkspacesService {
     private readonly policy: PolicyService,
     private readonly audit: AuditService,
     private readonly email: EmailService,
+    private readonly workflowEvents: WorkflowEvents,
   ) {}
 
   async create(userId: string, input: CreateWorkspaceInput) {
@@ -220,7 +222,7 @@ export class WorkspacesService {
     });
     if (existing) throw new BadRequestException('Already a member of this workspace');
 
-    await this.prisma.$transaction(async (tx) => {
+    const joinedChannelId = await this.prisma.$transaction(async (tx) => {
       await tx.workspaceMember.create({
         data: { workspaceId: invite.workspaceId, userId, role: invite.role },
       });
@@ -238,7 +240,16 @@ export class WorkspacesService {
           ...(invite.email ? { usedAt: new Date(), usedById: userId } : {}),
         },
       });
+      return general && invite.role !== 'GUEST' ? general.id : null;
     });
+    if (joinedChannelId) {
+      void this.workflowEvents.emit({
+        type: 'member_joined',
+        workspaceId: invite.workspaceId,
+        channelId: joinedChannelId,
+        userId,
+      });
+    }
 
     return this.getById(userId, invite.workspaceId);
   }

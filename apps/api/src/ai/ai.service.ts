@@ -56,19 +56,24 @@ export class AiService {
     return this.client;
   }
 
-  /** One-shot Claude call returning plain text. Thinking is disabled — these are
-   *  lightweight text transforms, not reasoning tasks. */
-  private async complete(system: string, user: string, maxTokens = 1024): Promise<string> {
-    const res = await this.anthropic().messages.create({
-      model: 'claude-opus-5',
-      max_tokens: maxTokens,
-      thinking: { type: 'disabled' },
+  /** One-shot Claude call returning plain text. These are lightweight text
+   *  transforms, so effort is `low`; thinking can't be disabled on this model.
+   *  Output length is steered by the prompts — `max_tokens` is only a safety cap
+   *  (it also covers thinking tokens, so it is deliberately generous). A safety
+   *  decline is retried server-side on a fallback model before we give up. */
+  private async complete(system: string, user: string): Promise<string> {
+    const res = await this.anthropic().beta.messages.create({
+      model: 'claude-opus-5-5',
+      max_tokens: 16000,
+      output_config: { effort: 'low' },
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
       system,
       messages: [{ role: 'user', content: user }],
     });
     if (res.stop_reason === 'refusal') return 'The assistant declined to respond to this content.';
     return res.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
       .map((b) => b.text)
       .join('')
       .trim();
@@ -92,7 +97,6 @@ export class AiService {
     return this.complete(
       'You write a team\'s weekly wrap-up from raw activity facts. Open with one upbeat sentence on what the team accomplished, then 3–5 tight bullet points grouping shipped work, decisions, and collaboration. Be concrete, never invent facts beyond those given, and keep it under 130 words. No preamble, no closing sign-off.',
       `Write this week's team wrap-up from these facts:\n\n${facts}`,
-      600,
     );
   }
 
@@ -163,7 +167,6 @@ export class AiService {
     const answer = await this.complete(
       "You answer a teammate's question using ONLY the numbered context from their workspace. Cite the sources you rely on inline as [n]. Be concise (2–5 sentences). If the context doesn't contain the answer, say you couldn't find it — never invent facts.",
       `Question: ${question}\n\nContext:\n${ctx.join('\n')}`,
-      700,
     );
     return { answer, sources };
   }
@@ -209,7 +212,6 @@ export class AiService {
     const summary = await this.complete(
       'You catch a teammate up on a busy channel. Reply with a short digest: the main topics, any decisions, and open action items, as tight bullet points. No preamble.',
       `Summarize the recent conversation in this channel:\n\n${transcript}`,
-      1500,
     );
     return { summary };
   }
@@ -235,7 +237,6 @@ export class AiService {
     const out = await this.complete(
       'You extract concrete, actionable to-do items from a team discussion. Reply with one action item per line in the imperative voice — no numbering, no preamble. If there are no clear action items, reply with the single word NONE.',
       `Extract the action items from this discussion:\n\n${transcript}`,
-      600,
     );
     return { items: parseActionItems(out) };
   }
@@ -257,12 +258,10 @@ export class AiService {
       this.complete(
         'You summarise a team meeting from its chat and shared notes. Write 3–6 concise bullet points (each starting with "- ") covering the key discussion and any decisions. No preamble, no closing remarks.',
         transcript,
-        600,
       ),
       this.complete(
         'You extract concrete action items from a meeting. Reply with one action item per line in the imperative voice — prefix an owner when clearly named (e.g. "Kevin — review the config"). No numbering, no preamble. Reply with the single word NONE if there are none.',
         transcript,
-        500,
       ),
     ]);
     const actionItems = parseActionItems(itemsRaw);
@@ -281,6 +280,7 @@ export class AiService {
         workspaceId,
         contentText,
         contentJson: textDoc(lines),
+        appName: 'Backstages AI',
       });
       posted = true;
     }
@@ -302,17 +302,14 @@ export class AiService {
       this.complete(
         'You write concise minutes of a team meeting from its transcript. Reply with 3–6 bullet points (each starting with "- ") covering the key discussion. No preamble, no closing remarks.',
         text,
-        700,
       ),
       this.complete(
         'You list the concrete decisions a team reached in this meeting. One decision per line, no numbering, no preamble. Reply with the single word NONE if there are none.',
         text,
-        400,
       ),
       this.complete(
         'You extract concrete action items from a meeting. Reply with one action item per line in the imperative voice — prefix an owner when clearly named (e.g. "Kevin — review the config"). No numbering, no preamble. Reply with the single word NONE if there are none.',
         text,
-        500,
       ),
     ]);
     return { summary, decisions: parseActionItems(decisionsRaw), actionItems: parseActionItems(itemsRaw) };
@@ -327,7 +324,6 @@ export class AiService {
     const translation = await this.complete(
       `You are a translator. Translate the user's text into ${lang}. Reply with ONLY the translation — no notes, no quotes, no preamble.`,
       t.slice(0, 2000),
-      400,
     );
     return { translation };
   }

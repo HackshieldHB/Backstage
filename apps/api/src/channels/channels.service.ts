@@ -11,6 +11,7 @@ import { PolicyService } from '../authz/policy.service';
 import { toUserDto } from '../auth/auth.service';
 import { RealtimeService, roomForChannel } from '../realtime/realtime.service';
 import { AuditService } from '../admin/audit.service';
+import { WorkflowEvents } from '../workflows/workflow-events';
 
 @Injectable()
 export class ChannelsService {
@@ -19,6 +20,7 @@ export class ChannelsService {
     private readonly policy: PolicyService,
     private readonly realtime: RealtimeService,
     private readonly audit: AuditService,
+    private readonly workflowEvents: WorkflowEvents,
   ) {}
 
   async create(userId: string, workspaceId: string, input: CreateChannelInput) {
@@ -188,6 +190,10 @@ export class ChannelsService {
       channelId,
       user: user ? toUserDto(user) : null,
     });
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
+    if (channel) {
+      void this.workflowEvents.emit({ type: 'member_joined', workspaceId: channel.workspaceId, channelId, userId });
+    }
   }
 
   async addMember(actorId: string, channelId: string, input: AddChannelMemberInput) {

@@ -107,6 +107,20 @@ export class PresenceService {
     return online ? 'ACTIVE' : 'OFFLINE';
   }
 
+  /** The subset of `userIds` who are present right now — online and not marked
+   *  Away. DND users count as present (their notification delivery is muted
+   *  downstream). Used to resolve `@here`. */
+  async presentUserIds(userIds: string[]): Promise<string[]> {
+    if (userIds.length === 0) return [];
+    // Two batched reads instead of two round-trips per member (channels can be large).
+    const [manual, online] = await Promise.all([
+      this.redis.mget(...userIds.map(manualKey)),
+      this.redis.mget(...userIds.map(onlineKey)),
+    ]);
+    // Same rules as effectiveState(): DND counts as present, AWAY does not.
+    return userIds.filter((_, i) => manual[i] === 'DND' || (manual[i] !== 'AWAY' && online[i] !== null));
+  }
+
   /** Presence map for every member of a workspace (member-only). */
   async workspacePresence(callerId: string, workspaceId: string): Promise<Record<string, PresenceState>> {
     await this.policy.requireWorkspaceMember(callerId, workspaceId);

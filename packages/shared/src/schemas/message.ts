@@ -92,6 +92,8 @@ export const MessageDtoSchema = z.object({
   conversationId: z.string().nullable(),
   user: UserDtoSchema.nullable(),
   kind: z.enum(['USER', 'SYSTEM', 'INTEGRATION']),
+  /** INTEGRATION messages: the posting app's name (null = Jira). */
+  appName: z.string().nullable().optional(),
   contentJson: z.unknown(),
   contentText: z.string(),
   parentId: z.string().nullable(),

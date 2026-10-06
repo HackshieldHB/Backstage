@@ -48,6 +48,8 @@ import { ScheduledHuddlesModule } from './scheduled-huddles/scheduled-huddles.mo
 import { MeetingInsightsModule } from './meeting-insights/meeting-insights.module';
 import { MeetingMinutesModule } from './meeting-minutes/meeting-minutes.module';
 import { AvailabilityModule } from './availability/availability.module';
+import { TasksModule } from './tasks/tasks.module';
+import { WorkflowEventsModule } from './workflows/workflow-events';
 import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
@@ -70,6 +72,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     AttachmentsModule,
     EmojiModule,
     ShareModule,
+    WorkflowEventsModule,
     WorkflowsModule,
     SfuModule,
     AuditModule,
@@ -98,6 +101,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     MeetingInsightsModule,
     MeetingMinutesModule,
     AvailabilityModule,
+    TasksModule,
   ],
   controllers: [HealthController],
   providers: [

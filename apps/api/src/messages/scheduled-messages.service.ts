@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { ScheduledMessage } from '@prisma/client';
 import type { CommandResultDto, ScheduleMessageInput, ScheduledMessageDto } from '@backstages/shared';
@@ -126,11 +126,34 @@ export class ScheduledMessagesService implements IntegrationApp, OnModuleInit {
     );
   }
 
+  /**
+   * "Remind me about this message": a personal reminder (never posted anywhere)
+   * that links back to a message the caller can read.
+   */
+  async remindAboutMessage(userId: string, messageId: string, at: Date): Promise<ScheduledMessageDto> {
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message || message.deletedAt) throw new NotFoundException('Message not found');
+    if (message.channelId) await this.policy.requireChannelMember(userId, message.channelId);
+    else if (message.conversationId) await this.policy.requireConversationMember(userId, message.conversationId);
+    else throw new NotFoundException('Message not found');
+
+    const snippet = message.contentText.replace(/\s+/g, ' ').trim().slice(0, 140) || 'a message';
+    const text = `About: “${snippet}”`;
+    return this.create(
+      userId,
+      message.workspaceId,
+      {},
+      { contentText: text, contentJson: textDoc(text), scheduledFor: at.toISOString() },
+      message.id,
+    );
+  }
+
   private async create(
     userId: string,
     workspaceId: string,
     target: { channelId?: string; conversationId?: string },
     input: ScheduleMessageInput,
+    messageId: string | null = null,
   ): Promise<ScheduledMessageDto> {
     const when = new Date(input.scheduledFor);
     if (Number.isNaN(when.getTime())) throw new BadRequestException('Invalid scheduledFor');
@@ -141,6 +164,7 @@ export class ScheduledMessagesService implements IntegrationApp, OnModuleInit {
         userId,
         channelId: target.channelId ?? null,
         conversationId: target.conversationId ?? null,
+        messageId,
         contentJson: (input.contentJson ?? {}) as object,
         contentText: input.contentText,
         scheduledFor: when,
@@ -187,10 +211,13 @@ export class ScheduledMessagesService implements IntegrationApp, OnModuleInit {
             attachmentIds: [],
           });
         } else {
-          // A reminder: private notification back to the person who set it.
+          // A reminder: private notification back to the person who set it. A
+          // message reminder links back only if they can still read the message.
+          const link = s.messageId ? await this.reminderLink(s.userId, s.messageId) : null;
           await this.notifications.notify({
             userId: s.userId,
             type: 'SYSTEM',
+            ...(link ?? {}),
             payload: { source: 'reminder', text: s.contentText },
           });
         }
@@ -205,6 +232,22 @@ export class ScheduledMessagesService implements IntegrationApp, OnModuleInit {
     return delivered;
   }
 
+  private async reminderLink(
+    userId: string,
+    messageId: string,
+  ): Promise<{ messageId: string; channelId: string | null; conversationId: string | null } | null> {
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message || message.deletedAt) return null;
+    try {
+      if (message.channelId) await this.policy.requireChannelMember(userId, message.channelId);
+      else if (message.conversationId) await this.policy.requireConversationMember(userId, message.conversationId);
+      else return null;
+    } catch {
+      return null; // lost access since scheduling: remind, but don't link
+    }
+    return { messageId: message.id, channelId: message.channelId, conversationId: message.conversationId };
+  }
+
   private toDto(row: ScheduledMessage): ScheduledMessageDto {
     return {
       id: row.id,
@@ -213,6 +256,7 @@ export class ScheduledMessagesService implements IntegrationApp, OnModuleInit {
       contentText: row.contentText,
       scheduledFor: row.scheduledFor.toISOString(),
       isReminder: !row.channelId && !row.conversationId,
+      messageId: row.messageId,
     };
   }
 }

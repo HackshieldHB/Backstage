@@ -94,11 +94,11 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  ownedWorkspaces         Workspace[]           @relation("WorkspaceOwner")
+  ownedWorkspaces         Workspace[]              @relation("WorkspaceOwner")
   workspaceMemberships    WorkspaceMember[]
-  invitesCreated          WorkspaceInvite[]     @relation("InviteCreator")
-  invitesUsed             WorkspaceInvite[]     @relation("InviteUser")
-  channelsCreated         Channel[]             @relation("ChannelCreator")
+  invitesCreated          WorkspaceInvite[]        @relation("InviteCreator")
+  invitesUsed             WorkspaceInvite[]        @relation("InviteUser")
+  channelsCreated         Channel[]                @relation("ChannelCreator")
   channelMemberships      ChannelMember[]
   conversationMemberships ConversationMember[]
   messages                Message[]
@@ -107,44 +107,46 @@ model User {
   pinnedMessages          PinnedMessage[]
   savedItems              SavedItem[]
   mentions                Mention[]
-  notifications           Notification[]        @relation("NotificationRecipient")
-  notificationsActed      Notification[]        @relation("NotificationActor")
+  notifications           Notification[]           @relation("NotificationRecipient")
+  notificationsActed      Notification[]           @relation("NotificationActor")
   refreshTokens           RefreshToken[]
   passwordResetTokens     PasswordResetToken[]
   atlassianLink           AtlassianAccountLink?
-  atlassianConnections    AtlassianConnection[] @relation("AtlassianConnector")
+  atlassianConnections    AtlassianConnection[]    @relation("AtlassianConnector")
   scheduledMessages       ScheduledMessage[]
   customEmojis            CustomEmoji[]
   shareLinks              ShareLink[]
   workflows               Workflow[]
-  userGroupsCreated       UserGroup[]          @relation("UserGroupCreator")
+  userGroupsCreated       UserGroup[]              @relation("UserGroupCreator")
   userGroupMemberships    UserGroupMember[]
   pollVotes               PollVote[]
   pushSubscriptions       PushSubscription[]
-  auditLogs               AuditLog[]           @relation("AuditActor")
-  canvasEdits             Canvas[]             @relation("CanvasEditor")
+  auditLogs               AuditLog[]               @relation("AuditActor")
+  canvasEdits             Canvas[]                 @relation("CanvasEditor")
   activitySegments        ActivitySegment[]
   huddleParticipations    HuddleParticipant[]
   timesheetEntries        TimesheetEntry[]
   utilizationDays         UtilizationDaily[]
-  standupsCreated         Standup[]            @relation("StandupCreator")
+  standupsCreated         Standup[]                @relation("StandupCreator")
   standupMemberships      StandupMember[]
   standupResponses        StandupResponse[]
-  webhooksCreated         IncomingWebhook[]    @relation("WebhookCreator")
+  webhooksCreated         IncomingWebhook[]        @relation("WebhookCreator")
   customCommands          CustomCommand[]
-  weeklyReports           WeeklyReport[]       @relation("WeeklyReportCreator")
-  decisionsCreated        Decision[]           @relation("DecisionCreator")
-  decisionsDecided        Decision[]           @relation("DecisionDecider")
-  decisionsOwned          Decision[]           @relation("DecisionOwner")
-  jiraSavedWidgets        JiraSavedWidget[]    @relation("JiraWidgetCreator")
-  jiraAlertRules          JiraAlertRule[]      @relation("JiraAlertCreator")
-  incidentsDeclared       Incident[]           @relation("IncidentDeclarer")
-  incidentsCommanded      Incident[]           @relation("IncidentCommander")
-  incidentUpdates         IncidentUpdate[]     @relation("IncidentUpdateAuthor")
+  weeklyReports           WeeklyReport[]           @relation("WeeklyReportCreator")
+  decisionsCreated        Decision[]               @relation("DecisionCreator")
+  decisionsDecided        Decision[]               @relation("DecisionDecider")
+  decisionsOwned          Decision[]               @relation("DecisionOwner")
+  jiraSavedWidgets        JiraSavedWidget[]        @relation("JiraWidgetCreator")
+  jiraAlertRules          JiraAlertRule[]          @relation("JiraAlertCreator")
+  incidentsDeclared       Incident[]               @relation("IncidentDeclarer")
+  incidentsCommanded      Incident[]               @relation("IncidentCommander")
+  incidentUpdates         IncidentUpdate[]         @relation("IncidentUpdateAuthor")
   oncallShifts            OncallShift[]
   calendarLink            CalendarLink?
   recommendationFeedback  RecommendationFeedback[]
-  scheduledHuddles        ScheduledHuddle[]    @relation("ScheduledHuddleCreator")
+  scheduledHuddles        ScheduledHuddle[]        @relation("ScheduledHuddleCreator")
+  tasksCreated            Task[]                   @relation("TaskCreator")
+  tasksAssigned           Task[]                   @relation("TaskAssignee")
 }
 
 model ShareLink {
@@ -170,17 +172,22 @@ model ShareLink {
 }
 
 model Workflow {
-  id          String   @id @default(cuid())
-  workspaceId String
-  name        String
-  enabled     Boolean  @default(true)
+  id             String    @id @default(cuid())
+  workspaceId    String
+  name           String
+  enabled        Boolean   @default(true)
   /// Trigger discriminator, e.g. "message_posted".
-  trigger     String
+  trigger        String
   /// Trigger + action parameters, shape depends on `trigger`.
-  config      Json
-  createdById String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  config         Json
+  /// How many times the actions have run, and when last.
+  runCount       Int       @default(0)
+  lastRunAt      DateTime?
+  /// schedule trigger: slots at or before this instant have been handled.
+  scheduleCursor DateTime?
+  createdById    String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
@@ -230,6 +237,7 @@ model Workspace {
   recommendationFeedback RecommendationFeedback[]
   scheduledHuddles       ScheduledHuddle[]
   meetingRecords         MeetingRecord[]
+  tasks                  Task[]
 }
 
 model CustomEmoji {
@@ -250,30 +258,30 @@ model CustomEmoji {
 }
 
 model WorkspaceMember {
-  id            String        @id @default(cuid())
-  workspaceId   String
-  userId        String
-  role          WorkspaceRole @default(MEMBER)
+  id                String        @id @default(cuid())
+  workspaceId       String
+  userId            String
+  role              WorkspaceRole @default(MEMBER)
   /// Set when the linked Atlassian account is deactivated on the connected site.
-  deactivatedAt DateTime?
+  deactivatedAt     DateTime?
   /// Opt-in to private workload/wellbeing signals derived from activity data.
-  wellbeingOptIn Boolean      @default(false)
+  wellbeingOptIn    Boolean       @default(false)
   /// Opt-in to a personal daily email digest of unread mentions/notifications.
-  dailyDigestOptIn Boolean    @default(false)
+  dailyDigestOptIn  Boolean       @default(false)
   /// The member's UTC offset in minutes, so the digest fires in their local morning.
-  digestTzOffsetMin Int       @default(0)
+  digestTzOffsetMin Int           @default(0)
   /// Member-local date (yyyy-mm-dd) the digest last emailed, so it sends once/day.
-  digestLastOn  String?
+  digestLastOn      String?
   /// Focus/working hours (minutes from local midnight); outside them the member's
   /// own desktop alerts are muted. Null = always available.
-  workStartMin  Int?
-  workEndMin    Int?
+  workStartMin      Int?
+  workEndMin        Int?
   /// Comma-separated local weekdays that count as working days (0=Sun..6=Sat).
-  workDays      String?
+  workDays          String?
   /// Out-of-office window + auto message; while active, alerts are muted.
-  oooUntil      DateTime?
-  oooMessage    String?
-  createdAt     DateTime      @default(now())
+  oooUntil          DateTime?
+  oooMessage        String?
+  createdAt         DateTime      @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -306,20 +314,20 @@ model WorkspaceInvite {
 }
 
 model Channel {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   workspaceId String
   name        String
   topic       String?
   description String?
-  isPrivate   Boolean   @default(false)
-  isArchived  Boolean   @default(false)
+  isPrivate   Boolean  @default(false)
+  isArchived  Boolean  @default(false)
   /// The non-leavable, non-deletable #general channel created with the workspace.
-  isDefault   Boolean   @default(false)
+  isDefault   Boolean  @default(false)
   /// Sidebar grouping: null = normal channel, else an integration group like "jira"/"confluence".
   groupKey    String?
   createdById String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   workspace         Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy         User?                     @relation("ChannelCreator", fields: [createdById], references: [id])
@@ -342,6 +350,7 @@ model Channel {
   jiraAlertRules         JiraAlertRule[]
   scheduledHuddles       ScheduledHuddle[]
   meetingRecords         MeetingRecord[]
+  tasks                  Task[]
 
   @@unique([workspaceId, name])
 }
@@ -380,6 +389,7 @@ model Conversation {
   scheduledMessages ScheduledMessage[]
   scheduledHuddles  ScheduledHuddle[]
   meetingRecords    MeetingRecord[]
+  tasks             Task[]
 
   @@unique([workspaceId, memberKey])
 }
@@ -400,19 +410,21 @@ model ConversationMember {
 }
 
 model Message {
-  id             String      @id @default(cuid())
+  id             String                   @id @default(cuid())
   workspaceId    String
   channelId      String?
   conversationId String?
   /// Author; null for SYSTEM/INTEGRATION messages (e.g. Jira event cards).
   userId         String?
-  kind           MessageKind @default(USER)
+  kind           MessageKind              @default(USER)
+  /// INTEGRATION messages: which app posted it (null = Jira, the original integration).
+  appName        String?
   contentJson    Json
   contentText    String
   parentId       String?
   /// Thread replies flagged "also send to channel" appear in the main channel view too.
-  showInChannel  Boolean     @default(false)
-  isEdited       Boolean     @default(false)
+  showInChannel  Boolean                  @default(false)
+  isEdited       Boolean                  @default(false)
   editedAt       DateTime?
   /// Soft delete: tombstone rendered client-side, row retained.
   deletedAt      DateTime?
@@ -420,8 +432,8 @@ model Message {
   clientMsgId    String?
   /// Rendered link previews (e.g. Jira issue status cards for pasted URLs).
   unfurls        Json?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
   /// Postgres GENERATED column maintained by the hand-written FTS migration; GIN-indexed.
   searchVector   Unsupported("tsvector")?
 
@@ -444,6 +456,8 @@ model Message {
   bitbucketPrCard             BitbucketPrCard?
   shareLinks                  ShareLink[]
   poll                        Poll?
+  tasks                       Task[]
+  reminders                   ScheduledMessage[]
 
   @@unique([userId, clientMsgId])
   @@index([channelId, createdAt])
@@ -700,6 +714,8 @@ model ScheduledMessage {
   conversationId String?
   contentJson    Json
   contentText    String
+  /// Set on a "remind me about this message" reminder; the notification links back to it.
+  messageId      String?
   scheduledFor   DateTime
   createdAt      DateTime @default(now())
 
@@ -707,20 +723,21 @@ model ScheduledMessage {
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   channel      Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message      Message?      @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([scheduledFor])
   @@index([userId])
 }
 
 model UserGroup {
-  id          String            @id @default(cuid())
+  id          String   @id @default(cuid())
   workspaceId String
   /// Display name, e.g. "Engineering".
   name        String
   /// Mention handle without @, e.g. "engineering". Unique per workspace.
   handle      String
   createdById String
-  createdAt   DateTime          @default(now())
+  createdAt   DateTime @default(now())
 
   workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy User              @relation("UserGroupCreator", fields: [createdById], references: [id])
@@ -743,14 +760,14 @@ model UserGroupMember {
 }
 
 model Poll {
-  id           String     @id @default(cuid())
-  messageId    String     @unique
-  question     String
+  id            String   @id @default(cuid())
+  messageId     String   @unique
+  question      String
   /// Array of option label strings.
-  options      Json
-  allowMultiple Boolean   @default(false)
-  createdById  String
-  createdAt    DateTime   @default(now())
+  options       Json
+  allowMultiple Boolean  @default(false)
+  createdById   String
+  createdAt     DateTime @default(now())
 
   message Message    @relation(fields: [messageId], references: [id], onDelete: Cascade)
   votes   PollVote[]
@@ -840,11 +857,11 @@ model ActivitySegment {
 /// Persisted record of a huddle (voice/video) session, so meeting time survives
 /// the in-memory HuddleService and feeds the timeline.
 model HuddleSession {
-  id          String              @id @default(cuid())
+  id          String    @id @default(cuid())
   workspaceId String
   /// Socket-room key: "channel:X" or "conversation:Y".
   roomKey     String
-  startedAt   DateTime            @default(now())
+  startedAt   DateTime  @default(now())
   endedAt     DateTime?
 
   workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -921,6 +938,7 @@ model MeetingRecord {
 
   workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   channel      Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  tasks        Task[]
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, createdAt])
@@ -1303,4 +1321,43 @@ model RecommendationFeedback {
   // One feedback row per (user, kind, target): re-acting upserts.
   @@unique([userId, kind, refId])
   @@index([workspaceId, userId, kind])
+}
+
+enum TaskStatus {
+  OPEN
+  DONE
+}
+
+/// A personal or assigned to-do. Visible only to its creator and assignee.
+/// Optionally traces back to where it came from: a chat message and/or a meeting.
+model Task {
+  id              String     @id @default(cuid())
+  workspaceId     String
+  title           String
+  notes           String     @default("")
+  status          TaskStatus @default(OPEN)
+  dueAt           DateTime?
+  /// Set once the "task is due" notification has gone out (reset when dueAt changes).
+  dueNotifiedAt   DateTime?
+  assigneeId      String?
+  createdById     String
+  messageId       String?
+  channelId       String?
+  conversationId  String?
+  meetingRecordId String?
+  completedAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy     User           @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  assignee      User?          @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  message       Message?       @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  channel       Channel?       @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  conversation  Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  meetingRecord MeetingRecord? @relation(fields: [meetingRecordId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, assigneeId, status])
+  @@index([workspaceId, createdById, status])
+  @@index([status, dueAt])
 }

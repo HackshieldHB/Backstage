@@ -28,6 +28,7 @@ import { IncidentsPane } from '@/components/incidents-pane';
 import { InboxPane } from '@/components/inbox-pane';
 import { DiscoverPane } from '@/components/discover-pane';
 import { ApplicationsPane } from '@/components/applications/applications-pane';
+import { TasksPane } from '@/components/tasks-pane';
 import { AskDialog } from '@/components/ask-dialog';
 import { SearchDialog } from '@/components/search-dialog';
 import { CommandPalette } from '@/components/command-palette';
@@ -195,6 +196,8 @@ function AppShell() {
             <InboxPane workspaceId={workspaceId} onNavigate={navigate} />
           ) : mainView === 'discover' ? (
             <DiscoverPane workspaceId={workspaceId} onNavigate={navigate} />
+          ) : mainView === 'tasks' ? (
+            <TasksPane workspaceId={workspaceId} onNavigate={navigate} />
           ) : mainView === 'applications' ? (
             <ApplicationsPane />
           ) : container ? (
