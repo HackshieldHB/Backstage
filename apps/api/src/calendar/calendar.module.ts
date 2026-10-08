@@ -8,5 +8,6 @@ import { CalendarQueue } from './calendar.queue';
   imports: [UsersModule],
   controllers: [CalendarController],
   providers: [CalendarService, CalendarQueue],
+  exports: [CalendarService],
 })
 export class CalendarModule {}

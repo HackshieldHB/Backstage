@@ -50,6 +50,8 @@ import { MeetingMinutesModule } from './meeting-minutes/meeting-minutes.module';
 import { AvailabilityModule } from './availability/availability.module';
 import { TasksModule } from './tasks/tasks.module';
 import { WorkflowEventsModule } from './workflows/workflow-events';
+import { TaskEventsModule } from './tasks/task-events';
+import { MyDayModule } from './my-day/my-day.module';
 import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
@@ -73,6 +75,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     EmojiModule,
     ShareModule,
     WorkflowEventsModule,
+    TaskEventsModule,
     WorkflowsModule,
     SfuModule,
     AuditModule,
@@ -102,6 +105,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     MeetingMinutesModule,
     AvailabilityModule,
     TasksModule,
+    MyDayModule,
   ],
   controllers: [HealthController],
   providers: [

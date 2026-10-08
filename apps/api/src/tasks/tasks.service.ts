@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { TaskEvents } from './task-events';
 
 const userSelect = { select: { id: true, displayName: true, avatarUrl: true } };
 const taskInclude = { createdBy: userSelect, assignee: userSelect } satisfies Prisma.TaskInclude;
@@ -62,6 +63,7 @@ export class TasksService {
     private readonly policy: PolicyService,
     private readonly realtime: RealtimeService,
     private readonly notifications: NotificationsService,
+    private readonly taskEvents: TaskEvents,
   ) {}
 
   async list(userId: string, workspaceId: string): Promise<TaskDto[]> {
@@ -235,7 +237,74 @@ export class TasksService {
       previousAssigneeId: existing.assigneeId,
       completed: existing.status === 'OPEN' && row.status === 'DONE',
     });
+    if (row.status !== existing.status && row.jiraIssueKey) {
+      // Push the new state to the linked Jira issue, then return what it recorded.
+      await this.taskEvents.statusChanged({ task: row, actorId: userId });
+      const fresh = await this.prisma.task.findUnique({ where: { id }, include: taskInclude });
+      if (fresh) return toDto(fresh);
+    }
     return toDto(row);
+  }
+
+  /** Public visibility check for integrations acting on a task. */
+  async requireVisible(userId: string, id: string): Promise<Task> {
+    return this.loadVisible(userId, id);
+  }
+
+  /** Attach (or with `null`, detach) a Jira issue. */
+  async setJiraLink(
+    id: string,
+    link: { key: string; url: string; status: string | null } | null,
+  ): Promise<TaskDto> {
+    const row = await this.prisma.task.update({
+      where: { id },
+      data: link
+        ? { jiraIssueKey: link.key, jiraUrl: link.url, jiraStatus: link.status, jiraSyncError: null }
+        : { jiraIssueKey: null, jiraUrl: null, jiraStatus: null, jiraSyncError: null },
+      include: taskInclude,
+    });
+    this.emit(row, false);
+    return toDto(row);
+  }
+
+  /** Record the outcome of a Backstages→Jira status push. */
+  async setJiraSyncResult(id: string, result: { status?: string | null; error: string | null }) {
+    const row = await this.prisma.task.update({
+      where: { id },
+      data: {
+        jiraSyncError: result.error,
+        ...(result.status !== undefined ? { jiraStatus: result.status } : {}),
+      },
+    });
+    this.emit(row, false);
+  }
+
+  /**
+   * A linked Jira issue changed status: mirror it onto every task linked to it.
+   * `done` is null when the status category is unknown (status name only).
+   * Does not push back to Jira, so there is no sync loop.
+   */
+  async syncFromJira(
+    workspaceId: string,
+    issueKey: string,
+    statusName: string | null,
+    done: boolean | null,
+  ): Promise<number> {
+    const tasks = await this.prisma.task.findMany({ where: { workspaceId, jiraIssueKey: issueKey } });
+    for (const t of tasks) {
+      const data: Prisma.TaskUncheckedUpdateInput = { jiraSyncError: null };
+      if (statusName) data.jiraStatus = statusName;
+      if (done === true && t.status === 'OPEN') {
+        data.status = 'DONE';
+        data.completedAt = new Date();
+      } else if (done === false && t.status === 'DONE') {
+        data.status = 'OPEN';
+        data.completedAt = null;
+      }
+      const row = await this.prisma.task.update({ where: { id: t.id }, data });
+      this.emit(row, false);
+    }
+    return tasks.length;
   }
 
   async remove(userId: string, id: string): Promise<{ ok: boolean }> {
@@ -347,6 +416,8 @@ function toDto(t: TaskRow): TaskDto {
     conversationId: t.conversationId,
     meetingRecordId: t.meetingRecordId,
     completedAt: t.completedAt?.toISOString() ?? null,
+    jira: t.jiraIssueKey ? { key: t.jiraIssueKey, url: t.jiraUrl, status: t.jiraStatus } : null,
+    jiraSyncError: t.jiraSyncError,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
   };

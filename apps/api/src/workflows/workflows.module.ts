@@ -14,6 +14,6 @@ import { TasksModule } from '../tasks/tasks.module';
   imports: [forwardRef(() => MessagesModule), ConversationsModule, TasksModule],
   controllers: [WorkflowsController],
   providers: [WorkflowsService, WorkflowRunsService, WorkflowsQueue],
-  exports: [WorkflowsService],
+  exports: [WorkflowsService, WorkflowRunsService],
 })
 export class WorkflowsModule {}

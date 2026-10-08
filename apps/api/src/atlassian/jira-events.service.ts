@@ -5,6 +5,7 @@ import type { AtlassianConnection } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { ActivityService } from '../timesheet/activity.service';
+import { TasksService } from '../tasks/tasks.service';
 import { UnreadService } from '../messages/unread.service';
 import {
   IntegrationMessagesService,
@@ -20,7 +21,7 @@ export interface JiraWebhookBody {
     key: string;
     fields?: {
       summary?: string;
-      status?: { name: string };
+      status?: { name: string; statusCategory?: { key?: string } };
       project?: { key: string };
       assignee?: { accountId: string; displayName?: string } | null;
     };
@@ -75,6 +76,7 @@ export class JiraEventsService {
     private readonly realtime: RealtimeService,
     private readonly unread: UnreadService,
     private readonly activity: ActivityService,
+    private readonly tasks: TasksService,
   ) {}
 
   async handleWebhook(connectionId: string, secret: string | undefined, body: JiraWebhookBody) {
@@ -91,6 +93,21 @@ export class JiraEventsService {
     }
 
     const events = this.normalize(body);
+    if (events.includes('status_changed') && body.issue?.key) {
+      // Mirror the new status onto Backstages tasks linked to this issue.
+      const status = body.issue.fields?.status;
+      const category = status?.statusCategory?.key;
+      await this.tasks
+        .syncFromJira(
+          connection.workspaceId,
+          body.issue.key.toUpperCase(),
+          status?.name ?? null,
+          category ? category === 'done' : null,
+        )
+        .catch((err) =>
+          this.logger.warn(`Task sync for ${body.issue?.key} failed: ${err instanceof Error ? err.message : err}`),
+        );
+    }
     const results: Array<{ event: JiraEventType; dm: boolean; cards: number }> = [];
     for (const event of events) {
       results.push(await this.dispatch(connection, event, body));

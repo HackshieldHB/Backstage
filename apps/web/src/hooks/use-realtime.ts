@@ -219,9 +219,11 @@ export function useRealtime(workspaceId: string | null) {
 
     const onTaskChanged = (p: TaskChangedPayload) => {
       qc.invalidateQueries({ queryKey: keys.tasks(p.workspaceId) });
+      qc.invalidateQueries({ queryKey: keys.myDay(p.workspaceId) });
     };
     const onWorkflowRequests = (p: WorkflowRequestsChangedPayload) => {
       qc.invalidateQueries({ queryKey: keys.workflowRequests(p.workspaceId) });
+      qc.invalidateQueries({ queryKey: keys.myDay(p.workspaceId) });
     };
 
     socket.on(SOCKET_EVENTS.MESSAGE_NEW, onMessageNew);

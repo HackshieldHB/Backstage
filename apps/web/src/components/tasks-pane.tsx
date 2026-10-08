@@ -27,6 +27,7 @@ import { useUiStore } from '@/stores/ui-store';
 import { PaneShell } from './pane-shell';
 import { Avatar } from './avatar';
 import { WorkflowRequests } from './workflow-requests';
+import { TaskJira } from './task-jira';
 
 const input =
   'rounded-lg border border-line-strong bg-elevated px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent';
@@ -434,6 +435,8 @@ function TaskRow({
           </span>
 
           {!isCreator && <span>from {task.createdBy.displayName}</span>}
+
+          <TaskJira task={task} workspaceId={workspaceId} />
 
           {source && (
             <button

@@ -25,6 +25,8 @@ function task(over: Partial<TaskDto>): TaskDto {
     completedAt: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    jira: null,
+    jiraSyncError: null,
     ...over,
   };
 }
@@ -118,6 +120,15 @@ vi.mock('@/hooks/queries', () => ({
   useDeleteTask: () => ({ mutate, isPending: false }),
   useWorkflowRequests: () => ({ data: [] }),
   useRespondToWorkflowRequest: () => ({ mutate, isPending: false }),
+  useTaskJira: () => ({
+    create: { mutate, isPending: false },
+    link: { mutate, isPending: false },
+    unlink: { mutate, isPending: false },
+  }),
+  useJiraProjects: () => ({ data: [] }),
+}));
+vi.mock('./atlassian-dialog', () => ({
+  useAtlassianStatus: () => ({ data: { connected: false } }),
 }));
 vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (sel: (s: { user: typeof me }) => unknown) => sel({ user: me }),

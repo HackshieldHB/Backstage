@@ -68,6 +68,8 @@ import type {
   WorkflowRunDto,
   WorkflowRequestDto,
   RespondToWorkflowRequestInput,
+  MyDayDto,
+  MyDayPlanDto,
 } from '@backstages/shared';
 import { api } from '@/lib/api';
 
@@ -140,6 +142,7 @@ export const keys = {
   tasks: (ws: string) => ['tasks', ws] as const,
   workflowRuns: (id: string) => ['workflow-runs', id] as const,
   workflowRequests: (ws: string) => ['workflow-requests', ws] as const,
+  myDay: (ws: string) => ['my-day', ws] as const,
 };
 
 export function useWorkspaces() {
@@ -657,6 +660,53 @@ export function useDeleteTask(workspaceId: string) {
   return useMutation({
     mutationFn: (id: string) => api<{ ok: boolean }>('DELETE', `/tasks/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.tasks(workspaceId) }),
+  });
+}
+
+/** Create a Jira issue from a task, link an existing one, or unlink. */
+export function useTaskJira(workspaceId: string) {
+  const qc = useQueryClient();
+  const done = (task: TaskDto) => {
+    qc.setQueryData<TaskDto[]>(keys.tasks(workspaceId), (old) =>
+      old?.map((t) => (t.id === task.id ? task : t)),
+    );
+    void qc.invalidateQueries({ queryKey: keys.tasks(workspaceId) });
+  };
+  return {
+    create: useMutation({
+      mutationFn: ({ id, projectKey }: { id: string; projectKey: string }) =>
+        api<TaskDto>('POST', `/tasks/${id}/jira`, { projectKey }),
+      onSuccess: done,
+    }),
+    link: useMutation({
+      mutationFn: ({ id, issueKey }: { id: string; issueKey: string }) =>
+        api<TaskDto>('POST', `/tasks/${id}/jira/link`, { issueKey }),
+      onSuccess: done,
+    }),
+    unlink: useMutation({
+      mutationFn: (id: string) => api<TaskDto>('DELETE', `/tasks/${id}/jira`),
+      onSuccess: done,
+    }),
+  };
+}
+
+/** The browser's UTC offset in minutes (east positive), as the API expects. */
+export const localTzOffset = () => -new Date().getTimezoneOffset();
+
+export function useMyDay(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.myDay(workspaceId),
+    queryFn: () =>
+      api<MyDayDto>('GET', `/workspaces/${workspaceId}/my-day?tz=${localTzOffset()}`),
+    enabled: enabled && !!workspaceId,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
+export function usePlanMyDay(workspaceId: string) {
+  return useMutation({
+    mutationFn: () =>
+      api<MyDayPlanDto>('POST', `/workspaces/${workspaceId}/my-day/plan?tz=${localTzOffset()}`),
   });
 }
 

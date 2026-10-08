@@ -29,6 +29,7 @@ import {
   Smile,
   Sparkles,
   Timer,
+  Sun,
   UserPlus,
   Zap,
 } from 'lucide-react';
@@ -244,6 +245,13 @@ export function Sidebar({
 
       <div className="thin-scrollbar flex-1 overflow-y-auto px-2 pb-2">
         {/* Primary quick-access */}
+        <SectionButton
+          icon={<Sun size={15} />}
+          label="My day"
+          active={mainView === 'myday'}
+          onClick={() => setMainView('myday')}
+          testId="my-day-button"
+        />
         <SectionButton
           icon={<Inbox size={15} />}
           label={t('inbox')}

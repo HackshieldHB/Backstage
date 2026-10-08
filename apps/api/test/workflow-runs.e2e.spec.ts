@@ -308,7 +308,7 @@ describe('workflow runs: history, approvals, forms, webhooks (e2e)', () => {
     let port = 0;
     const hits: Array<{ headers: http.IncomingHttpHeaders; body: string }> = [];
     let reply = 200;
-    const prevFlag = process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
+    const prevFlag = process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
 
     beforeAll(async () => {
       server = http.createServer((req, res) => {
@@ -324,13 +324,13 @@ describe('workflow runs: history, approvals, forms, webhooks (e2e)', () => {
       port = (server.address() as AddressInfo).port;
     });
     afterAll(async () => {
-      if (prevFlag === undefined) delete process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
-      else process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE = prevFlag;
+      if (prevFlag === undefined) delete process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
+      else process.env.OUTBOUND_HTTP_ALLOW_PRIVATE = prevFlag;
       await new Promise((r) => server.close(r));
     });
 
     it('refuses insecure or private targets in normal mode', async () => {
-      delete process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
+      delete process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
       const hook = (url: string) =>
         createWf({
           name: 'hook',
@@ -345,7 +345,7 @@ describe('workflow runs: history, approvals, forms, webhooks (e2e)', () => {
     });
 
     it('posts signed JSON; the secret is admin-only; failures are recorded', async () => {
-      process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE = '1'; // dev mode: allow the local test server
+      process.env.OUTBOUND_HTTP_ALLOW_PRIVATE = '1'; // dev mode: allow the local test server
       const created = await createWf({
         name: 'Hook flow',
         trigger: 'message_posted',

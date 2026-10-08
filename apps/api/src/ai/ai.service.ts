@@ -79,6 +79,60 @@ export class AiService {
       .trim();
   }
 
+  /**
+   * Suggest an order for the day's work. Returns the item ids in the suggested
+   * order with a short reason each, or null when AI is off or declines. The
+   * response is schema-constrained (structured outputs), so it always parses;
+   * callers still validate ids against what they sent.
+   */
+  async planDay(context: string): Promise<Array<{ id: string; reason: string }> | null> {
+    if (!this.enabled) return null;
+    const res = await this.anthropic().beta.messages.create({
+      model: 'claude-opus-5-5',
+      max_tokens: 16000,
+      output_config: {
+        effort: 'low',
+        format: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            properties: {
+              order: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { id: { type: 'string' }, reason: { type: 'string' } },
+                  required: ['id', 'reason'],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ['order'],
+            additionalProperties: false,
+          },
+        },
+      },
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      system:
+        'You help a teammate plan their working day. Order the given work items into the sequence they should tackle them today, considering deadlines, people waiting on them, priority, and the fixed meetings (work around them; do not list meetings). Give each item a reason of at most 12 words. Include every item id exactly once and only ids from the list.',
+      messages: [{ role: 'user', content: context }],
+    });
+    if (res.stop_reason === 'refusal' || res.stop_reason === 'max_tokens') return null;
+    const text = res.content
+      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+    try {
+      const parsed = JSON.parse(text) as { order?: Array<{ id?: unknown; reason?: unknown }> };
+      return (parsed.order ?? [])
+        .filter((o) => typeof o.id === 'string' && typeof o.reason === 'string')
+        .map((o) => ({ id: o.id as string, reason: (o.reason as string).slice(0, 120) }));
+    } catch {
+      return null;
+    }
+  }
+
   private async accessMessage(userId: string, messageId: string) {
     const message = await this.prisma.message.findUnique({ where: { id: messageId } });
     if (!message) throw new NotFoundException('Message not found');

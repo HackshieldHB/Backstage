@@ -42,11 +42,11 @@ describe('isBlockedAddress', () => {
 });
 
 describe('validateWebhookUrl', () => {
-  const prev = process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
-  beforeEach(() => delete process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE);
+  const prev = process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
+  beforeEach(() => delete process.env.OUTBOUND_HTTP_ALLOW_PRIVATE);
   afterAll(() => {
-    if (prev === undefined) delete process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
-    else process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE = prev;
+    if (prev === undefined) delete process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
+    else process.env.OUTBOUND_HTTP_ALLOW_PRIVATE = prev;
   });
 
   it('accepts public https URLs', () => {
@@ -69,11 +69,11 @@ describe('validateWebhookUrl', () => {
 });
 
 describe('safeLookup', () => {
-  const prev = process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
-  beforeEach(() => delete process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE);
+  const prev = process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
+  beforeEach(() => delete process.env.OUTBOUND_HTTP_ALLOW_PRIVATE);
   afterAll(() => {
-    if (prev === undefined) delete process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
-    else process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE = prev;
+    if (prev === undefined) delete process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
+    else process.env.OUTBOUND_HTTP_ALLOW_PRIVATE = prev;
   });
 
   it('refuses a hostname that resolves to loopback', (done) => {
@@ -88,7 +88,7 @@ describe('postWebhook', () => {
   let server: http.Server;
   let received: { headers: http.IncomingHttpHeaders; body: string } | null = null;
   let port = 0;
-  const prev = process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
+  const prev = process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
 
   beforeAll(async () => {
     server = http.createServer((req, res) => {
@@ -109,20 +109,20 @@ describe('postWebhook', () => {
     port = (server.address() as AddressInfo).port;
   });
   afterAll(async () => {
-    if (prev === undefined) delete process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
-    else process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE = prev;
+    if (prev === undefined) delete process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
+    else process.env.OUTBOUND_HTTP_ALLOW_PRIVATE = prev;
     await new Promise((r) => server.close(r));
   });
 
   it('refuses a local target in normal (secure) mode without sending anything', async () => {
-    delete process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE;
+    delete process.env.OUTBOUND_HTTP_ALLOW_PRIVATE;
     received = null;
     await expect(postWebhook(`http://127.0.0.1:${port}/hook`, { a: 1 }, 's')).rejects.toThrow();
     expect(received).toBeNull();
   });
 
   it('posts signed JSON (insecure dev mode) and does not follow redirects', async () => {
-    process.env.WORKFLOW_WEBHOOKS_ALLOW_INSECURE = '1';
+    process.env.OUTBOUND_HTTP_ALLOW_PRIVATE = '1';
     const status = await postWebhook(`http://127.0.0.1:${port}/hook`, { hello: 'world' }, 'secret');
     expect(status).toBe(204);
     expect(JSON.parse(received!.body)).toEqual({ hello: 'world' });

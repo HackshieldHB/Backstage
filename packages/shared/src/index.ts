@@ -28,4 +28,5 @@ export * from './schemas/meeting-minutes';
 export * from './schemas/availability';
 export * from './schemas/task';
 export * from './schemas/workflow';
+export * from './schemas/my-day';
 export * from './socket';

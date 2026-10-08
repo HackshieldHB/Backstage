@@ -23,11 +23,20 @@ import { JiraAlertsService } from './jira-alerts.service';
 import { JiraAlertsQueue } from './jira-alerts.queue';
 import { MessagesModule } from '../messages/messages.module';
 import { AuthModule } from '../auth/auth.module';
+import { TasksModule } from '../tasks/tasks.module';
+import { TaskJiraService } from './task-jira.service';
+import { TaskJiraController } from './task-jira.controller';
 
 @Global()
 @Module({
-  imports: [MessagesModule, AuthModule, ChannelsModule],
-  controllers: [AtlassianController, ConfluenceController, DashboardController, JiraAlertsController],
+  imports: [MessagesModule, AuthModule, ChannelsModule, TasksModule],
+  controllers: [
+    AtlassianController,
+    ConfluenceController,
+    DashboardController,
+    JiraAlertsController,
+    TaskJiraController,
+  ],
   providers: [
     AtlassianApiService,
     AtlassianService,
@@ -47,7 +56,8 @@ import { AuthModule } from '../auth/auth.module';
     BitbucketEventsService,
     ConfluenceApiService,
     ConfluenceService,
+    TaskJiraService,
   ],
-  exports: [AtlassianService, AtlassianSyncService, AtlassianApiService],
+  exports: [AtlassianService, AtlassianSyncService, AtlassianApiService, JiraActionsService],
 })
 export class AtlassianModule {}

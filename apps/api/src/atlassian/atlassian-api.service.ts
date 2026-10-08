@@ -34,6 +34,8 @@ export interface JiraIssueSummary {
   key: string;
   summary: string;
   status: string;
+  /** Jira status category: "new" | "indeterminate" | "done" (null when unknown). */
+  statusCategory?: string | null;
   issueType: string | null;
   priority: string | null;
   assigneeAccountId: string | null;
@@ -212,7 +214,7 @@ export class AtlassianApiService {
       key: string;
       fields: {
         summary: string;
-        status?: { name: string };
+        status?: { name: string; statusCategory?: { key?: string } };
         issuetype?: { name: string };
         priority?: { name: string };
         assignee?: { accountId: string };
@@ -226,6 +228,7 @@ export class AtlassianApiService {
       key: json.key,
       summary: json.fields.summary,
       status: json.fields.status?.name ?? 'Unknown',
+      statusCategory: json.fields.status?.statusCategory?.key ?? null,
       issueType: json.fields.issuetype?.name ?? null,
       priority: json.fields.priority?.name ?? null,
       assigneeAccountId: json.fields.assignee?.accountId ?? null,
@@ -480,12 +483,20 @@ export class AtlassianApiService {
     accessToken: string,
     cloudId: string,
     issueKey: string,
-  ): Promise<Array<{ id: string; name: string }>> {
-    const json = await this.get<{ transitions?: Array<{ id: string; name: string }> }>(
-      `${this.issueBase(cloudId, issueKey)}/transitions`,
-      accessToken,
-    );
-    return (json?.transitions ?? []).map((t) => ({ id: t.id, name: t.name }));
+  ): Promise<Array<{ id: string; name: string; toCategory?: string | null }>> {
+    const json = await this.get<{
+      transitions?: Array<{
+        id: string;
+        name: string;
+        to?: { statusCategory?: { key?: string } };
+      }>;
+    }>(`${this.issueBase(cloudId, issueKey)}/transitions`, accessToken);
+    return (json?.transitions ?? []).map((t) => ({
+      id: t.id,
+      name: t.name,
+      // Where the transition lands ("new" | "indeterminate" | "done").
+      toCategory: t.to?.statusCategory?.key ?? null,
+    }));
   }
 
   async transitionIssue(accessToken: string, cloudId: string, issueKey: string, transitionId: string) {

@@ -50,7 +50,27 @@ export interface TaskDto {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Linked Jira issue; its status is kept in sync with the task both ways. */
+  jira: { key: string; url: string | null; status: string | null } | null;
+  /** Why the last push of this task's status to Jira failed, if it did. */
+  jiraSyncError: string | null;
 }
+
+/** Create a new Jira issue from a task and link it. */
+export const CreateTaskJiraIssueSchema = z.object({
+  projectKey: z.string().trim().min(1).max(32),
+});
+export type CreateTaskJiraIssueInput = z.infer<typeof CreateTaskJiraIssueSchema>;
+
+/** Link a task to an existing Jira issue by key (e.g. "PROJ-12"). */
+export const LinkTaskJiraIssueSchema = z.object({
+  issueKey: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z][A-Za-z0-9_]*-\d+$/, 'Use an issue key like PROJ-12')
+    .transform((k) => k.toUpperCase()),
+});
+export type LinkTaskJiraIssueInput = z.infer<typeof LinkTaskJiraIssueSchema>;
 
 /** Socket payload: a task the recipient can see was created/changed/removed. */
 export interface TaskChangedPayload {

@@ -1351,6 +1351,12 @@ model Task {
   channelId       String?
   conversationId  String?
   meetingRecordId String?
+  /// Linked Jira issue (status kept in sync both ways).
+  jiraIssueKey    String?
+  jiraUrl         String?
+  jiraStatus      String?
+  /// Why the last Backstages→Jira status sync failed (null when it worked).
+  jiraSyncError   String?
   completedAt     DateTime?
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
@@ -1366,6 +1372,7 @@ model Task {
   @@index([workspaceId, assigneeId, status])
   @@index([workspaceId, createdById, status])
   @@index([status, dueAt])
+  @@index([workspaceId, jiraIssueKey])
 }
 
 enum WorkflowRunStatus {

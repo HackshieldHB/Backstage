@@ -23,7 +23,8 @@ export type MainView =
   | 'inbox'
   | 'discover'
   | 'applications'
-  | 'tasks';
+  | 'tasks'
+  | 'myday';
 
 interface TypingEntry {
   userId: string;

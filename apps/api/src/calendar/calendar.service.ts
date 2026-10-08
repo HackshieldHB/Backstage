@@ -1,13 +1,23 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import type { CalendarLinkDto } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
+import { safeGetText, validatePublicUrl } from '../common/safe-http';
 
 const MEETING_EMOJI = '🗓️';
 
-interface IcsEvent {
+const ICS_SCHEMES = ['https:', 'http:'];
+
+/** Calendar apps hand out webcal:// links; they're plain HTTP(S) underneath. */
+export function normalizeIcsUrl(url: string): string {
+  return url.replace(/^webcals?:\/\//i, 'https://');
+}
+
+export interface IcsEvent {
   start: number;
   end: number;
+  /** SUMMARY, unescaped (empty when the event has none). */
+  title: string;
 }
 
 /** Unfold RFC-5545 folded lines (continuations start with space/tab). */
@@ -29,13 +39,20 @@ function parseIcsDate(value: string): number | null {
   return Date.UTC(+y, +mo - 1, +d, +h, +mi, +s);
 }
 
+/** Undo RFC-5545 TEXT escaping: backslash-n becomes a space; escaped , ; and backslash are kept literally. */
+export function unescapeIcs(value: string): string {
+  return value.replace(/\\([nN,;\\])/g, (_m, c: string) => (c === 'n' || c === 'N' ? ' ' : c)).trim();
+}
+
 export function parseIcs(text: string): IcsEvent[] {
   const events: IcsEvent[] = [];
   let cur: Partial<IcsEvent> | null = null;
   for (const line of unfold(text)) {
     if (line === 'BEGIN:VEVENT') cur = {};
     else if (line === 'END:VEVENT') {
-      if (cur && cur.start != null && cur.end != null) events.push({ start: cur.start, end: cur.end });
+      if (cur && cur.start != null && cur.end != null) {
+        events.push({ start: cur.start, end: cur.end, title: cur.title ?? '' });
+      }
       cur = null;
     } else if (cur) {
       const idx = line.indexOf(':');
@@ -44,6 +61,7 @@ export function parseIcs(text: string): IcsEvent[] {
       const val = line.slice(idx + 1);
       if (name === 'DTSTART') cur.start = parseIcsDate(val) ?? undefined;
       else if (name === 'DTEND') cur.end = parseIcsDate(val) ?? undefined;
+      else if (name === 'SUMMARY') cur.title = unescapeIcs(val);
     }
   }
   return events;
@@ -70,7 +88,10 @@ export class CalendarService {
     };
   }
 
-  async set(userId: string, icsUrl: string): Promise<CalendarLinkDto> {
+  async set(userId: string, rawUrl: string): Promise<CalendarLinkDto> {
+    const icsUrl = normalizeIcsUrl(rawUrl.trim());
+    const problem = validatePublicUrl(icsUrl, ICS_SCHEMES);
+    if (problem) throw new BadRequestException(problem);
     await this.prisma.calendarLink.upsert({
       where: { userId },
       create: { userId, icsUrl },
@@ -106,6 +127,30 @@ export class CalendarService {
   }
 
   /**
+   * The user's calendar events overlapping [from, to), for planning views.
+   * `state` is 'none' when no calendar is linked and 'error' when the feed
+   * couldn't be fetched (the caller shows a hint instead of failing).
+   */
+  async eventsBetween(
+    userId: string,
+    from: Date,
+    to: Date,
+  ): Promise<{ state: 'ok' | 'none' | 'error'; events: IcsEvent[] }> {
+    const link = await this.prisma.calendarLink.findUnique({ where: { userId } });
+    if (!link) return { state: 'none', events: [] };
+    try {
+      const events = parseIcs(await this.fetchIcs(link.icsUrl))
+        .filter((e) => e.start < to.getTime() && e.end > from.getTime())
+        .sort((a, b) => a.start - b.start)
+        .slice(0, 50);
+      return { state: 'ok', events };
+    } catch (err) {
+      this.logger.warn(`Calendar fetch for ${userId} failed: ${err instanceof Error ? err.message : err}`);
+      return { state: 'error', events: [] };
+    }
+  }
+
+  /**
    * Fetch the ICS, decide if the user is currently in an event, and reflect it in
    * their status. Only ever touches the calendar-owned status (marked with a
    * 🗓️ emoji) so a manual status or focus block is never clobbered.
@@ -136,15 +181,13 @@ export class CalendarService {
 
   /** Fetch the ICS with a timeout + size cap. */
   private async fetchIcs(url: string): Promise<string> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const res = await fetch(url, { signal: controller.signal, redirect: 'follow' });
-      if (!res.ok) throw new Error(`ICS fetch ${res.status}`);
-      const text = await res.text();
-      return text.slice(0, 2_000_000); // cap ~2MB
-    } finally {
-      clearTimeout(timer);
-    }
+    // The URL is user-supplied: fetch it through the SSRF guard (public
+    // addresses only, every redirect hop re-checked, 8s timeout, ~2MB cap).
+    return safeGetText(normalizeIcsUrl(url), {
+      schemes: ICS_SCHEMES,
+      timeoutMs: 8000,
+      maxBytes: 2_000_000,
+      maxRedirects: 3,
+    });
   }
 }
