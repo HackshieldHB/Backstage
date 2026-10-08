@@ -29,4 +29,6 @@ export * from './schemas/availability';
 export * from './schemas/task';
 export * from './schemas/workflow';
 export * from './schemas/my-day';
+export * from './schemas/sidebar';
+export * from './schemas/atlassian-overview';
 export * from './socket';

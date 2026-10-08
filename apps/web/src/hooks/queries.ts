@@ -73,7 +73,12 @@ import type {
 } from '@backstages/shared';
 import { api } from '@/lib/api';
 
-export type ChannelWithMeta = ChannelDto & { notificationPref?: string; myRole?: string };
+export type ChannelWithMeta = ChannelDto & {
+  notificationPref?: string;
+  myRole?: string;
+  /** Where the viewer filed this channel in their sidebar (their own setting). */
+  sectionId?: string | null;
+};
 export type WorkspaceWithRole = WorkspaceDto & { myRole: string };
 
 export interface NotificationItem {

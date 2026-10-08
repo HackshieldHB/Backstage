@@ -70,7 +70,12 @@ export class ChannelsService {
     });
     return memberships
       .filter((m) => !m.channel.isArchived)
-      .map((m) => ({ ...m.channel, isMember: true, notificationPref: m.notificationPref }));
+      .map((m) => ({
+        ...m.channel,
+        isMember: true,
+        notificationPref: m.notificationPref,
+        sectionId: m.sectionId,
+      }));
   }
 
   /** Channel browser: public channels + own private ones. Guests see only their own. */

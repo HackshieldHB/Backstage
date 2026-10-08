@@ -28,6 +28,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { keys, useAiStatus, usePresence, type PendingMessage } from '@/hooks/queries';
 import { emojiChar } from '@/lib/emoji';
+import { useT } from '@/lib/i18n';
 import { Avatar } from './avatar';
 import { UserProfileDialog } from './user-profile-dialog';
 import { MessageBody } from './message-body';
@@ -42,6 +43,7 @@ import { ConfirmDialog, PromptDialog } from './confirm-dialog';
 import { Emoji } from './custom-emoji';
 import { ForwardDialog } from './forward-dialog';
 import { CreateTaskFromMessageDialog, RemindMeDialog } from './message-task-dialogs';
+import { EditHistoryDialog } from './edit-history-dialog';
 
 const QUICK_EMOJI = ['thumbsup', 'heart', 'joy', 'eyes', 'tada'];
 
@@ -62,6 +64,7 @@ export function MessageItem({
   onOpenThread?: (messageId: string) => void;
 }) {
   const me = useAuthStore((s) => s.user);
+  const tr = useT();
   const qc = useQueryClient();
   const [hovered, setHovered] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -72,6 +75,7 @@ export function MessageItem({
   const [forwardOpen, setForwardOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
   const [remindOpen, setRemindOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [translation, setTranslation] = useState<string | null>(null);
   const ai = useAiStatus();
   const pushToast = useUiStore((s) => s.pushToast);
@@ -190,7 +194,17 @@ export function MessageItem({
                 </button>
               </div>
             )}
-            {message.isEdited && <span className="ml-1 text-[11px] text-ink-3">(edited)</span>}
+            {message.isEdited && (
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                className="ml-1 text-[11px] text-ink-3 hover:text-ink hover:underline"
+                title="See earlier versions"
+                data-testid="edited-label"
+              >
+                {tr('edited')}
+              </button>
+            )}
             {message.pending && <span className="ml-1 text-[11px] text-ink-3">sending…</span>}
             {message.failed && (
               <button
@@ -265,11 +279,11 @@ export function MessageItem({
               <span className="text-[14px] leading-none">{emojiChar(e)}</span>
             </ToolbarButton>
           ))}
-          <ToolbarButton title="Add reaction" onClick={() => setEmojiOpen(true)} testId="add-reaction">
+          <ToolbarButton title={tr('add_reaction')} onClick={() => setEmojiOpen(true)} testId="add-reaction">
             <SmilePlus size={15} />
           </ToolbarButton>
           {!inThread && !message.parentId && (
-            <ToolbarButton title="Reply in thread" onClick={() => onOpenThread?.(message.id)} testId="reply-in-thread">
+            <ToolbarButton title={tr('reply_in_thread')} onClick={() => onOpenThread?.(message.id)} testId="reply-in-thread">
               <MessageSquareText size={15} />
             </ToolbarButton>
           )}
@@ -278,16 +292,16 @@ export function MessageItem({
               <Pin size={15} className={isPinned ? 'text-accent' : undefined} />
             </ToolbarButton>
           )}
-          <ToolbarButton title="Save for later" onClick={() => void save()} testId="save-message">
+          <ToolbarButton title={tr('save_for_later')} onClick={() => void save()} testId="save-message">
             <Bookmark size={15} />
           </ToolbarButton>
-          <ToolbarButton title="Forward" onClick={() => setForwardOpen(true)} testId="forward-message">
+          <ToolbarButton title={tr('forward')} onClick={() => setForwardOpen(true)} testId="forward-message">
             <Forward size={15} />
           </ToolbarButton>
-          <ToolbarButton title="Create task" onClick={() => setTaskOpen(true)} testId="create-task-from-message">
+          <ToolbarButton title={tr('create_task')} onClick={() => setTaskOpen(true)} testId="create-task-from-message">
             <CheckSquare size={15} />
           </ToolbarButton>
-          <ToolbarButton title="Remind me about this" onClick={() => setRemindOpen(true)} testId="remind-me-message">
+          <ToolbarButton title={tr('remind_me_about_this')} onClick={() => setRemindOpen(true)} testId="remind-me-message">
             <AlarmClock size={15} />
           </ToolbarButton>
           {ai.data?.enabled && (
@@ -321,10 +335,10 @@ export function MessageItem({
           )}
           {mine && (
             <>
-              <ToolbarButton title="Edit message" onClick={() => setEditing(true)} testId="edit-message">
+              <ToolbarButton title={tr('edit_message')} onClick={() => setEditing(true)} testId="edit-message">
                 <Pencil size={15} />
               </ToolbarButton>
-              <ToolbarButton title="Delete message" onClick={() => setDeleteOpen(true)} testId="delete-message">
+              <ToolbarButton title={tr('delete_message')} onClick={() => setDeleteOpen(true)} testId="delete-message">
                 <Trash2 size={15} className="text-red-500" />
               </ToolbarButton>
             </>
@@ -374,6 +388,10 @@ export function MessageItem({
           messageText={message.contentText}
           onClose={() => setTaskOpen(false)}
         />
+      )}
+
+      {historyOpen && (
+        <EditHistoryDialog message={message} onClose={() => setHistoryOpen(false)} />
       )}
 
       {remindOpen && (

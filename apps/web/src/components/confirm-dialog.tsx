@@ -60,6 +60,7 @@ export function PromptDialog({
   placeholder,
   confirmLabel = 'Submit',
   multiline,
+  initialValue = '',
   onSubmit,
   onClose,
 }: {
@@ -68,10 +69,12 @@ export function PromptDialog({
   placeholder?: string;
   confirmLabel?: string;
   multiline?: boolean;
+  /** Pre-filled text (e.g. the current name when renaming). */
+  initialValue?: string;
   onSubmit: (value: string) => void | Promise<void>;
   onClose: () => void;
 }) {
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState(initialValue);
   const [busy, setBusy] = useState(false);
   const inputCls =
     'w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';

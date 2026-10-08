@@ -24,6 +24,7 @@ import {
   type Container,
 } from '@/hooks/queries';
 import { useUiStore } from '@/stores/ui-store';
+import { dateLocale, useReasonT, useT } from '@/lib/i18n';
 import { PaneShell } from './pane-shell';
 
 const time = (iso: string) => format(new Date(iso), 'HH:mm');
@@ -44,6 +45,8 @@ export function MyDayPane({
   const ai = useAiStatus();
   const plan = usePlanMyDay(workspaceId);
   const pushToast = useUiStore((s) => s.pushToast);
+  const lang = useUiStore((s) => s.lang);
+  const t = useT();
   const [aiOrder, setAiOrder] = useState<MyDayItemDto[] | null>(null);
 
   const d = day.data;
@@ -68,8 +71,12 @@ export function MyDayPane({
   return (
     <PaneShell
       icon={<Sun size={18} className="text-accent" />}
-      title="My day"
-      subtitle={d ? format(new Date(`${d.date}T12:00:00`), 'EEEE, MMMM d') : 'Today'}
+      title={t('my_day')}
+      subtitle={
+        d
+          ? format(new Date(`${d.date}T12:00:00`), 'EEEE, MMMM d', { locale: dateLocale(lang) })
+          : t('bucket_today')
+      }
       actions={
         ai.data?.enabled ? (
           sameItems ? (
@@ -77,7 +84,7 @@ export function MyDayPane({
               onClick={() => setAiOrder(null)}
               className="rounded-lg border border-line-strong px-2.5 py-1.5 text-[13px] text-ink-2 hover:bg-hovered"
             >
-              Standard order
+              {t('standard_order')}
             </button>
           ) : (
             <button
@@ -86,15 +93,17 @@ export function MyDayPane({
               className="flex items-center gap-1 rounded-lg bg-accent px-2.5 py-1.5 text-[13px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
               data-testid="plan-my-day"
             >
-              <Sparkles size={14} /> {plan.isPending ? 'Planning…' : 'Suggest an order'}
+              <Sparkles size={14} /> {plan.isPending ? t('planning') : t('suggest_order')}
             </button>
           )
         ) : null
       }
     >
-      {day.isLoading && <p className="py-10 text-center text-sm text-ink-3">Gathering your day…</p>}
+      {day.isLoading && (
+        <p className="py-10 text-center text-sm text-ink-3">{t('my_day_loading')}</p>
+      )}
       {day.isError && (
-        <p className="py-10 text-center text-sm text-red-500">Could not load your day.</p>
+        <p className="py-10 text-center text-sm text-red-500">{t('my_day_error')}</p>
       )}
       {d && (
         <div className="mx-auto max-w-5xl space-y-4" data-testid="my-day">
@@ -114,16 +123,16 @@ export function MyDayPane({
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
             <section>
               <h2 className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                Focus{' '}
+                {t('focus')}{' '}
                 {sameItems && (
                   <span className="rounded bg-accent/15 px-1.5 text-accent normal-case">
-                    AI-suggested order
+                    {t('ai_order')}
                   </span>
                 )}
               </h2>
               {focus.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-line py-8 text-center text-sm text-ink-3">
-                  Nothing waiting on you today. 🎉
+                  {t('nothing_today')}
                 </p>
               ) : (
                 <ol className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-elevated">
@@ -137,11 +146,11 @@ export function MyDayPane({
             <aside className="space-y-4">
               <section>
                 <h2 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-                  Schedule
+                  {t('schedule')}
                 </h2>
                 {d.meetings.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-line px-3 py-4 text-center text-[13px] text-ink-3">
-                    No meetings today.
+                    {t('no_meetings')}
                   </p>
                 ) : (
                   <ul className="space-y-1.5" data-testid="my-day-meetings">
@@ -192,11 +201,12 @@ export function MyDayPane({
 }
 
 function Counts({ d }: { d: MyDayDto }) {
+  const t = useT();
   const items = [
-    { label: 'Meetings', value: d.counts.meetings },
-    { label: 'Overdue', value: d.counts.overdue, warn: d.counts.overdue > 0 },
-    { label: 'Due today', value: d.counts.dueToday },
-    { label: 'Requests', value: d.counts.requests, warn: d.counts.requests > 0 },
+    { label: t('meetings'), value: d.counts.meetings },
+    { label: t('bucket_overdue'), value: d.counts.overdue, warn: d.counts.overdue > 0 },
+    { label: t('due_today'), value: d.counts.dueToday },
+    { label: t('requests'), value: d.counts.requests, warn: d.counts.requests > 0 },
     { label: 'Jira', value: d.counts.jira },
   ];
   return (
@@ -216,17 +226,12 @@ function Counts({ d }: { d: MyDayDto }) {
 }
 
 function Hints({ d }: { d: MyDayDto }) {
+  const t = useT();
   const hints: string[] = [];
-  if (d.jira.state === 'not_linked')
-    hints.push(
-      'Connect your Atlassian account (Workspace menu) to see Jira issues assigned to you.',
-    );
-  if (d.jira.state === 'error')
-    hints.push('Jira didn’t answer — your issues aren’t shown right now.');
-  if (d.calendar.state === 'none')
-    hints.push('Link your calendar (Availability & focus hours) to see your meetings here.');
-  if (d.calendar.state === 'error')
-    hints.push('Your calendar feed couldn’t be read — check its link.');
+  if (d.jira.state === 'not_linked') hints.push(t('hint_jira_not_linked'));
+  if (d.jira.state === 'error') hints.push(t('hint_jira_error'));
+  if (d.calendar.state === 'none') hints.push(t('hint_calendar_none'));
+  if (d.calendar.state === 'error') hints.push(t('hint_calendar_error'));
   if (hints.length === 0) return null;
   return (
     <ul className="space-y-1 text-[12px] text-ink-3">
@@ -251,6 +256,8 @@ function FocusRow({
   const update = useUpdateTask(workspaceId);
   const setMainView = useUiStore((s) => s.setMainView);
   const pushToast = useUiStore((s) => s.pushToast);
+  const t = useT();
+  const reasonT = useReasonT();
   const Icon =
     item.kind === 'jira' ? SquareKanban : item.kind === 'request' ? ClipboardList : CheckSquare;
   const taskId = item.kind === 'task' ? item.id.slice('task:'.length) : null;
@@ -291,7 +298,7 @@ function FocusRow({
               item.overdue ? 'bg-red-500/15 text-red-500' : 'bg-hovered text-ink-2',
             )}
           >
-            {item.reason}
+            {reasonT(item.reason)}
           </span>
           {item.detail && <span>{item.detail}</span>}
         </div>
@@ -301,7 +308,7 @@ function FocusRow({
           onClick={() => setMainView('tasks')}
           className="shrink-0 rounded-md border border-line-strong px-2 py-1 text-[12px] text-ink hover:bg-hovered"
         >
-          Respond
+          {t('respond')}
         </button>
       )}
       {item.url && (

@@ -26,6 +26,8 @@ import { AuthModule } from '../auth/auth.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { TaskJiraService } from './task-jira.service';
 import { TaskJiraController } from './task-jira.controller';
+import { AtlassianOverviewService } from './atlassian-overview.service';
+import { AtlassianOverviewController } from './atlassian-overview.controller';
 
 @Global()
 @Module({
@@ -36,6 +38,7 @@ import { TaskJiraController } from './task-jira.controller';
     DashboardController,
     JiraAlertsController,
     TaskJiraController,
+    AtlassianOverviewController,
   ],
   providers: [
     AtlassianApiService,
@@ -57,6 +60,7 @@ import { TaskJiraController } from './task-jira.controller';
     ConfluenceApiService,
     ConfluenceService,
     TaskJiraService,
+    AtlassianOverviewService,
   ],
   exports: [AtlassianService, AtlassianSyncService, AtlassianApiService, JiraActionsService],
 })

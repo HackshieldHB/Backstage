@@ -41,6 +41,16 @@ export const EditMessageSchema = z
   });
 export type EditMessageInput = z.infer<typeof EditMessageSchema>;
 
+/** One earlier version of an edited message. */
+export interface MessageEditDto {
+  contentText: string;
+  contentJson: unknown;
+  /** When this version was written. */
+  versionAt: string;
+  /** When an edit replaced it. */
+  replacedAt: string;
+}
+
 export const ToggleReactionSchema = z.object({
   emoji: EmojiShortcodeSchema,
 });

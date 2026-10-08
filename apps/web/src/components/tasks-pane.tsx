@@ -24,6 +24,7 @@ import {
 } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
+import { useT } from '@/lib/i18n';
 import { PaneShell } from './pane-shell';
 import { Avatar } from './avatar';
 import { WorkflowRequests } from './workflow-requests';
@@ -65,11 +66,12 @@ export function bucketOf(
   return 'upcoming';
 }
 
+/** Labels are i18n keys. */
 const BUCKETS = [
-  { id: 'overdue', label: 'Overdue' },
-  { id: 'today', label: 'Today' },
-  { id: 'upcoming', label: 'Upcoming' },
-  { id: 'someday', label: 'No due date' },
+  { id: 'overdue', label: 'bucket_overdue' },
+  { id: 'today', label: 'bucket_today' },
+  { id: 'upcoming', label: 'bucket_upcoming' },
+  { id: 'someday', label: 'bucket_someday' },
 ] as const;
 
 export function TasksPane({
@@ -82,6 +84,7 @@ export function TasksPane({
   const me = useAuthStore((s) => s.user);
   const tasks = useTasks(workspaceId);
   const [tab, setTab] = useState<Tab>('mine');
+  const tr = useT();
 
   const { mine, delegated, done } = useMemo(() => {
     const all = tasks.data ?? [];
@@ -104,17 +107,17 @@ export function TasksPane({
   }, [tasks.data, me?.id]);
 
   const tabs: Array<{ id: Tab; label: string; count: number }> = [
-    { id: 'mine', label: 'Assigned to me', count: mine.length },
-    { id: 'delegated', label: 'Assigned by me', count: delegated.length },
-    { id: 'done', label: 'Done', count: done.length },
+    { id: 'mine', label: tr('assigned_to_me'), count: mine.length },
+    { id: 'delegated', label: tr('assigned_by_me'), count: delegated.length },
+    { id: 'done', label: tr('done'), count: done.length },
   ];
   const shown = tab === 'mine' ? mine : tab === 'delegated' ? delegated : done;
 
   return (
     <PaneShell
       icon={<CheckSquare size={18} className="text-accent" />}
-      title="Tasks"
-      subtitle="Your to-dos and the work you've handed off"
+      title={tr('tasks')}
+      subtitle={tr('tasks_subtitle')}
     >
       <div className="mx-auto max-w-3xl space-y-4" data-testid="tasks-pane">
         <WorkflowRequests workspaceId={workspaceId} />
@@ -143,18 +146,18 @@ export function TasksPane({
           ))}
         </div>
 
-        {tasks.isLoading && <p className="py-6 text-center text-sm text-ink-3">Loading…</p>}
+        {tasks.isLoading && <p className="py-6 text-center text-sm text-ink-3">{tr('loading')}</p>}
         {tasks.isError && (
-          <p className="py-6 text-center text-sm text-red-500">Could not load tasks.</p>
+          <p className="py-6 text-center text-sm text-red-500">{tr('could_not_load_tasks')}</p>
         )}
 
         {tasks.isSuccess && shown.length === 0 && (
           <p className="rounded-xl border border-dashed border-line py-8 text-center text-sm text-ink-3">
             {tab === 'mine'
-              ? 'Nothing on your plate. Add a task above, or turn a message into one from its menu.'
+              ? tr('empty_mine')
               : tab === 'delegated'
-                ? 'You haven’t assigned anything to anyone.'
-                : 'No completed tasks yet.'}
+                ? tr('empty_delegated')
+                : tr('empty_done')}
           </p>
         )}
 
@@ -170,7 +173,7 @@ export function TasksPane({
                       b.id === 'overdue' ? 'text-red-500' : 'text-ink-3',
                     )}
                   >
-                    {b.label} · {items.length}
+                    {tr(b.label)} · {items.length}
                   </h2>
                   <TaskList tasks={items} workspaceId={workspaceId} onNavigate={onNavigate} />
                 </section>
@@ -189,6 +192,7 @@ function QuickAdd({ workspaceId }: { workspaceId: string }) {
   const members = useMembers(workspaceId);
   const create = useCreateTask(workspaceId);
   const pushToast = useUiStore((s) => s.pushToast);
+  const tr = useT();
   const [title, setTitle] = useState('');
   const [due, setDue] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
@@ -219,7 +223,7 @@ function QuickAdd({ workspaceId }: { workspaceId: string }) {
     >
       <input
         className={clsx(input, 'min-w-[200px] flex-1')}
-        placeholder="Add a task…"
+        placeholder={tr('add_task_placeholder')}
         value={title}
         maxLength={300}
         onChange={(e) => setTitle(e.target.value)}
@@ -240,7 +244,7 @@ function QuickAdd({ workspaceId }: { workspaceId: string }) {
         onChange={(e) => setAssigneeId(e.target.value)}
         aria-label="Assignee"
       >
-        <option value="">Me</option>
+        <option value="">{tr('me')}</option>
         {(members.data ?? [])
           .filter((m) => m.user.id !== me?.id)
           .map((m) => (
@@ -255,7 +259,7 @@ function QuickAdd({ workspaceId }: { workspaceId: string }) {
         className="flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
         data-testid="task-add"
       >
-        <Plus size={14} /> Add
+        <Plus size={14} /> {tr('add')}
       </button>
     </form>
   );
@@ -296,6 +300,7 @@ function TaskRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const dateRef = useRef<HTMLInputElement>(null);
+  const tr = useT();
 
   const done = task.status === 'DONE';
   const overdue = !done && !!task.dueAt && isPast(new Date(task.dueAt));
@@ -387,7 +392,7 @@ function TaskRow({
               title="Change due date"
             >
               <CalendarDays size={12} />
-              {task.dueAt ? dueLabel(task.dueAt) : 'Set due date'}
+              {task.dueAt ? dueLabel(task.dueAt) : tr('set_due_date')}
             </button>
             <input
               ref={dateRef}
@@ -425,16 +430,16 @@ function TaskRow({
               }
               aria-label="Assignee"
             >
-              <option value="">Unassigned</option>
+              <option value="">{tr('unassigned')}</option>
               {(members.data ?? []).map((m) => (
                 <option key={m.user.id} value={m.user.id}>
-                  {m.user.id === me?.id ? 'Me' : m.user.displayName}
+                  {m.user.id === me?.id ? tr('me') : m.user.displayName}
                 </option>
               ))}
             </select>
           </span>
 
-          {!isCreator && <span>from {task.createdBy.displayName}</span>}
+          {!isCreator && <span>{tr('from_person', { name: task.createdBy.displayName })}</span>}
 
           <TaskJira task={task} workspaceId={workspaceId} />
 
@@ -449,7 +454,7 @@ function TaskRow({
               }
             >
               {task.meetingRecordId ? <Video size={12} /> : <MessageSquareText size={12} />}
-              {task.meetingRecordId ? 'From a meeting' : 'From a message'}
+              {task.meetingRecordId ? tr('from_meeting') : tr('from_message')}
             </button>
           )}
         </div>

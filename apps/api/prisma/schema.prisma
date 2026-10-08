@@ -149,6 +149,8 @@ model User {
   tasksAssigned           Task[]                   @relation("TaskAssignee")
   workflowRunsTriggered   WorkflowRun[]            @relation("WorkflowRunTrigger")
   workflowRequests        WorkflowRun[]            @relation("WorkflowRunPending")
+  sidebarSections         SidebarSection[]
+  bookmarksCreated        ChannelBookmark[]
 }
 
 model ShareLink {
@@ -244,6 +246,7 @@ model Workspace {
   meetingRecords         MeetingRecord[]
   tasks                  Task[]
   workflowRuns           WorkflowRun[]
+  sidebarSections        SidebarSection[]
 }
 
 model CustomEmoji {
@@ -357,6 +360,7 @@ model Channel {
   scheduledHuddles       ScheduledHuddle[]
   meetingRecords         MeetingRecord[]
   tasks                  Task[]
+  bookmarks              ChannelBookmark[]
 
   @@unique([workspaceId, name])
 }
@@ -368,8 +372,11 @@ model ChannelMember {
   notificationPref  NotificationPref @default(ALL)
   lastReadMessageId String?
   joinedAt          DateTime         @default(now())
+  /// The member's own sidebar section for this channel (null = default list).
+  sectionId         String?
 
   channel         Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  section         SidebarSection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   lastReadMessage Message? @relation("ChannelLastRead", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
 
@@ -406,9 +413,12 @@ model ConversationMember {
   userId            String
   lastReadMessageId String?
   joinedAt          DateTime @default(now())
+  /// The member's own sidebar section for this DM (null = default list).
+  sectionId         String?
 
   conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  section         SidebarSection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
   lastReadMessage Message?     @relation("ConversationLastRead", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
 
   @@unique([conversationId, userId])
@@ -464,6 +474,7 @@ model Message {
   poll                        Poll?
   tasks                       Task[]
   reminders                   ScheduledMessage[]
+  edits                       MessageEdit[]
 
   @@unique([userId, clientMsgId])
   @@index([channelId, createdAt])
@@ -1420,4 +1431,54 @@ model WorkflowRun {
   @@index([workflowId, startedAt])
   @@index([pendingUserId, status])
   @@index([status, expiresAt])
+}
+
+/// A previous version of an edited message (the text before an edit). Removed
+/// with the message, and cleared when the message is deleted.
+model MessageEdit {
+  id          String   @id @default(cuid())
+  messageId   String
+  contentText String
+  contentJson Json
+  /// When this version was written (the message's creation or previous edit).
+  versionAt   DateTime
+  /// When it was replaced.
+  replacedAt  DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId, replacedAt])
+}
+
+/// A user's own named group of channels/DMs in the sidebar.
+model SidebarSection {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  name        String
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace           Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channelMembers      ChannelMember[]
+  conversationMembers ConversationMember[]
+
+  @@index([userId, workspaceId])
+}
+
+/// A pinned link shown under a channel's header.
+model ChannelBookmark {
+  id          String   @id @default(cuid())
+  channelId   String
+  title       String
+  url         String
+  createdById String
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([channelId, position])
 }

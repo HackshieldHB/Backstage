@@ -8,6 +8,7 @@ import { fileUrl } from '@/lib/api';
 import { useSearch, type Container } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
+import { useT } from '@/lib/i18n';
 import { Avatar } from './avatar';
 import { MessageBody } from './message-body';
 
@@ -29,6 +30,7 @@ export function SearchDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const results = useSearch(workspaceId, debounced);
   const me = useAuthStore((s) => s.user);
+  const tr = useT();
   const setMainView = useUiStore((s) => s.setMainView);
   const openTasks = () => {
     setMainView('tasks');
@@ -144,7 +146,7 @@ export function SearchDialog({
               )}
               data-testid={`search-tab-${t}`}
             >
-              {t} {debounced && counts[t] > 0 && <span className="text-xs text-gray-500 dark:text-gray-400">({counts[t]})</span>}
+              {tr(`search.${t}`)} {debounced && counts[t] > 0 && <span className="text-xs text-gray-500 dark:text-gray-400">({counts[t]})</span>}
             </button>
           ))}
         </div>

@@ -6,6 +6,7 @@ import { Check, ClipboardList, X, Zap } from 'lucide-react';
 import type { WorkflowRequestDto } from '@backstages/shared';
 import { useRespondToWorkflowRequest, useWorkflowRequests } from '@/hooks/queries';
 import { useUiStore } from '@/stores/ui-store';
+import { useT } from '@/lib/i18n';
 
 const input =
   'w-full rounded-lg border border-line-strong bg-elevated px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent';
@@ -16,12 +17,13 @@ const input =
  */
 export function WorkflowRequests({ workspaceId }: { workspaceId: string }) {
   const requests = useWorkflowRequests(workspaceId);
+  const t = useT();
   const items = requests.data ?? [];
   if (items.length === 0) return null;
   return (
     <section data-testid="workflow-requests">
       <h2 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-accent">
-        Requests for you · {items.length}
+        {t('requests_for_you')} · {items.length}
       </h2>
       <ul className="space-y-2">
         {items.map((r) => (
@@ -42,6 +44,7 @@ function RequestCard({
   const respond = useRespondToWorkflowRequest(workspaceId);
   const pushToast = useUiStore((s) => s.pushToast);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const t = useT();
 
   const send = (body: { decision: 'approve' | 'reject' } | { answers: Record<string, string> }) =>
     respond.mutate(
@@ -92,7 +95,7 @@ function RequestCard({
             className="flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
             data-testid="request-approve"
           >
-            <Check size={14} /> Approve
+            <Check size={14} /> {t('approve')}
           </button>
           <button
             onClick={() => send({ decision: 'reject' })}
@@ -100,7 +103,7 @@ function RequestCard({
             className="flex items-center gap-1 rounded-lg border border-line-strong px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-hovered disabled:opacity-50"
             data-testid="request-reject"
           >
-            <X size={14} /> Reject
+            <X size={14} /> {t('reject')}
           </button>
         </div>
       ) : (
@@ -121,7 +124,7 @@ function RequestCard({
                   value={answers[f.key] ?? ''}
                   onChange={(e) => setAnswers((a) => ({ ...a, [f.key]: e.target.value }))}
                 >
-                  <option value="">Choose…</option>
+                  <option value="">{t('choose')}</option>
                   {(f.options ?? []).map((o) => (
                     <option key={o} value={o}>
                       {o}
@@ -144,7 +147,7 @@ function RequestCard({
             className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
             data-testid="request-submit"
           >
-            Submit
+            {t('submit')}
           </button>
         </form>
       )}

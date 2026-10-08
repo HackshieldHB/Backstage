@@ -137,6 +137,12 @@ export class MessagesController {
     return this.messages.edit(user.id, id, body);
   }
 
+  /** Earlier versions of an edited message. */
+  @Get('messages/:id/edits')
+  editHistory(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.messages.editHistory(user.id, id);
+  }
+
   @Delete('messages/:id')
   delete(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.messages.delete(user.id, id);

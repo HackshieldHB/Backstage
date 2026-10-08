@@ -9,6 +9,7 @@ import {
 import {
   EditMessageInput,
   ListMessagesQuery,
+  MessageEditDto,
   MessageDto,
   MessagePage,
   SOCKET_EVENTS,
@@ -591,16 +592,34 @@ export class MessagesService {
     const container = containerOf(message);
     await this.requireContainerAccess(userId, container);
 
-    const updated = await this.prisma.message.update({
-      where: { id: messageId },
-      data: {
-        contentJson: (input.contentJson ?? {}) as Prisma.InputJsonValue,
-        contentText: input.contentText,
-        isEdited: true,
-        editedAt: new Date(),
-      },
-      include: messageInclude,
-    });
+    const now = new Date();
+    const changed = message.contentText !== input.contentText;
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.message.update({
+        where: { id: messageId },
+        data: {
+          contentJson: (input.contentJson ?? {}) as Prisma.InputJsonValue,
+          contentText: input.contentText,
+          isEdited: true,
+          editedAt: now,
+        },
+        include: messageInclude,
+      }),
+      // Keep the version being replaced, so readers can see what changed.
+      ...(changed
+        ? [
+            this.prisma.messageEdit.create({
+              data: {
+                messageId,
+                contentText: message.contentText,
+                contentJson: (message.contentJson ?? {}) as Prisma.InputJsonValue,
+                versionAt: message.editedAt ?? message.createdAt,
+                replacedAt: now,
+              },
+            }),
+          ]
+        : []),
+    ]);
 
     // Newly-added mentions get rows + notifications; existing ones are untouched.
     const memberIds = new Set(await this.containerMemberIds(container));
@@ -657,6 +676,24 @@ export class MessagesService {
     return dto;
   }
 
+  /** Earlier versions of an edited message, newest first (readers of the message only). */
+  async editHistory(userId: string, messageId: string): Promise<MessageEditDto[]> {
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message || message.deletedAt) throw new NotFoundException('Message not found');
+    await this.requireContainerAccess(userId, containerOf(message));
+    const rows = await this.prisma.messageEdit.findMany({
+      where: { messageId },
+      orderBy: { replacedAt: 'desc' },
+      take: 50,
+    });
+    return rows.map((r) => ({
+      contentText: r.contentText,
+      contentJson: r.contentJson,
+      versionAt: r.versionAt.toISOString(),
+      replacedAt: r.replacedAt.toISOString(),
+    }));
+  }
+
   async delete(userId: string, messageId: string) {
     const message = await this.prisma.message.findUnique({ where: { id: messageId } });
     if (!message || message.deletedAt) throw new NotFoundException('Message not found');
@@ -669,10 +706,14 @@ export class MessagesService {
       await this.requireContainerAccess(userId, containerOf(message));
     }
 
-    await this.prisma.message.update({
-      where: { id: messageId },
-      data: { deletedAt: new Date() },
-    });
+    await this.prisma.$transaction([
+      this.prisma.message.update({
+        where: { id: messageId },
+        data: { deletedAt: new Date() },
+      }),
+      // Deleted content never leaves the server — nor do its earlier versions.
+      this.prisma.messageEdit.deleteMany({ where: { messageId } }),
+    ]);
 
     this.realtime.emitToContainer(
       { channelId: message.channelId, conversationId: message.conversationId },

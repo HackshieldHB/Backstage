@@ -15,5 +15,7 @@ export const ConversationDtoSchema = z.object({
   /** Set for integration inboxes (e.g. "Jira"); null for normal DMs. */
   title: z.string().nullable(),
   members: z.array(UserDtoSchema),
+  /** Where the viewer filed this DM in their sidebar (their own setting). */
+  sectionId: z.string().nullable().optional(),
 });
 export type ConversationDto = z.infer<typeof ConversationDtoSchema>;

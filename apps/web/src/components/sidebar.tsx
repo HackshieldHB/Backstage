@@ -70,6 +70,7 @@ import { WorkflowsDialog } from './workflows-dialog';
 import { UserGroupsDialog, AnalyticsDialog, AuditDialog } from './workspace-admin';
 import { Tooltip } from './tooltip';
 import { GuidedTour, type TourStep } from './guided-tour';
+import { CustomSections, MoveToSectionMenu, useSidebarSections } from './sidebar-sections';
 
 export function Sidebar({
   workspaceId,
@@ -144,12 +145,22 @@ export function Sidebar({
     ).length;
   }, [tasks.data, me?.id]);
 
-  const ungroupedChannels = useMemo(() => channels.filter((c) => !c.groupKey), [channels]);
+  // The user's own sections; anything filed in one is shown there instead.
+  const sections = useSidebarSections(workspaceId);
+  const sectionIds = useMemo(() => new Set((sections.data ?? []).map((s) => s.id)), [sections.data]);
+  const inSection = (sectionId?: string | null) => !!sectionId && sectionIds.has(sectionId);
+  const ungroupedChannels = useMemo(
+    () => channels.filter((c) => !c.groupKey && !(c.sectionId && sectionIds.has(c.sectionId))),
+    [channels, sectionIds],
+  );
   const groupedChannels = useMemo(() => {
     const g: Record<string, ChannelWithMeta[]> = {};
-    for (const c of channels) if (c.groupKey) (g[c.groupKey] ??= []).push(c);
+    for (const c of channels) {
+      if (c.groupKey && !(c.sectionId && sectionIds.has(c.sectionId))) (g[c.groupKey] ??= []).push(c);
+    }
     return g;
-  }, [channels]);
+  }, [channels, sectionIds]);
+  const freeConversations = conversations.filter((dm) => !inSection(dm.sectionId));
   const groupKeys = useMemo(() => Object.keys(groupedChannels).sort(), [groupedChannels]);
 
   // First-run walkthrough of the left menu. Each step spotlights a real button,
@@ -208,6 +219,64 @@ export function Sidebar({
     },
   ];
 
+  const sectionMenu = (kind: 'channel' | 'conversation', id: string, sectionId?: string | null) => (
+    <MoveToSectionMenu
+      workspaceId={workspaceId}
+      kind={kind}
+      id={id}
+      currentSectionId={sectionId}
+      sections={sections.data ?? []}
+    />
+  );
+
+  const renderChannel = (ch: ChannelWithMeta) => (
+    <ChannelRow
+      key={ch.id}
+      ch={ch}
+      active={container?.kind === 'channel' && container.id === ch.id}
+      unread={unreadFor(ch.id)}
+      onClick={() => onNavigate({ kind: 'channel', id: ch.id })}
+      menu={sectionMenu('channel', ch.id, ch.sectionId)}
+    />
+  );
+
+  const renderDm = (dm: ConversationDto) => {
+    const others = dm.members.filter((m) => m.id !== me?.id);
+    const label =
+      dm.title ?? (others.length > 0 ? others.map((o) => o.displayName).join(', ') : 'You');
+    const u = unreadFor(dm.id);
+    const active = container?.kind === 'conversation' && container.id === dm.id;
+    const first = others[0] ?? me;
+    return (
+      <li key={dm.id} className="group/row relative flex items-center">
+        <button
+          onClick={() => onNavigate({ kind: 'conversation', id: dm.id })}
+          className={clsx(
+            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px]',
+            active
+              ? 'bg-accent/10 font-medium text-accent'
+              : u.unread > 0
+                ? 'font-semibold text-ink hover:bg-hovered'
+                : 'text-ink-2 hover:bg-hovered hover:text-ink',
+          )}
+        >
+          <Avatar
+            user={first ?? null}
+            size="xs"
+            presence={first ? (presence.data?.[first.id] ?? 'OFFLINE') : undefined}
+          />
+          <span className="truncate">{label}</span>
+          {u.unread > 0 && (
+            <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+              {u.unread}
+            </span>
+          )}
+        </button>
+        <div className="absolute right-1">{sectionMenu('conversation', dm.id, dm.sectionId)}</div>
+      </li>
+    );
+  };
+
   return (
     <aside className="sidebar-surface flex h-full w-64 shrink-0 flex-col border-r border-line text-ink">
       {/* Workspace header */}
@@ -247,7 +316,7 @@ export function Sidebar({
         {/* Primary quick-access */}
         <SectionButton
           icon={<Sun size={15} />}
-          label="My day"
+          label={t('my_day')}
           active={mainView === 'myday'}
           onClick={() => setMainView('myday')}
           testId="my-day-button"
@@ -262,14 +331,14 @@ export function Sidebar({
         />
         <SectionButton
           icon={<Compass size={15} />}
-          label="Discover"
+          label={t('discover')}
           active={mainView === 'discover'}
           onClick={() => setMainView('discover')}
           testId="discover-button"
         />
         <SectionButton
           icon={<CheckSquare size={15} />}
-          label="Tasks"
+          label={t('tasks')}
           badge={overdueTasks + (workflowRequests.data?.length ?? 0)}
           active={mainView === 'tasks'}
           onClick={() => setMainView('tasks')}
@@ -363,7 +432,7 @@ export function Sidebar({
           />
           <SectionButton
             icon={<LayoutGrid size={15} />}
-            label="Applications"
+            label={t('applications')}
             active={mainView === 'applications'}
             onClick={() => setMainView('applications')}
             testId="applications-button"
@@ -420,6 +489,16 @@ export function Sidebar({
           )}
         </NavGroup>
 
+        {/* The user's own sections (channels/DMs they've filed) */}
+        <CustomSections
+          workspaceId={workspaceId}
+          sections={sections.data ?? []}
+          channels={channels}
+          conversations={conversations}
+          renderChannel={renderChannel}
+          renderDm={renderDm}
+        />
+
         {/* Channels */}
         <SectionHeader
           label={t('channels')}
@@ -430,17 +509,7 @@ export function Sidebar({
           onAdd={() => setDialog('create-channel')}
           onBrowse={() => setDialog('browse')}
         />
-        <ul>
-          {ungroupedChannels.map((ch) => (
-            <ChannelRow
-              key={ch.id}
-              ch={ch}
-              active={container?.kind === 'channel' && container.id === ch.id}
-              unread={unreadFor(ch.id)}
-              onClick={() => onNavigate({ kind: 'channel', id: ch.id })}
-            />
-          ))}
-        </ul>
+        <ul>{ungroupedChannels.map(renderChannel)}</ul>
 
         {/* Integration channel groups (Jira / Confluence) */}
         {groupKeys.map((gk) => {
@@ -458,17 +527,7 @@ export function Sidebar({
                 {GROUP_LABELS[gk] ?? gk}
               </button>
               {!collapsed && (
-                <ul>
-                  {groupedChannels[gk].map((ch) => (
-                    <ChannelRow
-                      key={ch.id}
-                      ch={ch}
-                      active={container?.kind === 'channel' && container.id === ch.id}
-                      unread={unreadFor(ch.id)}
-                      onClick={() => onNavigate({ kind: 'channel', id: ch.id })}
-                    />
-                  ))}
-                </ul>
+                <ul>{groupedChannels[gk].map(renderChannel)}</ul>
               )}
             </div>
           );
@@ -481,43 +540,7 @@ export function Sidebar({
           addTitle={t('add')}
           onAdd={() => setDialog('dm')}
         />
-        <ul>
-          {conversations.map((dm) => {
-            const others = dm.members.filter((m) => m.id !== me?.id);
-            const label =
-              dm.title ?? (others.length > 0 ? others.map((o) => o.displayName).join(', ') : 'You');
-            const u = unreadFor(dm.id);
-            const active = container?.kind === 'conversation' && container.id === dm.id;
-            const first = others[0] ?? me;
-            return (
-              <li key={dm.id}>
-                <button
-                  onClick={() => onNavigate({ kind: 'conversation', id: dm.id })}
-                  className={clsx(
-                    'flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px]',
-                    active
-                      ? 'bg-accent/10 font-medium text-accent'
-                      : u.unread > 0
-                        ? 'font-semibold text-ink hover:bg-hovered'
-                        : 'text-ink-2 hover:bg-hovered hover:text-ink',
-                  )}
-                >
-                  <Avatar
-                    user={first ?? null}
-                    size="xs"
-                    presence={first ? (presence.data?.[first.id] ?? 'OFFLINE') : undefined}
-                  />
-                  <span className="truncate">{label}</span>
-                  {u.unread > 0 && (
-                    <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
-                      {u.unread}
-                    </span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <ul>{freeConversations.map(renderDm)}</ul>
       </div>
 
       {/* Footer: current user */}
@@ -645,19 +668,22 @@ function ChannelRow({
   active,
   unread,
   onClick,
+  menu,
 }: {
   ch: ChannelWithMeta;
   active: boolean;
   unread: { unread: number; mentions: number };
   onClick: () => void;
+  /** Hover actions (e.g. "Move to section"). */
+  menu?: React.ReactNode;
 }) {
   return (
-    <li>
+    <li className="group/row relative flex items-center">
       <button
         onClick={onClick}
         data-testid={`channel-${ch.name}`}
         className={clsx(
-          'group flex w-full items-center gap-2 rounded-md px-2 py-1 text-[13px]',
+          'group flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px]',
           active
             ? 'bg-accent/10 font-medium text-accent'
             : unread.unread > 0
@@ -681,6 +707,7 @@ function ChannelRow({
           </span>
         )}
       </button>
+      {menu && <div className="absolute right-1">{menu}</div>}
     </li>
   );
 }

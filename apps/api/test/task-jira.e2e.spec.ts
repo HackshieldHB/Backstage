@@ -72,6 +72,22 @@ class FakeJira {
     });
     return { key };
   }
+  countFails = false;
+  async listProjects() {
+    return [
+      { id: '1', key: 'PROJ', name: 'Project' },
+      { id: '2', key: 'OPS', name: 'Operations' },
+    ];
+  }
+  async countJql() {
+    if (this.countFails) throw new Error('Jira down');
+    return 42;
+  }
+  async searchJql() {
+    return [
+      { key: 'PROJ-9', summary: 'Ship it', status: 'In Progress', priority: null, dueDate: null, updated: '2026-10-08T01:00:00Z' },
+    ];
+  }
   async getTransitions() {
     return Object.entries(STATUS).map(([id, s]) => ({ id, name: s.name, toCategory: s.category }));
   }
@@ -351,5 +367,39 @@ describe('task ↔ Jira sync (e2e, fake Jira)', () => {
     await hook(key, 'To Do', 'new', 'wrong-secret').expect(401);
     t = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
     expect(t.status).toBe('DONE');
+  });
+
+  it('Applications Hub overview: live Atlassian figures, partial failures, scoping', async () => {
+    const res = await http()
+      .get(`/workspaces/${workspaceId}/applications/atlassian`)
+      .set(auth(bob))
+      .expect(200);
+    const o = res.body.data;
+    expect(o).toMatchObject({
+      connected: true,
+      siteUrl: SITE.url,
+      projects: 2,
+      openIssues: 42,
+      confluenceSpaces: null, // Confluence not granted on this connection
+      linkedMembers: 1, // Alice linked her own account earlier
+      problems: [],
+    });
+    expect(o.recent[0]).toMatchObject({ key: 'PROJ-9', url: `${SITE.url}/browse/PROJ-9` });
+
+    jira.countFails = true;
+    const partial = (
+      await http().get(`/workspaces/${workspaceId}/applications/atlassian`).set(auth(alice)).expect(200)
+    ).body.data;
+    expect(partial.openIssues).toBeNull();
+    expect(partial.problems).toEqual(['open issue count']);
+    expect(partial.projects).toBe(2);
+    jira.countFails = false;
+
+    const other = await http()
+      .get(`/workspaces/${otherWorkspaceId}/applications/atlassian`)
+      .set(auth(mallory))
+      .expect(200);
+    expect(other.body.data).toEqual({ connected: false });
+    await http().get(`/workspaces/${workspaceId}/applications/atlassian`).set(auth(mallory)).expect(404);
   });
 });

@@ -66,7 +66,11 @@ export class ConversationsService {
       include: { members: { include: { user: true } } },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map((c) => this.toDto(c));
+    return rows.map((c) => ({
+      ...this.toDto(c),
+      // Where the caller filed this DM in their own sidebar.
+      sectionId: c.members.find((m) => m.userId === userId)?.sectionId ?? null,
+    }));
   }
 
   async get(userId: string, conversationId: string) {

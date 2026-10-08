@@ -27,5 +27,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
     setAccent(theme);
   }, [bootstrap, setAccent]);
 
+  // Keep <html lang> in step with the UI language (screen readers, spellcheck, hyphenation).
+  const lang = useUiStore((s) => s.lang);
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }

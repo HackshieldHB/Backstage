@@ -15,6 +15,7 @@ import { Tooltip } from './tooltip';
 import { Dialog } from './dialog';
 import { ScheduleHuddleDialog, UpcomingHuddles } from './schedule-huddle';
 import { MeetingHistoryDialog } from './meeting-history-dialog';
+import { BookmarksBar } from './bookmarks-bar';
 
 export function MainPane({
   workspaceId,
@@ -209,6 +210,7 @@ export function MainPane({
           </button>
         </Tooltip>
         </div>
+        {container.kind === 'channel' && <BookmarksBar channelId={container.id} />}
       </header>
 
       {tipsOpen && (
