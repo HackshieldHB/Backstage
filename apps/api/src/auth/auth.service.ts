@@ -1,6 +1,7 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import type {
   AuthResponse,
+  MfaChallengeDto,
   ForgotPasswordInput,
   LoginInput,
   ResetPasswordInput,
@@ -13,8 +14,12 @@ import { User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { sha256, TokenService } from './token.service';
+import { TwoFactorService } from './two-factor.service';
+import { RedisClient } from '../redis/redis.module';
+import { ssoEnforcedFor } from '../security/sso-policy';
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+const MFA_MAX_ATTEMPTS = 5;
 
 export function toUserDto(user: User): UserDto {
   return {
@@ -34,12 +39,27 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly tokenService: TokenService,
     private readonly emailService: EmailService,
+    private readonly twoFactor: TwoFactorService,
+    private readonly redis: RedisClient,
   ) {}
 
   async signup(input: SignupInput): Promise<AuthResponse> {
     const existing = await this.prisma.user.findUnique({ where: { email: input.email } });
     if (existing && !existing.isProvisional) {
       throw new ConflictException('An account with this email already exists');
+    }
+    if (await ssoEnforcedFor(this.prisma, input.email)) {
+      throw new ForbiddenException('Your organization requires single sign-on — use “Continue with SSO”');
+    }
+    // Accounts pre-created by an organization (SCIM) on a verified domain can only be
+    // claimed by proving the mailbox (password reset) or via SSO — signup has no email
+    // check, so it must not hand someone else's provisioned account to whoever asks.
+    if (existing?.isProvisional && (await this.prisma.workspaceDomain.count({
+      where: { domain: input.email.slice(input.email.lastIndexOf('@') + 1).toLowerCase(), verifiedAt: { not: null } },
+    }))) {
+      throw new ConflictException(
+        'Your organization already set up this account — sign in with SSO, or use “Forgot password” to set a password',
+      );
     }
 
     const passwordHash = await bcrypt.hash(input.password, 10);
@@ -56,11 +76,39 @@ export class AuthService {
     return this.buildAuthResponse(user);
   }
 
-  async login(input: LoginInput): Promise<AuthResponse> {
+  /**
+   * Password step. With 2FA on, no session is issued yet: the caller gets a
+   * 5-minute `mfaToken` to present with a code to loginTwoFactor().
+   */
+  async login(input: LoginInput): Promise<AuthResponse | MfaChallengeDto> {
     const user = await this.prisma.user.findUnique({ where: { email: input.email } });
-    if (!user?.passwordHash) throw new UnauthorizedException('Invalid credentials');
+    if (!user?.passwordHash || user.isBot) throw new UnauthorizedException('Invalid credentials');
     const ok = await bcrypt.compare(input.password, user.passwordHash);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
+    if (await ssoEnforcedFor(this.prisma, user.email, user.id)) {
+      throw new ForbiddenException('Your organization requires single sign-on — use “Continue with SSO”');
+    }
+    if (user.totpEnabledAt) {
+      return { mfaRequired: true, mfaToken: await this.tokenService.signMfaToken(user) };
+    }
+    return this.buildAuthResponse(user);
+  }
+
+  /** Second step: a TOTP or recovery code. Each mfaToken allows a few tries, then it's spent. */
+  async loginTwoFactor(mfaToken: string, code: string): Promise<AuthResponse> {
+    const { userId, jti } = await this.tokenService.verifyMfaToken(mfaToken);
+    const key = `mfa:attempts:${jti}`;
+    const attempts = await this.redis.incr(key);
+    if (attempts === 1) await this.redis.expire(key, 600);
+    if (attempts > MFA_MAX_ATTEMPTS) {
+      throw new UnauthorizedException('Too many attempts — enter your password again');
+    }
+    if (!(await this.twoFactor.verify(userId, code))) {
+      throw new UnauthorizedException('That code is not valid');
+    }
+    // Spend the challenge so it can't start a second session.
+    await this.redis.set(key, String(MFA_MAX_ATTEMPTS + 1), 'EX', 600);
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     return this.buildAuthResponse(user);
   }
 

@@ -71,6 +71,7 @@ import { UserGroupsDialog, AnalyticsDialog, AuditDialog } from './workspace-admi
 import { Tooltip } from './tooltip';
 import { GuidedTour, type TourStep } from './guided-tour';
 import { CustomSections, MoveToSectionMenu, useSidebarSections } from './sidebar-sections';
+import { AccountSecurityDialog } from './account-security';
 
 export function Sidebar({
   workspaceId,
@@ -96,7 +97,7 @@ export function Sidebar({
   const workspace = workspaces.data?.find((w) => w.id === workspaceId);
 
   const [dialog, setDialog] = useState<
-    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'availability' | 'settings' | 'catch-up' | 'scheduled' | 'workflows' | 'user-groups' | 'analytics' | 'audit' | 'standups' | 'integrations' | 'decisions' | 'weekly-reports' | 'work-dashboard'
+    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'availability' | 'settings' | 'catch-up' | 'scheduled' | 'workflows' | 'user-groups' | 'analytics' | 'audit' | 'standups' | 'integrations' | 'decisions' | 'weekly-reports' | 'work-dashboard' | 'account-security'
   >('none');
   const isAdmin = workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN';
 
@@ -595,8 +596,10 @@ export function Sidebar({
             (me && (presence.data?.[me.id] as 'ACTIVE' | 'AWAY' | 'DND' | undefined)) ?? 'ACTIVE'
           }
           onClose={() => setDialog('none')}
+          onOpenSecurity={() => setDialog('account-security')}
         />
       )}
+      {dialog === 'account-security' && <AccountSecurityDialog onClose={() => setDialog('none')} />}
       {dialog === 'availability' && (
         <AvailabilityDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
       )}
@@ -605,6 +608,7 @@ export function Sidebar({
           workspaceId={workspaceId}
           workspaceName={workspace?.name ?? 'Workspace'}
           isAdmin={workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN'}
+          isOwner={workspace?.myRole === 'OWNER'}
           onClose={() => setDialog('none')}
         />
       )}
@@ -1108,10 +1112,12 @@ function ProfileDialog({
   workspaceId,
   initialPresence = 'ACTIVE',
   onClose,
+  onOpenSecurity,
 }: {
   workspaceId: string;
   initialPresence?: 'ACTIVE' | 'AWAY' | 'DND';
   onClose: () => void;
+  onOpenSecurity?: () => void;
 }) {
   const me = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -1387,6 +1393,21 @@ function ProfileDialog({
           Get notified when a Jira task is assigned to or removed from you, plus mentions and DMs.
         </p>
       </div>
+
+      {onOpenSecurity && (
+        <button
+          type="button"
+          onClick={onOpenSecurity}
+          className="mb-3 flex w-full items-center justify-between rounded-md border border-line px-3 py-2 text-left text-sm hover:bg-gray-50 dark:border-line dark:hover:bg-gray-800"
+          data-testid="open-account-security"
+        >
+          <span>
+            <span className="font-medium">Account security</span>
+            <span className="block text-xs text-gray-500">Two-factor authentication and API tokens</span>
+          </span>
+          <span aria-hidden>›</span>
+        </button>
+      )}
 
       <button
         onClick={() => void save()}

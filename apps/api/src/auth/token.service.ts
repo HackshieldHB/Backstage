@@ -9,6 +9,8 @@ export function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+const mfaSecret = () => `${process.env.JWT_ACCESS_SECRET ?? ''}:mfa-step`;
+
 @Injectable()
 export class TokenService {
   constructor(
@@ -18,6 +20,29 @@ export class TokenService {
 
   async signAccessToken(user: { id: string; email: string }): Promise<string> {
     return this.jwtService.signAsync({ sub: user.id, email: user.email });
+  }
+
+  /**
+   * The short-lived token between the password step and the 2FA step. Signed with
+   * a derived secret and typed, so it can never pass as a session access token.
+   */
+  async signMfaToken(user: { id: string; email: string }): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: user.id, email: user.email, typ: 'mfa', jti: randomUUID() },
+      { secret: mfaSecret(), expiresIn: '5m' },
+    );
+  }
+
+  async verifyMfaToken(token: string): Promise<{ userId: string; jti: string }> {
+    try {
+      const payload = await this.jwtService.verifyAsync<{ sub: string; typ?: string; jti?: string }>(token, {
+        secret: mfaSecret(),
+      });
+      if (payload.typ !== 'mfa' || !payload.jti) throw new Error('wrong token type');
+      return { userId: payload.sub, jti: payload.jti };
+    } catch {
+      throw new UnauthorizedException('Your sign-in expired — enter your password again');
+    }
   }
 
   /** Issues a new crypto-random refresh token; only its SHA-256 hash is persisted. */

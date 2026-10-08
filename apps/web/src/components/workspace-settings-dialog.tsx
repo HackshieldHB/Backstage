@@ -12,8 +12,9 @@ import { useUiStore } from '@/stores/ui-store';
 import { Dialog } from './dialog';
 import { Avatar } from './avatar';
 import { AtlassianSettings } from './atlassian-dialog';
+import { WorkspaceSecuritySettings } from './workspace-security';
 
-type Section = 'general' | 'members' | 'atlassian';
+type Section = 'general' | 'members' | 'atlassian' | 'security';
 
 /**
  * Workspace settings, opened from the workspace name. Home for everything that
@@ -24,11 +25,13 @@ export function WorkspaceSettingsDialog({
   workspaceId,
   workspaceName,
   isAdmin,
+  isOwner = false,
   onClose,
 }: {
   workspaceId: string;
   workspaceName: string;
   isAdmin: boolean;
+  isOwner?: boolean;
   onClose: () => void;
 }) {
   const [section, setSection] = useState<Section>('general');
@@ -61,6 +64,14 @@ export function WorkspaceSettingsDialog({
             active={section === 'atlassian'}
             onClick={() => setSection('atlassian')}
           />
+          {isAdmin && (
+            <SectionTab
+              icon={<ShieldCheck size={15} />}
+              label="Security"
+              active={section === 'security'}
+              onClick={() => setSection('security')}
+            />
+          )}
         </nav>
         <div className="min-w-0 flex-1">
           {section === 'general' ? (
@@ -71,6 +82,8 @@ export function WorkspaceSettingsDialog({
             />
           ) : section === 'members' ? (
             <MembersSettings workspaceId={workspaceId} />
+          ) : section === 'security' && isAdmin ? (
+            <WorkspaceSecuritySettings workspaceId={workspaceId} isOwner={isOwner} />
           ) : (
             <AtlassianSettings
               workspaceId={workspaceId}

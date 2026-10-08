@@ -5,6 +5,8 @@ export interface AuthUser {
   /** The user id (resolved from the JWT `sub` claim). */
   id: string;
   email: string;
+  /** Set when the request authenticated with an API token rather than a session. */
+  tokenScope?: 'read' | 'write';
 }
 
 /** Yields the AuthUser — `user.id` is always the user id, never the raw JWT payload. */

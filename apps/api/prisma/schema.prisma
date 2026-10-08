@@ -91,9 +91,21 @@ model User {
   statusExpiresAt DateTime?
   /// When set and in the future, desktop notifications are snoozed (DND).
   dndUntil        DateTime?
+  /// Bot accounts: API-token only (no password, no 2FA), owned by one workspace.
+  isBot           Boolean   @default(false)
+  botWorkspaceId  String?
+  /// Two-factor auth (TOTP): encrypted secret; enabled once confirmed with a code.
+  totpSecretEnc   String?
+  totpEnabledAt   DateTime?
+  /// Last accepted TOTP time step — a code can't be replayed within its window.
+  totpLastStep    Int?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  apiTokens               ApiToken[]               @relation("ApiTokenOwner")
+  apiTokensCreated        ApiToken[]               @relation("ApiTokenCreator")
+  recoveryCodes           RecoveryCode[]
+  ssoIdentities           SsoIdentity[]
   ownedWorkspaces         Workspace[]              @relation("WorkspaceOwner")
   workspaceMemberships    WorkspaceMember[]
   invitesCreated          WorkspaceInvite[]        @relation("InviteCreator")
@@ -209,7 +221,16 @@ model Workspace {
   ownerId   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  /// Messages older than this many days are deleted (null = keep forever).
+  retentionDays   Int?
+  /// While set, retention deletes nothing (e.g. during an investigation).
+  legalHold       Boolean  @default(false)
+  /// SCIM provisioning bearer token (hash only; shown once when generated).
+  scimTokenHash   String?  @unique
+  scimTokenPrefix String?
 
+  sso                 SsoConnection?
+  domains             WorkspaceDomain[]
   owner               User                 @relation("WorkspaceOwner", fields: [ownerId], references: [id])
   members             WorkspaceMember[]
   invites             WorkspaceInvite[]
@@ -1481,4 +1502,88 @@ model ChannelBookmark {
   createdBy User    @relation(fields: [createdById], references: [id], onDelete: Cascade)
 
   @@index([channelId, position])
+}
+
+/// A personal access token or bot token. Only a SHA-256 hash is stored; the
+/// token itself is shown once at creation.
+model ApiToken {
+  id          String    @id @default(cuid())
+  /// Whose identity the token acts as (a person, or a bot user).
+  userId      String
+  name        String
+  tokenHash   String    @unique
+  /// First characters of the token, for recognising it in lists.
+  prefix      String
+  /// 'read' (GET only) or 'write'.
+  scope       String    @default("read")
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdById String
+  createdAt   DateTime  @default(now())
+
+  user      User @relation("ApiTokenOwner", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User @relation("ApiTokenCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// One-time 2FA recovery codes (hashed).
+model RecoveryCode {
+  id       String    @id @default(cuid())
+  userId   String
+  codeHash String
+  usedAt   DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// A workspace's OpenID Connect identity provider (Okta, Entra ID, Google…).
+model SsoConnection {
+  id              String   @id @default(cuid())
+  workspaceId     String   @unique
+  issuer          String
+  clientId        String
+  clientSecretEnc String
+  /// When true, people with an email on one of the workspace's verified domains
+  /// must sign in through SSO (password login refused, except the owner).
+  enforced        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+/// Links a Backstages user to an IdP subject ("sub") so renamed emails still match.
+/// An email domain a workspace has proven it controls (DNS TXT record). Only
+/// verified domains can be used for SSO sign-in and SCIM provisioning, so a
+/// workspace can never claim accounts on someone else's domain.
+model WorkspaceDomain {
+  id          String    @id @default(cuid())
+  workspaceId String
+  domain      String
+  /// Expected TXT value at _backstages-challenge.<domain>.
+  token       String
+  verifiedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, domain])
+  @@index([domain])
+}
+
+model SsoIdentity {
+  id        String   @id @default(cuid())
+  userId    String
+  issuer    String
+  subject   String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([issuer, subject])
+  @@index([userId])
 }

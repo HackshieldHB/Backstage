@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import type { AuthResponse, UserDto } from '@backstages/shared';
+import type { AuthResponse, MfaChallengeDto, UserDto } from '@backstages/shared';
 import { api, setTokens, getAccessToken } from '@/lib/api';
 import { destroySocket } from '@/lib/socket';
 
@@ -9,7 +9,9 @@ interface AuthState {
   user: UserDto | null;
   loading: boolean;
   bootstrap: () => Promise<void>;
-  login: (email: string, password: string) => Promise<void>;
+  /** Resolves to an mfaToken when the account has 2FA on (finish with loginTwoFactor). */
+  login: (email: string, password: string) => Promise<{ mfaToken: string } | null>;
+  loginTwoFactor: (mfaToken: string, code: string) => Promise<void>;
   signup: (email: string, password: string, displayName: string) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (user: UserDto) => void;
@@ -33,7 +35,15 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   login: async (email, password) => {
-    const res = await api<AuthResponse>('POST', '/auth/login', { email, password });
+    const res = await api<AuthResponse | MfaChallengeDto>('POST', '/auth/login', { email, password }, { retry: false });
+    if ('mfaRequired' in res) return { mfaToken: res.mfaToken };
+    setTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
+    set({ user: res.user, loading: false });
+    return null;
+  },
+
+  loginTwoFactor: async (mfaToken, code) => {
+    const res = await api<AuthResponse>('POST', '/auth/login/2fa', { mfaToken, code }, { retry: false });
     setTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
     set({ user: res.user, loading: false });
   },

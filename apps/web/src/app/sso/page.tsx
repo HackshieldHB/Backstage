@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { setTokens } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 
-/** Landing page for the Atlassian SSO redirect: /sso#access=...&refresh=... */
+/** Landing page for the Atlassian / OIDC SSO redirect: /sso#access=...&refresh=... */
 export default function SsoPage() {
   const router = useRouter();
   const bootstrap = useAuthStore((s) => s.bootstrap);
@@ -25,7 +25,7 @@ export default function SsoPage() {
   return (
     <main className="flex min-h-screen items-center justify-center">
       <div className="animate-pulse text-lg font-semibold text-sidebar dark:text-white">
-        Signing you in with Atlassian…
+        Signing you in…
       </div>
     </main>
   );

@@ -53,6 +53,7 @@ import { WorkflowEventsModule } from './workflows/workflow-events';
 import { TaskEventsModule } from './tasks/task-events';
 import { MyDayModule } from './my-day/my-day.module';
 import { SidebarModule } from './sidebar/sidebar.module';
+import { SecurityModule } from './security/security.module';
 import { RateLimitGuard } from './common/rate-limit.guard';
 
 @Module({
@@ -108,6 +109,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     TasksModule,
     MyDayModule,
     SidebarModule,
+    SecurityModule,
   ],
   controllers: [HealthController],
   providers: [
