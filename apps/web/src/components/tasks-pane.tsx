@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { PaneShell } from './pane-shell';
 import { Avatar } from './avatar';
+import { WorkflowRequests } from './workflow-requests';
 
 const input =
   'rounded-lg border border-line-strong bg-elevated px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent';
@@ -115,6 +116,7 @@ export function TasksPane({
       subtitle="Your to-dos and the work you've handed off"
     >
       <div className="mx-auto max-w-3xl space-y-4" data-testid="tasks-pane">
+        <WorkflowRequests workspaceId={workspaceId} />
         <QuickAdd workspaceId={workspaceId} />
 
         <div className="flex gap-1 border-b border-line" role="tablist">

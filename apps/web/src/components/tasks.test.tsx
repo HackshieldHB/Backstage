@@ -116,6 +116,8 @@ vi.mock('@/hooks/queries', () => ({
   useCreateTask: () => ({ mutate, isPending: false }),
   useUpdateTask: () => ({ mutate, isPending: false }),
   useDeleteTask: () => ({ mutate, isPending: false }),
+  useWorkflowRequests: () => ({ data: [] }),
+  useRespondToWorkflowRequest: () => ({ mutate, isPending: false }),
 }));
 vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (sel: (s: { user: typeof me }) => unknown) => sel({ user: me }),

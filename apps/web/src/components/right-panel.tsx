@@ -651,7 +651,7 @@ interface NotifPayload {
 }
 
 function iconForNotification(type: string, pl: NotifPayload) {
-  if (type === 'SYSTEM' && pl.source === 'task') return <CheckSquare size={14} className="text-accent" />;
+  if (type === 'SYSTEM' && (pl.source === 'task' || pl.source === 'workflow_request')) return <CheckSquare size={14} className="text-accent" />;
   if (type === 'SYSTEM' && pl.source === 'reminder') return <AlarmClock size={14} className="text-amber-500" />;
   if (type === 'SYSTEM' && pl.source === 'jira')
     return <SquareKanban size={14} className="text-[#2684FF]" />;
@@ -730,7 +730,7 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
         const pl = (n.payload ?? {}) as NotifPayload;
         const sysText = n.type === 'SYSTEM' ? (taskOrReminderText(pl, n.actor?.displayName) ?? systemText(pl)) : null;
         const open = () => {
-          if (pl.source === 'task') {
+          if (pl.source === 'task' || pl.source === 'workflow_request') {
             setMainView('tasks');
             return;
           }

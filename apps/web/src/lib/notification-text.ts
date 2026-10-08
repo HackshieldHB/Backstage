@@ -15,6 +15,12 @@ export function taskOrReminderText(
   actorName?: string | null,
 ): string | null {
   if (pl.source === 'reminder') return `⏰ Reminder: ${pl.text ?? ''}`.trim();
+  if (pl.source === 'workflow_request') {
+    const what = pl.action === 'form' ? 'needs you to fill in a form' : 'needs your approval';
+    return `${pl.title ?? 'A workflow'} ${what}`;
+  }
+  // A workflow DM addressed to its own creator arrives as a notification.
+  if (pl.source === 'workflow') return `${pl.title ?? 'Workflow'}: ${pl.text ?? ''}`.trim();
   if (pl.source !== 'task') return null;
   const title = `“${pl.title ?? 'a task'}”`;
   const who = actorName ?? 'Someone';

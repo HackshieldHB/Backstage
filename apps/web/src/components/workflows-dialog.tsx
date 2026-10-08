@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { ArrowLeft, Pencil, Plus, Trash2, X, Zap } from 'lucide-react';
+import { ArrowLeft, History, Pencil, Plus, Trash2, X, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   MAX_WORKFLOW_ACTIONS,
@@ -11,10 +11,18 @@ import {
   WorkflowInputSchema,
   type WorkflowAction,
   type WorkflowDto,
+  type WorkflowFormField,
+  type WorkflowRunStatus,
   type WorkflowTrigger,
 } from '@backstages/shared';
 import { api } from '@/lib/api';
-import { keys, useMembers, useWorkflows, type ChannelWithMeta } from '@/hooks/queries';
+import {
+  keys,
+  useMembers,
+  useWorkflowRuns,
+  useWorkflows,
+  type ChannelWithMeta,
+} from '@/hooks/queries';
 import { useUiStore } from '@/stores/ui-store';
 import { Dialog } from './dialog';
 
@@ -29,6 +37,18 @@ const ACTION_LABEL: Record<WorkflowAction['type'], string> = {
   post_message: 'Post to a channel',
   send_dm: 'Send a direct message',
   create_task: 'Create a task',
+  call_webhook: 'Call a webhook',
+  request_approval: 'Ask for approval',
+  ask_form: 'Ask someone to fill in a form',
+};
+const RUN_STATUS_STYLE: Record<WorkflowRunStatus, string> = {
+  RUNNING: 'bg-blue-500/15 text-blue-500',
+  WAITING: 'bg-amber-500/15 text-amber-500',
+  SUCCEEDED: 'bg-green-500/15 text-green-500',
+  PARTIAL: 'bg-amber-500/15 text-amber-500',
+  FAILED: 'bg-red-500/15 text-red-500',
+  REJECTED: 'bg-red-500/15 text-red-500',
+  EXPIRED: 'bg-slate-500/15 text-ink-3',
 };
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -72,9 +92,55 @@ export function describeTrigger(
 /** One-line, human description of an action. */
 export function describeAction(a: WorkflowAction, channel: Lookup, person: Lookup): string {
   const who = (id: string) => (id === TRIGGER_USER ? 'the person who triggered it' : person(id));
-  if (a.type === 'post_message') return `post to #${channel(a.channelId)}`;
-  if (a.type === 'send_dm') return `DM ${who(a.to)}`;
-  return `create a task for ${who(a.assignee)}`;
+  switch (a.type) {
+    case 'post_message':
+      return `post to #${channel(a.channelId)}`;
+    case 'send_dm':
+      return `DM ${who(a.to)}`;
+    case 'create_task':
+      return `create a task for ${who(a.assignee)}`;
+    case 'call_webhook': {
+      let host = a.url;
+      try {
+        host = new URL(a.url).host;
+      } catch {
+        /* show as typed */
+      }
+      return `call ${host}`;
+    }
+    case 'request_approval':
+      return `ask ${who(a.approver)} to approve`;
+    case 'ask_form':
+      return `ask ${who(a.assignee)} to fill in a form`;
+  }
+}
+
+/** Variables a step can use: the trigger's, plus anything earlier approval/form steps add. */
+export function variablesBefore(
+  trigger: WorkflowTrigger,
+  actions: WorkflowAction[],
+  index: number,
+): string[] {
+  const vars = [...WORKFLOW_VARIABLES[trigger]];
+  for (const a of actions.slice(0, index)) {
+    if (a.type === 'request_approval') vars.push('approver', 'decision');
+    if (a.type === 'ask_form')
+      vars.push('respondent', ...a.fields.map((f) => f.key).filter(Boolean));
+  }
+  return [...new Set(vars)];
+}
+
+/** A short, human message for the first schema problem, naming the step. */
+export function describeIssue(issue: { path: (string | number)[]; message: string }): string {
+  const stepIdx =
+    issue.path[0] === 'config' && issue.path[1] === 'actions' ? issue.path[2] : undefined;
+  const field = issue.path[issue.path.length - 1];
+  const message = /at least 1 character|Required|Invalid input/i.test(issue.message)
+    ? `${typeof field === 'string' ? field : 'a field'} is required`
+    : issue.message;
+  if (typeof stepIdx === 'number') return `Step ${stepIdx + 1}: ${message}`;
+  if (issue.path.length === 0) return message;
+  return `Check “${String(field)}”: ${message}`;
 }
 
 // ---------- editor state ----------
@@ -174,16 +240,44 @@ function newAction(
   channels: ChannelWithMeta[],
 ): WorkflowAction {
   const person = d.trigger === 'schedule' ? '' : TRIGGER_USER;
-  if (type === 'post_message') return { type, channelId: channels[0]?.id ?? '', text: '' };
-  if (type === 'send_dm') return { type, to: person, text: '' };
-  return { type, title: '', assignee: person };
+  switch (type) {
+    case 'post_message':
+      return { type, channelId: channels[0]?.id ?? '', text: '' };
+    case 'send_dm':
+      return { type, to: person, text: '' };
+    case 'create_task':
+      return { type, title: '', assignee: person };
+    case 'call_webhook':
+      return { type, url: 'https://' };
+    case 'request_approval':
+      return { type, approver: '', prompt: '' };
+    case 'ask_form':
+      return {
+        type,
+        assignee: person,
+        prompt: '',
+        fields: [{ key: 'answer', label: 'Answer', kind: 'text', required: true }],
+      };
+  }
+}
+
+/** Clear "the person who triggered it" from every step (a schedule has nobody). */
+function withoutTriggerUser(actions: WorkflowAction[]): WorkflowAction[] {
+  return actions.map((a) => {
+    if (a.type === 'send_dm' && a.to === TRIGGER_USER) return { ...a, to: '' };
+    if ((a.type === 'create_task' || a.type === 'ask_form') && a.assignee === TRIGGER_USER)
+      return { ...a, assignee: '' };
+    if (a.type === 'request_approval' && a.approver === TRIGGER_USER) return { ...a, approver: '' };
+    return a;
+  });
 }
 
 // ---------- dialog ----------
 
 /**
- * Workflow builder: pick a trigger, then up to five actions — post to a channel,
- * DM someone, or create a task. Text can use {{variables}} from the trigger.
+ * Workflow builder: pick a trigger, then up to five steps — post to a channel,
+ * DM someone, create a task, call a webhook, or pause for an approval / form.
+ * Text can use {{variables}} from the trigger and earlier steps.
  */
 export function WorkflowsDialog({
   workspaceId,
@@ -201,6 +295,7 @@ export function WorkflowsDialog({
   const qc = useQueryClient();
   const pushToast = useUiStore((s) => s.pushToast);
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft } | null>(null);
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   const refresh = () => qc.invalidateQueries({ queryKey: keys.workflows(workspaceId) });
   const channelName: Lookup = (id) => channels.find((c) => c.id === id)?.name ?? 'unknown-channel';
@@ -249,7 +344,8 @@ export function WorkflowsDialog({
   return (
     <Dialog title="Workflows" onClose={onClose} wide>
       <p className="mb-3 text-sm text-ink-3">
-        Automate routine work: when something happens, post a message, DM someone, or create a task.
+        Automate routine work: when something happens, post a message, DM someone, create a task,
+        call a webhook, or ask someone to approve or fill in a form.
         {!canManage && ' Only workspace admins can create or change workflows.'}
       </p>
 
@@ -274,9 +370,20 @@ export function WorkflowsDialog({
                   ? `Ran ${wf.runCount} time${wf.runCount === 1 ? '' : 's'} · last ${formatDistanceToNow(new Date(wf.lastRunAt), { addSuffix: true })}`
                   : 'Hasn’t run yet'}
               </div>
+              {canManage && wf.signingSecret && <SigningSecret secret={wf.signingSecret} />}
+              {historyFor === wf.id && <RunHistory workflowId={wf.id} />}
             </div>
             {canManage && (
               <>
+                <button
+                  onClick={() => setHistoryFor((cur) => (cur === wf.id ? null : wf.id))}
+                  title="Run history"
+                  aria-label={`Run history for ${wf.name}`}
+                  aria-expanded={historyFor === wf.id}
+                  className="shrink-0 rounded p-1 text-ink-3 hover:bg-hovered hover:text-ink"
+                >
+                  <History size={15} />
+                </button>
                 <label className="flex shrink-0 items-center gap-1 text-[12px] text-ink-3">
                   <input type="checkbox" checked={wf.enabled} onChange={() => void toggle(wf)} />
                   On
@@ -349,36 +456,16 @@ function WorkflowEditor({
     setD((prev) => ({ ...prev, actions: prev.actions.map((x, j) => (j === i ? a : x)) }));
 
   const hasTriggerUser = d.trigger !== 'schedule';
-  const vars = WORKFLOW_VARIABLES[d.trigger];
 
   const changeTrigger = (trigger: WorkflowTrigger) => {
     // A schedule has no triggering person: clear any such recipient.
-    const actions =
-      trigger === 'schedule'
-        ? d.actions.map((a) =>
-            a.type === 'send_dm' && a.to === TRIGGER_USER
-              ? { ...a, to: '' }
-              : a.type === 'create_task' && a.assignee === TRIGGER_USER
-                ? { ...a, assignee: '' }
-                : a,
-          )
-        : d.actions;
-    set({ trigger, actions });
+    set({ trigger, actions: trigger === 'schedule' ? withoutTriggerUser(d.actions) : d.actions });
   };
 
   const submit = async () => {
     const parsed = WorkflowInputSchema.safeParse(toInput(d));
     if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      const where = issue.path.join('.');
-      pushToast(
-        where.includes('actions')
-          ? 'Every action needs its channel/person and text filled in.'
-          : where
-            ? `Check “${where.split('.').pop()}”: ${issue.message}`
-            : issue.message,
-        'error',
-      );
+      pushToast(describeIssue(parsed.error.issues[0]), 'error');
       return;
     }
     setBusy(true);
@@ -552,7 +639,8 @@ function WorkflowEditor({
       <fieldset className="rounded-lg border border-line p-3">
         <legend className="px-1 text-xs font-semibold text-ink-2">Then…</legend>
         <p className="mb-2 text-[11px] text-ink-3">
-          Text can use: {vars.map((v) => `{{${v}}}`).join(' ')}
+          Steps run in order. An approval or form pauses the run until that person responds (in
+          their Tasks); rejecting an approval stops it.
         </p>
         <ol className="space-y-2">
           {d.actions.map((a, i) => (
@@ -665,6 +753,76 @@ function WorkflowEditor({
                   />
                 </div>
               )}
+              {a.type === 'call_webhook' && (
+                <>
+                  <input
+                    className={inputCls}
+                    placeholder="https://example.com/hooks/backstages"
+                    value={a.url}
+                    maxLength={2000}
+                    onChange={(e) => setAction(i, { ...a, url: e.target.value })}
+                    aria-label="Webhook URL"
+                  />
+                  <p className="mt-1 text-[11px] text-ink-3">
+                    Sends the run’s variables as JSON, signed with this workflow’s secret
+                    (X-Backstages-Signature). Must be a public https:// address.
+                  </p>
+                </>
+              )}
+              {a.type === 'request_approval' && (
+                <>
+                  <select
+                    className={`${inputCls} mb-2`}
+                    value={a.approver}
+                    onChange={(e) => setAction(i, { ...a, approver: e.target.value })}
+                    aria-label="Approver"
+                  >
+                    {personOptions}
+                  </select>
+                  <textarea
+                    className={`${inputCls} resize-y`}
+                    rows={2}
+                    placeholder="What should they approve?"
+                    value={a.prompt}
+                    maxLength={4000}
+                    onChange={(e) => setAction(i, { ...a, prompt: e.target.value })}
+                    aria-label="Approval question"
+                  />
+                </>
+              )}
+              {a.type === 'ask_form' && (
+                <>
+                  <select
+                    className={`${inputCls} mb-2`}
+                    value={a.assignee}
+                    onChange={(e) => setAction(i, { ...a, assignee: e.target.value })}
+                    aria-label="Form recipient"
+                  >
+                    {personOptions}
+                  </select>
+                  <textarea
+                    className={`${inputCls} mb-2 resize-y`}
+                    rows={2}
+                    placeholder="Introduce the form"
+                    value={a.prompt}
+                    maxLength={4000}
+                    onChange={(e) => setAction(i, { ...a, prompt: e.target.value })}
+                    aria-label="Form introduction"
+                  />
+                  <FormFieldsEditor
+                    fields={a.fields}
+                    onChange={(fields) => setAction(i, { ...a, fields })}
+                  />
+                </>
+              )}
+              {a.type !== 'call_webhook' && (
+                <p className="mt-1.5 text-[11px] text-ink-3">
+                  Can use:{' '}
+                  {variablesBefore(d.trigger, d.actions, i)
+                    .map((v) => `{{${v}}}`)
+                    .join(' ')}
+                </p>
+              )}
             </li>
           ))}
         </ol>
@@ -696,6 +854,164 @@ function WorkflowEditor({
           {busy ? 'Saving…' : workflowId ? 'Save changes' : 'Create workflow'}
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Edit up to five form fields: key (variable name), label, text/choice, required. */
+function FormFieldsEditor({
+  fields,
+  onChange,
+}: {
+  fields: WorkflowFormField[];
+  onChange: (fields: WorkflowFormField[]) => void;
+}) {
+  const update = (i: number, patch: Partial<WorkflowFormField>) =>
+    onChange(fields.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  return (
+    <div className="space-y-1.5" data-testid="form-fields">
+      {fields.map((f, i) => (
+        <div key={i} className="grid grid-cols-[1fr_1fr_110px_auto_auto] items-center gap-1.5">
+          <input
+            className={inputCls}
+            placeholder="Label"
+            value={f.label}
+            maxLength={80}
+            onChange={(e) => update(i, { label: e.target.value })}
+            aria-label={`Field ${i + 1} label`}
+          />
+          <input
+            className={inputCls}
+            placeholder="variable_name"
+            value={f.key}
+            maxLength={30}
+            onChange={(e) =>
+              update(i, { key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })
+            }
+            aria-label={`Field ${i + 1} variable name`}
+          />
+          <select
+            className={inputCls}
+            value={f.kind}
+            onChange={(e) => {
+              const kind = e.target.value as WorkflowFormField['kind'];
+              update(
+                i,
+                kind === 'select'
+                  ? { kind, options: f.options?.length ? f.options : ['Yes', 'No'] }
+                  : { kind, options: undefined },
+              );
+            }}
+            aria-label={`Field ${i + 1} type`}
+          >
+            <option value="text">Text</option>
+            <option value="select">Choice</option>
+          </select>
+          <label className="flex items-center gap-1 text-[11px] text-ink-3">
+            <input
+              type="checkbox"
+              checked={f.required}
+              onChange={(e) => update(i, { required: e.target.checked })}
+            />
+            Required
+          </label>
+          <button
+            type="button"
+            onClick={() => onChange(fields.filter((_, j) => j !== i))}
+            disabled={fields.length === 1}
+            aria-label={`Remove field ${i + 1}`}
+            className="rounded p-1 text-ink-3 hover:bg-red-500/10 hover:text-red-500 disabled:opacity-30"
+          >
+            <X size={13} />
+          </button>
+          {f.kind === 'select' && (
+            <input
+              className={`${inputCls} col-span-5`}
+              placeholder="Choices, separated by commas"
+              value={(f.options ?? []).join(', ')}
+              onChange={(e) =>
+                update(i, {
+                  options: e.target.value
+                    .split(',')
+                    .map((o) => o.trim())
+                    .filter(Boolean)
+                    .slice(0, 10),
+                })
+              }
+              aria-label={`Field ${i + 1} choices`}
+            />
+          )}
+        </div>
+      ))}
+      {fields.length < 5 && (
+        <button
+          type="button"
+          onClick={() =>
+            onChange([
+              ...fields,
+              { key: `field_${fields.length + 1}`, label: '', kind: 'text', required: true },
+            ])
+          }
+          className="flex items-center gap-1 text-[11px] font-medium text-accent hover:underline"
+        >
+          <Plus size={12} /> Add a field
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Recent runs of one workflow with each step's outcome (admins only). */
+function RunHistory({ workflowId }: { workflowId: string }) {
+  const runs = useWorkflowRuns(workflowId);
+  if (runs.isLoading) return <p className="py-2 text-[12px] text-ink-3">Loading…</p>;
+  if (runs.isError)
+    return <p className="py-2 text-[12px] text-red-500">Could not load the history.</p>;
+  if (!runs.data?.length) return <p className="py-2 text-[12px] text-ink-3">No runs yet.</p>;
+  return (
+    <ol className="mt-2 space-y-2 border-t border-line pt-2" data-testid="workflow-runs">
+      {runs.data.map((r) => (
+        <li key={r.id} className="text-[12px]">
+          <div className="flex items-center gap-2">
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${RUN_STATUS_STYLE[r.status]}`}
+            >
+              {r.status}
+            </span>
+            <span className="text-ink-2">
+              {formatDistanceToNow(new Date(r.startedAt), { addSuffix: true })}
+              {r.triggerUser && ` · by ${r.triggerUser.displayName}`}
+            </span>
+          </div>
+          <ul className="mt-1 space-y-0.5 pl-1">
+            {r.steps.map((s, k) => (
+              <li key={k} className={s.ok ? 'text-ink-3' : 'text-red-500'}>
+                {s.ok ? '✓' : '✗'} {s.index + 1}. {s.detail}
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** The webhook signing secret, hidden until asked for (admins only receive it). */
+function SigningSecret({ secret }: { secret: string }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="mt-1 flex items-center gap-2 text-[11px] text-ink-3">
+      <span>Signing secret:</span>
+      <code className="rounded bg-hovered px-1.5 py-0.5 font-mono text-ink-2">
+        {shown ? secret : '•'.repeat(16)}
+      </code>
+      <button
+        type="button"
+        onClick={() => setShown((v) => !v)}
+        className="text-accent hover:underline"
+      >
+        {shown ? 'Hide' : 'Show'}
+      </button>
     </div>
   );
 }

@@ -45,6 +45,7 @@ import {
   usePresence,
   useTasks,
   useUnreads,
+  useWorkflowRequests,
   useWorkspaces,
   type ChannelWithMeta,
   type Container,
@@ -129,7 +130,8 @@ export function Sidebar({
 
   const activityBadge = notifications.data?.unreadCount ?? 0;
   const tasks = useTasks(workspaceId);
-  // Badge = your open tasks that are already overdue.
+  const workflowRequests = useWorkflowRequests(workspaceId);
+  // Badge = your open tasks that are already overdue, plus approvals/forms waiting on you.
   const overdueTasks = useMemo(() => {
     const now = Date.now();
     return (tasks.data ?? []).filter(
@@ -260,7 +262,7 @@ export function Sidebar({
         <SectionButton
           icon={<CheckSquare size={15} />}
           label="Tasks"
-          badge={overdueTasks}
+          badge={overdueTasks + (workflowRequests.data?.length ?? 0)}
           active={mainView === 'tasks'}
           onClick={() => setMainView('tasks')}
           testId="tasks-button"

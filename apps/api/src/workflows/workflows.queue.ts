@@ -1,17 +1,22 @@
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { Queue, Worker } from 'bullmq';
 import { WorkflowsService } from './workflows.service';
+import { WorkflowRunsService } from './workflow-runs.service';
 
 const QUEUE_NAME = 'workflow-schedules';
 
-/** Fires scheduled workflows; ticks every 30s so no minute slot is skipped. */
+/** Fires scheduled workflows and expires stale approval/form requests; ticks every
+ *  30s so no minute slot is skipped. */
 @Injectable()
 export class WorkflowsQueue implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(WorkflowsQueue.name);
   private queue: Queue | null = null;
   private worker: Worker | null = null;
 
-  constructor(private readonly workflows: WorkflowsService) {}
+  constructor(
+    private readonly workflows: WorkflowsService,
+    private readonly runs: WorkflowRunsService,
+  ) {}
 
   async onModuleInit() {
     if (process.env.DISABLE_SYNC_QUEUE === '1') return; // tests call runDueSchedules directly
@@ -30,6 +35,8 @@ export class WorkflowsQueue implements OnModuleInit, OnApplicationShutdown {
       async () => {
         const n = await this.workflows.runDueSchedules();
         if (n > 0) this.logger.log(`Ran ${n} scheduled workflow(s)`);
+        const expired = await this.runs.expireRequests();
+        if (expired > 0) this.logger.log(`Expired ${expired} workflow request(s)`);
       },
       { connection },
     );

@@ -65,6 +65,9 @@ import type {
   CreateTaskInput,
   UpdateTaskInput,
   WorkflowDto,
+  WorkflowRunDto,
+  WorkflowRequestDto,
+  RespondToWorkflowRequestInput,
 } from '@backstages/shared';
 import { api } from '@/lib/api';
 
@@ -135,6 +138,8 @@ export const keys = {
   recsExperts: (ws: string, q: string) => ['recs-experts', ws, q] as const,
   recsKnowledge: (messageId: string) => ['recs-knowledge', messageId] as const,
   tasks: (ws: string) => ['tasks', ws] as const,
+  workflowRuns: (id: string) => ['workflow-runs', id] as const,
+  workflowRequests: (ws: string) => ['workflow-requests', ws] as const,
 };
 
 export function useWorkspaces() {
@@ -488,6 +493,36 @@ export function useWorkflows(workspaceId: string, enabled = true) {
     queryKey: keys.workflows(workspaceId),
     queryFn: () => api<WorkflowView[]>('GET', `/workspaces/${workspaceId}/workflows`),
     enabled: enabled && !!workspaceId,
+  });
+}
+
+/** A workflow's recent runs (admins only). */
+export function useWorkflowRuns(workflowId: string | null) {
+  return useQuery({
+    queryKey: keys.workflowRuns(workflowId ?? 'none'),
+    queryFn: () => api<WorkflowRunDto[]>('GET', `/workflows/${workflowId}/runs`),
+    enabled: !!workflowId,
+  });
+}
+
+/** Approvals and forms waiting on the current user. */
+export function useWorkflowRequests(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.workflowRequests(workspaceId),
+    queryFn: () => api<WorkflowRequestDto[]>('GET', `/workspaces/${workspaceId}/workflow-requests`),
+    enabled: enabled && !!workspaceId,
+  });
+}
+
+export function useRespondToWorkflowRequest(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, ...body }: RespondToWorkflowRequestInput & { runId: string }) =>
+      api<WorkflowRunDto>('POST', `/workflow-runs/${runId}/respond`, body),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: keys.workflowRequests(workspaceId) });
+      void qc.invalidateQueries({ queryKey: keys.tasks(workspaceId) });
+    },
   });
 }
 

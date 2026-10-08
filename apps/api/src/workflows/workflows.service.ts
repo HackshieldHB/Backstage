@@ -2,12 +2,11 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  Inject,
   Logger,
   NotFoundException,
   OnModuleInit,
-  forwardRef,
 } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import type { Workflow } from '@prisma/client';
 import {
   IncidentDeclaredConfigSchema,
@@ -18,7 +17,6 @@ import {
   SEVERITIES_ORDERED,
   TRIGGER_USER,
   type MessageDto,
-  type WorkflowAction,
   type WorkflowConfig,
   type WorkflowDto,
   type WorkflowInput,
@@ -26,12 +24,12 @@ import {
 } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
-import { IntegrationMessagesService } from '../messages/integration-messages.service';
-import { channelContainer, conversationContainer } from '../messages/messages.service';
-import { NotificationsService } from '../notifications/notifications.service';
-import { ConversationsService } from '../conversations/conversations.service';
-import { TasksService } from '../tasks/tasks.service';
 import { WorkflowEvents, type WorkflowEvent } from './workflow-events';
+import { WorkflowRunsService } from './workflow-runs.service';
+import { validateWebhookUrl } from './safe-webhook';
+import { isoDate } from './workflow-utils';
+
+export { renderTemplate } from './workflow-utils';
 
 const CONFIG_SCHEMAS = {
   message_posted: MessagePostedConfigSchema,
@@ -43,13 +41,6 @@ const CONFIG_SCHEMAS = {
 
 /** How far back a schedule tick looks for missed slots (covers a late worker). */
 const SCHEDULE_LOOKBACK_MS = 10 * 60_000;
-
-/** Replace {{name}} tokens with values; unknown tokens are left as typed. */
-export function renderTemplate(text: string, vars: Record<string, string>): string {
-  return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (whole, name: string) =>
-    Object.prototype.hasOwnProperty.call(vars, name) ? vars[name] : whole,
-  );
-}
 
 /** Weekday (0 = Sunday) and "HH:MM" of an instant in an IANA time zone. */
 export function localSlot(at: Date, timeZone: string): { day: number; time: string } {
@@ -89,22 +80,12 @@ export function severityMeets(severity: string, min: string): boolean {
   return s !== -1 && m !== -1 && s <= m;
 }
 
-interface RunContext {
-  workspaceId: string;
-  /** The user whose action fired the trigger (null for schedules). */
-  triggerUserId: string | null;
-  vars: Record<string, string>;
-  /** Source message/channel, linked onto created tasks. */
-  messageId?: string;
-  channelId?: string;
-}
-
 /**
  * Workflow automation: a trigger (message posted, reaction added, member joined,
- * incident declared, or a weekly schedule) runs up to five actions in order —
- * post to a channel, DM someone, or create a task. Only workspace admins manage
- * workflows; actions run on behalf of the workflow's creator and are re-checked
- * at run time (a removed creator stops their workflows).
+ * incident declared, or a weekly schedule) starts a run of up to five steps —
+ * post to a channel, DM someone, create a task, call a webhook, or pause for an
+ * approval / form. Only workspace admins manage workflows; this service owns
+ * definitions and trigger matching, WorkflowRunsService executes the steps.
  */
 @Injectable()
 export class WorkflowsService implements OnModuleInit {
@@ -113,11 +94,7 @@ export class WorkflowsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
-    @Inject(forwardRef(() => IntegrationMessagesService))
-    private readonly integrationMessages: IntegrationMessagesService,
-    private readonly notifications: NotificationsService,
-    private readonly conversations: ConversationsService,
-    private readonly tasks: TasksService,
+    private readonly runs: WorkflowRunsService,
     private readonly events: WorkflowEvents,
   ) {}
 
@@ -128,12 +105,13 @@ export class WorkflowsService implements OnModuleInit {
   // ---------- CRUD ----------
 
   async list(userId: string, workspaceId: string): Promise<WorkflowDto[]> {
-    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const member = await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const isAdmin = member.role === 'OWNER' || member.role === 'ADMIN';
     const rows = await this.prisma.workflow.findMany({
       where: { workspaceId },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map((r) => this.toDto(r));
+    return rows.map((r) => this.toDto(r, isAdmin));
   }
 
   async create(userId: string, workspaceId: string, input: WorkflowInput): Promise<WorkflowDto> {
@@ -149,9 +127,10 @@ export class WorkflowsService implements OnModuleInit {
         createdById: userId,
         // A schedule only fires for slots after it was saved.
         scheduleCursor: input.trigger === 'schedule' ? new Date() : null,
+        signingSecret: usesWebhook(input) ? newSecret() : null,
       },
     });
-    return this.toDto(created);
+    return this.toDto(created, true);
   }
 
   async update(userId: string, id: string, input: WorkflowInput): Promise<WorkflowDto> {
@@ -167,9 +146,11 @@ export class WorkflowsService implements OnModuleInit {
         enabled: input.enabled,
         config: input.config as object,
         scheduleCursor: input.trigger === 'schedule' ? new Date() : null,
+        // Keep an existing secret stable so receivers don't need re-configuring.
+        ...(usesWebhook(input) && !existing.signingSecret ? { signingSecret: newSecret() } : {}),
       },
     });
-    return this.toDto(updated);
+    return this.toDto(updated, true);
   }
 
   /** Turn a workflow on/off without resubmitting its definition. */
@@ -185,7 +166,7 @@ export class WorkflowsService implements OnModuleInit {
         ...(enabled && existing.trigger === 'schedule' ? { scheduleCursor: new Date() } : {}),
       },
     });
-    return this.toDto(updated);
+    return this.toDto(updated, true);
   }
 
   async remove(userId: string, id: string): Promise<void> {
@@ -207,7 +188,17 @@ export class WorkflowsService implements OnModuleInit {
         if (channel.isArchived) throw new BadRequestException('Cannot post to an archived channel');
         continue;
       }
-      const who = action.type === 'send_dm' ? action.to : action.assignee;
+      if (action.type === 'call_webhook') {
+        const problem = validateWebhookUrl(action.url);
+        if (problem) throw new BadRequestException(problem);
+        continue;
+      }
+      const who =
+        action.type === 'send_dm'
+          ? action.to
+          : action.type === 'request_approval'
+            ? action.approver
+            : action.assignee;
       if (who === TRIGGER_USER) {
         if (input.trigger === 'schedule') {
           throw new BadRequestException(
@@ -215,7 +206,9 @@ export class WorkflowsService implements OnModuleInit {
           );
         }
       } else if (!(await this.isActiveMember(workspaceId, who))) {
-        throw new BadRequestException('Recipients and assignees must be members of this workspace');
+        throw new BadRequestException(
+          'Recipients, assignees and approvers must be members of this workspace',
+        );
       }
     }
   }
@@ -250,7 +243,8 @@ export class WorkflowsService implements OnModuleInit {
         if (!cfg || cfg.channelId !== message.channelId) continue;
         if (cfg.keyword && !message.contentText.toLowerCase().includes(cfg.keyword.toLowerCase()))
           continue;
-        await this.run(wf, cfg.actions, {
+        await this.runs.start(wf, cfg.actions, {
+          trigger: wf.trigger,
           workspaceId: message.workspaceId,
           triggerUserId: message.user.id,
           messageId: message.id,
@@ -273,7 +267,8 @@ export class WorkflowsService implements OnModuleInit {
       for (const wf of await this.enabled(e.workspaceId, 'reaction_added')) {
         const cfg = this.parse(wf, 'reaction_added');
         if (!cfg || cfg.channelId !== e.channelId || cfg.emoji !== e.emoji) continue;
-        await this.run(wf, cfg.actions, {
+        await this.runs.start(wf, cfg.actions, {
+          trigger: wf.trigger,
           workspaceId: e.workspaceId,
           triggerUserId: e.userId,
           messageId: e.messageId,
@@ -291,7 +286,8 @@ export class WorkflowsService implements OnModuleInit {
       for (const wf of await this.enabled(e.workspaceId, 'member_joined')) {
         const cfg = this.parse(wf, 'member_joined');
         if (!cfg || cfg.channelId !== e.channelId) continue;
-        await this.run(wf, cfg.actions, {
+        await this.runs.start(wf, cfg.actions, {
+          trigger: wf.trigger,
           workspaceId: e.workspaceId,
           triggerUserId: e.userId,
           channelId: e.channelId,
@@ -306,7 +302,8 @@ export class WorkflowsService implements OnModuleInit {
       for (const wf of await this.enabled(e.workspaceId, 'incident_declared')) {
         const cfg = this.parse(wf, 'incident_declared');
         if (!cfg || !severityMeets(e.severity, cfg.minSeverity)) continue;
-        await this.run(wf, cfg.actions, {
+        await this.runs.start(wf, cfg.actions, {
+          trigger: wf.trigger,
           workspaceId: e.workspaceId,
           triggerUserId: e.userId,
           vars: {
@@ -341,7 +338,8 @@ export class WorkflowsService implements OnModuleInit {
         data: { scheduleCursor: now },
       });
       if (count === 0) continue; // another worker took this slot
-      await this.run(wf, cfg.actions, {
+      await this.runs.start(wf, cfg.actions, {
+        trigger: wf.trigger,
         workspaceId: wf.workspaceId,
         triggerUserId: null,
         vars: { date: isoDate(now, cfg.timeZone) },
@@ -349,90 +347,6 @@ export class WorkflowsService implements OnModuleInit {
       ran++;
     }
     return ran;
-  }
-
-  // ---------- actions ----------
-
-  private async run(wf: Workflow, actions: WorkflowAction[], ctx: RunContext): Promise<void> {
-    // Actions act on the creator's behalf: stop if they've left the workspace.
-    if (!(await this.isActiveMember(wf.workspaceId, wf.createdById))) return;
-    let ok = 0;
-    for (const action of actions) {
-      try {
-        if (await this.runAction(wf, action, ctx)) ok++;
-      } catch (err) {
-        this.logger.warn(
-          `Workflow ${wf.id} action ${action.type} failed: ${err instanceof Error ? err.message : err}`,
-        );
-      }
-    }
-    if (ok > 0) {
-      await this.prisma.workflow.update({
-        where: { id: wf.id },
-        data: { runCount: { increment: 1 }, lastRunAt: new Date() },
-      });
-    }
-  }
-
-  /** Returns true when the action did something. */
-  private async runAction(wf: Workflow, action: WorkflowAction, ctx: RunContext): Promise<boolean> {
-    if (action.type === 'post_message') {
-      const channel = await this.prisma.channel.findUnique({ where: { id: action.channelId } });
-      if (!channel || channel.isArchived || channel.workspaceId !== ctx.workspaceId) return false;
-      const text = renderTemplate(action.text, ctx.vars);
-      await this.integrationMessages.post(channelContainer(channel.id), {
-        workspaceId: ctx.workspaceId,
-        contentText: text,
-        contentJson: textDoc(text),
-        appName: wf.name,
-      });
-      return true;
-    }
-
-    const target =
-      (action.type === 'send_dm' ? action.to : action.assignee) === TRIGGER_USER
-        ? ctx.triggerUserId
-        : action.type === 'send_dm'
-          ? action.to
-          : action.assignee;
-    if (!target || !(await this.isActiveMember(ctx.workspaceId, target))) return false;
-
-    if (action.type === 'send_dm') {
-      const text = renderTemplate(action.text, ctx.vars);
-      if (target === wf.createdById) {
-        // No DM-with-yourself: deliver to the creator as a notification instead.
-        await this.notifications.notify({
-          userId: target,
-          type: 'SYSTEM',
-          payload: { source: 'workflow', title: wf.name, text },
-        });
-        return true;
-      }
-      const dm = await this.conversations.open(wf.createdById, ctx.workspaceId, {
-        memberIds: [target],
-      });
-      await this.integrationMessages.post(conversationContainer(dm.id), {
-        workspaceId: ctx.workspaceId,
-        contentText: text,
-        contentJson: textDoc(text),
-        appName: wf.name,
-      });
-      return true;
-    }
-
-    // create_task
-    const dueAt =
-      action.dueInDays !== undefined ? new Date(Date.now() + action.dueInDays * 86_400_000) : null;
-    await this.tasks.createFromWorkflow({
-      workspaceId: ctx.workspaceId,
-      createdById: wf.createdById,
-      assigneeId: target,
-      title: renderTemplate(action.title, ctx.vars).slice(0, 300),
-      dueAt,
-      messageId: ctx.messageId ?? null,
-      channelId: ctx.channelId ?? null,
-    });
-    return true;
   }
 
   // ---------- helpers ----------
@@ -470,7 +384,8 @@ export class WorkflowsService implements OnModuleInit {
     return u?.displayName ?? 'Someone';
   }
 
-  private toDto(w: Workflow): WorkflowDto {
+  /** `isAdmin` controls whether the webhook signing secret is included. */
+  private toDto(w: Workflow, isAdmin: boolean): WorkflowDto {
     const trigger = w.trigger as WorkflowTrigger;
     const schema = CONFIG_SCHEMAS[trigger];
     const parsed = schema?.safeParse(w.config);
@@ -483,27 +398,15 @@ export class WorkflowsService implements OnModuleInit {
       runCount: w.runCount,
       lastRunAt: w.lastRunAt?.toISOString() ?? null,
       createdAt: w.createdAt.toISOString(),
+      ...(isAdmin ? { signingSecret: w.signingSecret } : {}),
     };
   }
 }
 
-function textDoc(text: string) {
-  return {
-    type: 'doc',
-    content: text
-      .split('\n')
-      .map((l) =>
-        l ? { type: 'paragraph', content: [{ type: 'text', text: l }] } : { type: 'paragraph' },
-      ),
-  };
+function usesWebhook(input: WorkflowInput): boolean {
+  return input.config.actions.some((a) => a.type === 'call_webhook');
 }
 
-/** YYYY-MM-DD, in a time zone when given (else UTC). */
-function isoDate(at: Date, timeZone = 'UTC'): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(at);
+function newSecret(): string {
+  return randomBytes(32).toString('hex');
 }

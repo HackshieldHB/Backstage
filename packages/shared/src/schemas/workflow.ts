@@ -50,14 +50,99 @@ export const CreateTaskActionSchema = z.object({
   dueInDays: z.number().int().min(0).max(365).optional(),
 });
 
+/**
+ * POST the run's variables as signed JSON to an external URL. The server also
+ * refuses non-public destinations (SSRF guard) — https only.
+ */
+export const CallWebhookActionSchema = z.object({
+  type: z.literal('call_webhook'),
+  url: z
+    .string()
+    .trim()
+    .max(2000)
+    .refine((u) => /^https?:\/\//i.test(u), 'Enter a full https:// URL'),
+});
+
+/**
+ * Pause the run until a person approves or rejects. Rejecting stops the run.
+ * Later steps can use {{approver}} and {{decision}}.
+ */
+export const RequestApprovalActionSchema = z.object({
+  type: z.literal('request_approval'),
+  /** A user id, or TRIGGER_USER. */
+  approver: id,
+  prompt: text,
+});
+
+/** Variable names a form field may not take (they're set by triggers/approvals). */
+export const RESERVED_WORKFLOW_VARIABLES = [
+  'user',
+  'channel',
+  'message',
+  'emoji',
+  'incident',
+  'severity',
+  'date',
+  'approver',
+  'decision',
+  'respondent',
+] as const;
+
+export const WorkflowFormFieldSchema = z.object({
+  /** Becomes the {{key}} variable for later steps. */
+  key: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]{0,29}$/, 'Use lowercase letters, digits and _ (start with a letter)')
+    .refine(
+      (k) => !(RESERVED_WORKFLOW_VARIABLES as readonly string[]).includes(k),
+      'That name is reserved',
+    ),
+  label: z.string().trim().min(1).max(80),
+  kind: z.enum(['text', 'select']),
+  /** Choices for a select field. */
+  options: z.array(z.string().trim().min(1).max(80)).max(10).optional(),
+  required: z.boolean().default(true),
+});
+export type WorkflowFormField = z.infer<typeof WorkflowFormFieldSchema>;
+
+/** Pause the run until a person fills in a short form; answers become {{variables}}. */
+export const AskFormActionSchema = z.object({
+  type: z.literal('ask_form'),
+  /** A user id, or TRIGGER_USER. */
+  assignee: id,
+  prompt: text,
+  fields: z
+    .array(WorkflowFormFieldSchema)
+    .min(1)
+    .max(5)
+    .refine((fs) => new Set(fs.map((f) => f.key)).size === fs.length, 'Field names must be unique')
+    .refine(
+      (fs) => fs.every((f) => f.kind !== 'select' || (f.options?.length ?? 0) >= 2),
+      'A choice field needs at least two options',
+    ),
+});
+
 export const WorkflowActionSchema = z.discriminatedUnion('type', [
   PostMessageActionSchema,
   SendDmActionSchema,
   CreateTaskActionSchema,
+  CallWebhookActionSchema,
+  RequestApprovalActionSchema,
+  AskFormActionSchema,
 ]);
 export type WorkflowAction = z.infer<typeof WorkflowActionSchema>;
 
-const actions = z.array(WorkflowActionSchema).min(1).max(MAX_WORKFLOW_ACTIONS);
+/** Steps that pause the run until a person responds. */
+export const HUMAN_STEP_TYPES = ['request_approval', 'ask_form'] as const;
+
+const actions = z
+  .array(WorkflowActionSchema)
+  .min(1)
+  .max(MAX_WORKFLOW_ACTIONS)
+  .refine((as) => {
+    const keys = as.flatMap((a) => (a.type === 'ask_form' ? a.fields.map((f) => f.key) : []));
+    return new Set(keys).size === keys.length;
+  }, 'Form field names must be unique across the workflow');
 
 /** IANA time zone the runtime actually knows (e.g. "Europe/Berlin"). */
 export function isValidTimeZone(tz: string): boolean {
@@ -141,4 +226,58 @@ export interface WorkflowDto {
   runCount: number;
   lastRunAt: string | null;
   createdAt: string;
+  /** HMAC key for verifying webhook calls — only sent to workspace admins. */
+  signingSecret?: string | null;
+}
+
+export const WORKFLOW_RUN_STATUSES = [
+  'RUNNING',
+  'WAITING',
+  'SUCCEEDED',
+  'PARTIAL',
+  'FAILED',
+  'REJECTED',
+  'EXPIRED',
+] as const;
+export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
+
+export interface WorkflowRunStepDto {
+  index: number;
+  type: WorkflowAction['type'];
+  ok: boolean;
+  detail: string;
+  at: string;
+}
+
+export interface WorkflowRunDto {
+  id: string;
+  workflowId: string;
+  status: WorkflowRunStatus;
+  triggerUser: { id: string; displayName: string } | null;
+  steps: WorkflowRunStepDto[];
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+/** A paused run waiting on the viewer (approval or form). */
+export interface WorkflowRequestDto {
+  runId: string;
+  workflowName: string;
+  kind: 'request_approval' | 'ask_form';
+  prompt: string;
+  fields: WorkflowFormField[];
+  requestedBy: { id: string; displayName: string } | null;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+export const RespondToWorkflowRequestSchema = z.union([
+  z.object({ decision: z.enum(['approve', 'reject']) }),
+  z.object({ answers: z.record(z.string(), z.string().max(2000)) }),
+]);
+export type RespondToWorkflowRequestInput = z.infer<typeof RespondToWorkflowRequestSchema>;
+
+/** Socket payload: the viewer's pending workflow requests changed. */
+export interface WorkflowRequestsChangedPayload {
+  workspaceId: string;
 }

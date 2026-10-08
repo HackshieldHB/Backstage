@@ -1,7 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { WorkflowInputSchema, type WorkflowDto } from '@backstages/shared';
-import { describeAction, describeTrigger, toInput } from './workflows-dialog';
+import {
+  describeAction,
+  describeIssue,
+  describeTrigger,
+  toInput,
+  variablesBefore,
+} from './workflows-dialog';
 
 const channel = (id: string) => ({ c1: 'general', c2: 'ops' })[id] ?? 'unknown';
 const person = (id: string) => ({ u1: 'Ada' })[id] ?? 'a member';
@@ -114,6 +120,31 @@ vi.mock('@/hooks/queries', () => ({
         runCount: 3,
         lastRunAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
+        signingSecret: 'abc123secret',
+      },
+    ],
+  }),
+  useWorkflowRuns: () => ({
+    isLoading: false,
+    isError: false,
+    data: [
+      {
+        id: 'r1',
+        workflowId: 'wf1',
+        status: 'PARTIAL',
+        triggerUser: { id: 'u1', displayName: 'Ada' },
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        steps: [
+          { index: 0, type: 'post_message', ok: true, detail: 'Posted to #ops', at: '' },
+          {
+            index: 1,
+            type: 'call_webhook',
+            ok: false,
+            detail: 'hooks.example.com answered 500',
+            at: '',
+          },
+        ],
       },
     ],
   }),
@@ -180,5 +211,106 @@ describe('WorkflowsDialog', () => {
         actions: [{ type: 'create_task', title: 'Triage {{message}}', assignee: 'trigger_user' }],
       },
     });
+  });
+
+  it('shows run history and a hidden signing secret to admins', async () => {
+    const { WorkflowsDialog } = await import('./workflows-dialog');
+    render(
+      <WorkflowsDialog workspaceId="w1" channels={channels} canManage onClose={() => undefined} />,
+    );
+    expect(screen.queryByText('abc123secret')).toBeNull();
+    fireEvent.click(screen.getByText('Show'));
+    expect(screen.getByText('abc123secret')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Run history for Deploys'));
+    expect(screen.getByTestId('workflow-runs')).toBeTruthy();
+    expect(screen.getByText('PARTIAL')).toBeTruthy();
+    expect(screen.getByText(/2\. hooks\.example\.com answered 500/)).toBeTruthy();
+  });
+
+  it('builds an approval step and saves it', async () => {
+    apiMock.mockClear();
+    const { WorkflowsDialog } = await import('./workflows-dialog');
+    render(
+      <WorkflowsDialog workspaceId="w1" channels={channels} canManage onClose={() => undefined} />,
+    );
+    fireEvent.click(screen.getByTestId('new-workflow'));
+    fireEvent.change(screen.getByTestId('workflow-name'), { target: { value: 'Expense' } });
+    fireEvent.change(screen.getByLabelText('Action 1 type'), {
+      target: { value: 'request_approval' },
+    });
+    fireEvent.change(screen.getByLabelText('Approver'), { target: { value: 'u1' } });
+    fireEvent.change(screen.getByLabelText('Approval question'), {
+      target: { value: 'OK {{user}}?' },
+    });
+    fireEvent.click(screen.getByTestId('save-workflow'));
+    await waitFor(() => expect(apiMock).toHaveBeenCalled());
+    expect(apiMock).toHaveBeenCalledWith('POST', '/workspaces/w1/workflows', {
+      name: 'Expense',
+      enabled: true,
+      trigger: 'message_posted',
+      config: {
+        channelId: 'c1',
+        actions: [{ type: 'request_approval', approver: 'u1', prompt: 'OK {{user}}?' }],
+      },
+    });
+  });
+});
+
+describe('phase B builder helpers', () => {
+  it('describes webhook, approval and form steps', () => {
+    expect(
+      describeAction({ type: 'call_webhook', url: 'https://hooks.example.com/x' }, channel, person),
+    ).toBe('call hooks.example.com');
+    expect(
+      describeAction({ type: 'request_approval', approver: 'u1', prompt: 'p' }, channel, person),
+    ).toBe('ask Ada to approve');
+    expect(
+      describeAction(
+        { type: 'ask_form', assignee: 'trigger_user', prompt: 'p', fields: [] },
+        channel,
+        person,
+      ),
+    ).toBe('ask the person who triggered it to fill in a form');
+  });
+
+  it('offers approval/form variables only to later steps', () => {
+    const actions = [
+      { type: 'request_approval' as const, approver: 'u1', prompt: 'p' },
+      {
+        type: 'ask_form' as const,
+        assignee: 'u1',
+        prompt: 'p',
+        fields: [{ key: 'team', label: 'Team', kind: 'text' as const, required: true }],
+      },
+      { type: 'post_message' as const, channelId: 'c', text: 't' },
+    ];
+    expect(variablesBefore('member_joined', actions, 0)).toEqual(['user', 'channel', 'date']);
+    expect(variablesBefore('member_joined', actions, 1)).toEqual([
+      'user',
+      'channel',
+      'date',
+      'approver',
+      'decision',
+    ]);
+    expect(variablesBefore('member_joined', actions, 2)).toContain('team');
+  });
+
+  it('turns schema issues into readable, step-numbered messages', () => {
+    expect(
+      describeIssue({
+        path: ['config', 'actions', 1, 'prompt'],
+        message: 'String must contain at least 1 character(s)',
+      }),
+    ).toBe('Step 2: prompt is required');
+    expect(
+      describeIssue({
+        path: ['config', 'actions', 0, 'fields', 0, 'key'],
+        message: 'That name is reserved',
+      }),
+    ).toBe('Step 1: That name is reserved');
+    expect(
+      describeIssue({ path: ['name'], message: 'String must contain at least 1 character(s)' }),
+    ).toBe('Check “name”: name is required');
   });
 });

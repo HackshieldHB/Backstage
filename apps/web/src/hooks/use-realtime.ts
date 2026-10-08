@@ -11,6 +11,7 @@ import {
   type PresenceChangedPayload,
   type ReactionChangedPayload,
   type TaskChangedPayload,
+  type WorkflowRequestsChangedPayload,
   type ThreadReplyPayload,
   type TypingPayload,
   type UnreadUpdatedPayload,
@@ -219,6 +220,9 @@ export function useRealtime(workspaceId: string | null) {
     const onTaskChanged = (p: TaskChangedPayload) => {
       qc.invalidateQueries({ queryKey: keys.tasks(p.workspaceId) });
     };
+    const onWorkflowRequests = (p: WorkflowRequestsChangedPayload) => {
+      qc.invalidateQueries({ queryKey: keys.workflowRequests(p.workspaceId) });
+    };
 
     socket.on(SOCKET_EVENTS.MESSAGE_NEW, onMessageNew);
     socket.on(SOCKET_EVENTS.MESSAGE_UPDATED, onMessageUpdated);
@@ -236,6 +240,7 @@ export function useRealtime(workspaceId: string | null) {
     socket.on(SOCKET_EVENTS.MEMBER_JOINED, onChannelsChanged);
     socket.on(SOCKET_EVENTS.MEMBER_LEFT, onChannelsChanged);
     socket.on(SOCKET_EVENTS.TASK_CHANGED, onTaskChanged);
+    socket.on(SOCKET_EVENTS.WORKFLOW_REQUESTS_CHANGED, onWorkflowRequests);
 
     return () => {
       socket.off(SOCKET_EVENTS.MESSAGE_NEW, onMessageNew);
@@ -254,6 +259,7 @@ export function useRealtime(workspaceId: string | null) {
       socket.off(SOCKET_EVENTS.MEMBER_JOINED, onChannelsChanged);
       socket.off(SOCKET_EVENTS.MEMBER_LEFT, onChannelsChanged);
       socket.off(SOCKET_EVENTS.TASK_CHANGED, onTaskChanged);
+      socket.off(SOCKET_EVENTS.WORKFLOW_REQUESTS_CHANGED, onWorkflowRequests);
     };
   }, [workspaceId, me, qc, upsertTyping, removeTyping]);
 }

@@ -147,6 +147,8 @@ model User {
   scheduledHuddles        ScheduledHuddle[]        @relation("ScheduledHuddleCreator")
   tasksCreated            Task[]                   @relation("TaskCreator")
   tasksAssigned           Task[]                   @relation("TaskAssignee")
+  workflowRunsTriggered   WorkflowRun[]            @relation("WorkflowRunTrigger")
+  workflowRequests        WorkflowRun[]            @relation("WorkflowRunPending")
 }
 
 model ShareLink {
@@ -185,12 +187,15 @@ model Workflow {
   lastRunAt      DateTime?
   /// schedule trigger: slots at or before this instant have been handled.
   scheduleCursor DateTime?
+  /// HMAC key for signing outgoing webhook calls (set when a webhook step is added).
+  signingSecret  String?
   createdById    String
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  runs      WorkflowRun[]
 
   @@index([workspaceId])
 }
@@ -238,6 +243,7 @@ model Workspace {
   scheduledHuddles       ScheduledHuddle[]
   meetingRecords         MeetingRecord[]
   tasks                  Task[]
+  workflowRuns           WorkflowRun[]
 }
 
 model CustomEmoji {
@@ -1360,4 +1366,51 @@ model Task {
   @@index([workspaceId, assigneeId, status])
   @@index([workspaceId, createdById, status])
   @@index([status, dueAt])
+}
+
+enum WorkflowRunStatus {
+  RUNNING
+  WAITING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+  REJECTED
+  EXPIRED
+}
+
+/// One execution of a workflow: what fired it, what each step did, and — when
+/// paused on an approval/form — who must respond and from which step to resume.
+model WorkflowRun {
+  id            String            @id @default(cuid())
+  workflowId    String
+  workspaceId   String
+  trigger       String
+  status        WorkflowRunStatus @default(RUNNING)
+  triggerUserId String?
+  /// Snapshot of the steps at trigger time, so a paused run resumes the plan it
+  /// started with even if the workflow is edited meanwhile.
+  actions       Json
+  /// Variables available to steps (trigger vars, then approval/form results).
+  vars          Json
+  /// Step log: [{ index, type, ok, detail, at }].
+  steps         Json              @default("[]")
+  /// Index of the next step to run when resuming a paused run.
+  nextStep      Int               @default(0)
+  pendingUserId String?
+  pendingSince  DateTime?
+  expiresAt     DateTime?
+  /// Source message/channel, linked onto tasks the run creates.
+  messageId     String?
+  channelId     String?
+  startedAt     DateTime          @default(now())
+  finishedAt    DateTime?
+
+  workflow    Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  triggerUser User?     @relation("WorkflowRunTrigger", fields: [triggerUserId], references: [id], onDelete: SetNull)
+  pendingUser User?     @relation("WorkflowRunPending", fields: [pendingUserId], references: [id], onDelete: SetNull)
+
+  @@index([workflowId, startedAt])
+  @@index([pendingUserId, status])
+  @@index([status, expiresAt])
 }
