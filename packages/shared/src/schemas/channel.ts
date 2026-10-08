@@ -49,3 +49,44 @@ export const ChannelDtoSchema = z.object({
   isMember: z.boolean().optional(),
 });
 export type ChannelDto = z.infer<typeof ChannelDtoSchema>;
+
+// ---------- shared channels (with another workspace) ----------
+
+/** Extra fields on a sidebar channel that involves a partner workspace. */
+export interface ChannelShareInfo {
+  /** Host side: the channel is shared with at least one partner workspace. */
+  isShared?: boolean;
+  /** Guest side: the workspace that owns this channel. */
+  sharedFrom?: { workspaceId: string; name: string } | null;
+}
+
+export const AcceptChannelShareSchema = z.object({
+  token: z.string().trim().min(10).max(200),
+});
+export type AcceptChannelShareInput = z.infer<typeof AcceptChannelShareSchema>;
+
+/** A share as the host channel's admins see it. */
+export interface ChannelShareDto {
+  id: string;
+  status: 'pending' | 'active' | 'revoked';
+  partner: { workspaceId: string; name: string } | null;
+  inviteExpiresAt: string;
+  acceptedAt: string | null;
+  createdAt: string;
+}
+
+/** Returned once when an invite is created — the token is shown only here. */
+export interface ChannelShareInviteDto extends ChannelShareDto {
+  token: string;
+}
+
+/** A channel another workspace shared into this one (guest side). */
+export interface IncomingSharedChannelDto {
+  shareId: string;
+  channelId: string;
+  name: string;
+  topic: string | null;
+  host: { workspaceId: string; name: string };
+  isMember: boolean;
+  isArchived: boolean;
+}

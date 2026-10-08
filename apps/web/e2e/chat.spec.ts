@@ -2,6 +2,9 @@ import { test, expect, type Page } from '@playwright/test';
 
 const run = Date.now().toString(36);
 
+// The first-run guided tour overlays the app; mark it as seen so it doesn't block clicks.
+const seenTour = () => window.localStorage.setItem('bs.tour.sidebar.v1', '1');
+
 async function signup(page: Page, name: string) {
   const email = `e2e-${name}-${run}@example.com`;
   await page.goto('/signup');
@@ -25,6 +28,7 @@ test('login → send message → see it render, plus two-browser realtime delive
 }) => {
   // --- User A signs up and creates a workspace ---
   const contextA = await browser.newContext({ permissions: [] });
+  await contextA.addInitScript(seenTour);
   const pageA = await contextA.newPage();
   await signup(pageA, 'alice');
 
@@ -40,6 +44,7 @@ test('login → send message → see it render, plus two-browser realtime delive
     pageA.getByTestId('message-list').getByText(`hello world ${run}`),
   ).toBeVisible();
 
+
   // --- A creates a shareable invite link ---
   await pageA.getByTestId('invite-button').click();
   await pageA.getByTestId('create-invite-link').click();
@@ -49,6 +54,7 @@ test('login → send message → see it render, plus two-browser realtime delive
 
   // --- User B signs up in a second browser and accepts the invite ---
   const contextB = await browser.newContext({ permissions: [] });
+  await contextB.addInitScript(seenTour);
   const pageB = await contextB.newPage();
   await signup(pageB, 'bob');
   const token = inviteUrl.split('/invite/')[1];

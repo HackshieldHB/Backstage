@@ -15,6 +15,7 @@ import {
 } from '@/hooks/queries';
 import { api } from '@/lib/api';
 import { useHuddle } from '@/hooks/use-huddle';
+import { useHuddleRecording } from '@/hooks/use-huddle-recording';
 import { WorkspaceRail } from '@/components/workspace-rail';
 import { Sidebar } from '@/components/sidebar';
 import { MainPane } from '@/components/main-pane';
@@ -88,6 +89,7 @@ function AppShell() {
   // The huddle lives at the shell (not inside MainPane) so it keeps running when
   // you navigate to another channel or DM.
   const huddle = useHuddle();
+  const huddleRecording = useHuddleRecording(huddle, workspaceId);
   const huddleTarget = huddle.activeTarget;
   const huddleLabel = useMemo(() => {
     if (!huddleTarget) return undefined;
@@ -184,7 +186,7 @@ function AppShell() {
       {sidebarOpen && (
         <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => toggleSidebar(false)} />
       )}
-      {huddle.joined && <MeetingRoom huddle={huddle} label={huddleLabel} workspaceId={workspaceId} />}
+      {huddle.joined && <MeetingRoom huddle={huddle} label={huddleLabel} workspaceId={workspaceId} recording={huddleRecording} />}
       <main className="flex min-w-0 flex-1 flex-col bg-surface">
         <ErrorBoundary key={`${mainView}:${container?.id ?? 'none'}`}>
           {mainView === 'timeline' ? (

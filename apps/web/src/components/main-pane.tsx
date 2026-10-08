@@ -1,12 +1,12 @@
 'use client';
 
-import { CalendarClock, FileText, Hash, Headphones, Info, Lightbulb, Lock, Menu, NotebookPen, Pin, Sparkles, Users } from 'lucide-react';
+import { ArrowLeftRight, CalendarClock, FileText, Hash, Headphones, Info, Lightbulb, Lock, Menu, NotebookPen, Pin, Sparkles, Users } from 'lucide-react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
-import { useAiStatus, useChannelMembers, useConversations, usePins, type Container } from '@/hooks/queries';
+import { useAiStatus, useChannelMembers, useChannels, useConversations, usePins, type Container } from '@/hooks/queries';
 import type { HuddleController } from '@/hooks/use-huddle';
 import { MessageList } from './message-list';
 import { Composer, TypingIndicator } from './composer';
@@ -42,6 +42,8 @@ export function MainPane({
   const pins = usePins(container.kind === 'channel' ? container.id : null);
   const channelMembers = useChannelMembers(container.kind === 'channel' ? container.id : null);
   const conversations = useConversations(workspaceId);
+  // Share info comes with the sidebar list (already cached), not the channel itself.
+  const sidebarChannel = useChannels(workspaceId).data?.find((c) => c.id === container.id);
 
   const channel = useQuery({
     queryKey: ['channel', container.id],
@@ -79,6 +81,15 @@ export function MainPane({
           ) : null}
           {title}
         </h1>
+        {container.kind === 'channel' && (sidebarChannel?.sharedFrom || sidebarChannel?.isShared) && (
+          <span
+            className="flex shrink-0 items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 text-[11px] font-medium text-accent"
+            data-testid="channel-shared-badge"
+          >
+            <ArrowLeftRight size={11} />
+            {sidebarChannel.sharedFrom ? `From ${sidebarChannel.sharedFrom.name}` : 'Shared'}
+          </span>
+        )}
         {channel.data?.topic && (
           <span className="hidden truncate text-[13px] text-ink-3 md:inline">· {channel.data.topic}</span>
         )}

@@ -207,20 +207,20 @@ model Workflow {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User          @relation(fields: [createdById], references: [id], onDelete: Cascade)
   runs      WorkflowRun[]
 
   @@index([workspaceId])
 }
 
 model Workspace {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  ownerId   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  ownerId         String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
   /// Messages older than this many days are deleted (null = keep forever).
   retentionDays   Int?
   /// While set, retention deletes nothing (e.g. during an investigation).
@@ -231,6 +231,8 @@ model Workspace {
 
   sso                 SsoConnection?
   domains             WorkspaceDomain[]
+  channelSharesHosted ChannelShare[]       @relation("ChannelShareHost")
+  channelSharesJoined ChannelShare[]       @relation("ChannelShareGuest")
   owner               User                 @relation("WorkspaceOwner", fields: [ownerId], references: [id])
   members             WorkspaceMember[]
   invites             WorkspaceInvite[]
@@ -372,6 +374,7 @@ model Channel {
   scheduledMessages      ScheduledMessage[]
   shareLinks             ShareLink[]
   canvas                 Canvas?
+  shares                 ChannelShare[]
   standups               Standup[]
   incomingWebhooks       IncomingWebhook[]
   channelEmail           ChannelEmail?
@@ -396,10 +399,10 @@ model ChannelMember {
   /// The member's own sidebar section for this channel (null = default list).
   sectionId         String?
 
-  channel         Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channel         Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
   section         SidebarSection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lastReadMessage Message? @relation("ChannelLastRead", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadMessage Message?        @relation("ChannelLastRead", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
 
   @@unique([channelId, userId])
   @@index([userId])
@@ -437,10 +440,10 @@ model ConversationMember {
   /// The member's own sidebar section for this DM (null = default list).
   sectionId         String?
 
-  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation    Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   section         SidebarSection? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
-  lastReadMessage Message?     @relation("ConversationLastRead", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
+  lastReadMessage Message?        @relation("ConversationLastRead", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
 
   @@unique([conversationId, userId])
   @@index([userId])
@@ -1557,6 +1560,35 @@ model SsoConnection {
 }
 
 /// Links a Backstages user to an IdP subject ("sub") so renamed emails still match.
+/// A channel shared with another workspace (Slack Connect style). The host
+/// workspace owns the channel; members of the guest workspace may join it and
+/// use core messaging only — never the host's integrations or admin features.
+model ChannelShare {
+  id               String    @id @default(cuid())
+  channelId        String
+  hostWorkspaceId  String
+  /// Set when an admin of the partner workspace accepts the invite.
+  guestWorkspaceId String?
+  /// SHA-256 of the one-time invite token; cleared once accepted.
+  inviteTokenHash  String?   @unique
+  inviteExpiresAt  DateTime
+  invitedById      String
+  acceptedById     String?
+  acceptedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  channel        Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  hostWorkspace  Workspace  @relation("ChannelShareHost", fields: [hostWorkspaceId], references: [id], onDelete: Cascade)
+  guestWorkspace Workspace? @relation("ChannelShareGuest", fields: [guestWorkspaceId], references: [id], onDelete: Cascade)
+
+  // One live share per partner: partial unique index in the migration
+  // ("ChannelShare_live_partner_key" WHERE revokedAt IS NULL) — a revoked
+  // share stays for history and the channel can be shared again.
+  @@index([channelId])
+  @@index([guestWorkspaceId])
+}
+
 /// An email domain a workspace has proven it controls (DNS TXT record). Only
 /// verified domains can be used for SSO sign-in and SCIM provisioning, so a
 /// workspace can never claim accounts on someone else's domain.

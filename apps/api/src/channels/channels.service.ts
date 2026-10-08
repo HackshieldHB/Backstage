@@ -62,20 +62,43 @@ export class ChannelsService {
 
   /** Channels the caller belongs to (sidebar). */
   async listMine(userId: string, workspaceId: string) {
-    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const member = await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const activeShare = { acceptedAt: { not: null }, revokedAt: null };
     const memberships = await this.prisma.channelMember.findMany({
-      where: { userId, channel: { workspaceId } },
-      include: { channel: true },
+      where: {
+        userId,
+        OR: [
+          { channel: { workspaceId } },
+          // Channels another workspace shared into this one, that the user joined.
+          ...(member.role === 'GUEST'
+            ? []
+            : [{ channel: { shares: { some: { guestWorkspaceId: workspaceId, ...activeShare } } } }]),
+        ],
+      },
+      include: {
+        channel: {
+          include: {
+            workspace: { select: { id: true, name: true } },
+            shares: { where: activeShare, select: { id: true }, take: 1 },
+          },
+        },
+      },
       orderBy: { channel: { name: 'asc' } },
     });
     return memberships
       .filter((m) => !m.channel.isArchived)
-      .map((m) => ({
-        ...m.channel,
-        isMember: true,
-        notificationPref: m.notificationPref,
-        sectionId: m.sectionId,
-      }));
+      .map((m) => {
+        const { workspace, shares, ...channel } = m.channel;
+        const foreign = channel.workspaceId !== workspaceId;
+        return {
+          ...channel,
+          isMember: true,
+          notificationPref: m.notificationPref,
+          sectionId: m.sectionId,
+          isShared: shares.length > 0,
+          sharedFrom: foreign ? { workspaceId: workspace.id, name: workspace.name } : null,
+        };
+      });
   }
 
   /** Channel browser: public channels + own private ones. Guests see only their own. */
@@ -109,7 +132,7 @@ export class ChannelsService {
   }
 
   async get(userId: string, channelId: string) {
-    const { channel, channelMember } = await this.policy.requireChannelMember(userId, channelId);
+    const { channel, channelMember } = await this.policy.requireChannelParticipant(userId, channelId);
     return { ...channel, notificationPref: channelMember.notificationPref };
   }
 
@@ -179,7 +202,7 @@ export class ChannelsService {
   }
 
   async leave(userId: string, channelId: string) {
-    const { channel, channelMember } = await this.policy.requireChannelMember(userId, channelId);
+    const { channel, channelMember } = await this.policy.requireChannelParticipant(userId, channelId);
     if (channel.isDefault) throw new ForbiddenException('You cannot leave the default channel');
     await this.prisma.channelMember.delete({ where: { id: channelMember.id } });
     await this.realtime.unsubscribeUserFromRoom(userId, roomForChannel(channelId)).catch(() => undefined);
@@ -234,7 +257,7 @@ export class ChannelsService {
   }
 
   async setNotificationPref(userId: string, channelId: string, pref: 'ALL' | 'MENTIONS' | 'MUTED') {
-    const { channelMember } = await this.policy.requireChannelMember(userId, channelId);
+    const { channelMember } = await this.policy.requireChannelParticipant(userId, channelId);
     const updated = await this.prisma.channelMember.update({
       where: { id: channelMember.id },
       data: { notificationPref: pref },
@@ -243,7 +266,7 @@ export class ChannelsService {
   }
 
   async listMembers(userId: string, channelId: string) {
-    await this.policy.requireChannelMember(userId, channelId);
+    await this.policy.requireChannelParticipant(userId, channelId);
     const members = await this.prisma.channelMember.findMany({
       where: { channelId },
       include: { user: true },

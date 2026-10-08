@@ -58,6 +58,53 @@ export class PolicyService {
   }
 
   /**
+   * Core-messaging access to a channel, including people from a partner
+   * workspace the channel is shared with (read, post, react, threads, files,
+   * read markers). Deliberately separate from requireChannelMember: features
+   * that act with the host workspace's integrations, data or admin powers keep
+   * using the strict home-workspace check, so a partner can never reach them.
+   */
+  async requireChannelParticipant(
+    userId: string,
+    channelId: string,
+  ): Promise<{ channel: Channel; channelMember: ChannelMember; external: boolean }> {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) throw new NotFoundException('Channel not found');
+    const home = await this.prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId: channel.workspaceId, userId } },
+    });
+    const isHome = !!home && !home.deactivatedAt;
+    if (!isHome && !(await this.sharedAccessWorkspace(userId, channelId))) {
+      throw new NotFoundException('Channel not found');
+    }
+    const channelMember = await this.prisma.channelMember.findUnique({
+      where: { channelId_userId: { channelId, userId } },
+    });
+    if (!channelMember) throw new NotFoundException('Channel not found');
+    return { channel, channelMember, external: !isHome };
+  }
+
+  /**
+   * The partner workspace through which the user may use a shared channel —
+   * an accepted, unrevoked share with a workspace they're an active,
+   * non-guest member of. Null when there is none.
+   */
+  async sharedAccessWorkspace(userId: string, channelId: string): Promise<string | null> {
+    const share = await this.prisma.channelShare.findFirst({
+      where: {
+        channelId,
+        acceptedAt: { not: null },
+        revokedAt: null,
+        guestWorkspace: {
+          members: { some: { userId, deactivatedAt: null, role: { not: 'GUEST' } } },
+        },
+      },
+      select: { guestWorkspaceId: true },
+    });
+    return share?.guestWorkspaceId ?? null;
+  }
+
+  /**
    * Admin-level access to a channel: role is verified against the channel's OWN
    * workspace (an admin of another workspace has no power here).
    */

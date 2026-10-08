@@ -20,6 +20,7 @@ import {
   Siren,
   SquareKanban,
   UsersRound,
+  ArrowLeftRight,
   Hash,
   Lock,
   LogOut,
@@ -697,6 +698,16 @@ function ChannelRow({
       >
         {ch.isPrivate ? <Lock size={13} className="shrink-0" /> : <Hash size={13} className="shrink-0" />}
         <span className="truncate">{ch.name}</span>
+        {(ch.sharedFrom || ch.isShared) && (
+          <span
+            className="shrink-0 text-ink-3"
+            title={ch.sharedFrom ? `Shared from ${ch.sharedFrom.name}` : 'Shared with another workspace'}
+            aria-label={ch.sharedFrom ? `Shared from ${ch.sharedFrom.name}` : 'Shared with another workspace'}
+            data-testid={`shared-${ch.name}`}
+          >
+            <ArrowLeftRight size={12} />
+          </span>
+        )}
         {unread.mentions > 0 && (
           <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
             {unread.mentions}

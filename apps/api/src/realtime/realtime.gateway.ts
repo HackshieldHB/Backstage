@@ -291,6 +291,10 @@ export class RealtimeGateway
 
   /** Pushes the current participant list (with names/avatars) to the huddle's room. */
   private async broadcastHuddle(key: string) {
+    // The recording indicator must never outlive its recorder's presence.
+    if (this.huddle.clearRecordingIfAbsent(key)) {
+      this.emitToKey(key, SOCKET_EVENTS.HUDDLE_SETTINGS, (idField) => ({ ...idField, ...this.huddle.getSettings(key) }));
+    }
     const userIds = this.huddle.userIds(key);
     const users = userIds.length
       ? await this.prisma.user.findMany({
@@ -610,6 +614,10 @@ export class RealtimeGateway
     const key = this.huddleGuard(socket, body);
     if (!key || !this.huddle.isModerator(key, socket.data.userId)) return;
     const before = this.huddle.getSettings(key);
+    // Recording: a moderator starts it as themselves (one at a time); any moderator may stop it.
+    if (body.recording !== undefined) {
+      this.huddle.setRecording(key, body.recording ? socket.data.userId : null);
+    }
     const next = this.huddle.setSettings(key, {
       waitingRoomEnabled: body.waitingRoomEnabled,
       locked: body.locked,

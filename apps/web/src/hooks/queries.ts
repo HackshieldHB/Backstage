@@ -10,6 +10,7 @@ import {
 import type {
   AttachmentDto,
   ChannelDto,
+  ChannelShareInfo,
   ConfluencePage,
   ConfluenceSpace,
   CatchUpResponse,
@@ -73,7 +74,8 @@ import type {
 } from '@backstages/shared';
 import { api } from '@/lib/api';
 
-export type ChannelWithMeta = ChannelDto & {
+export type ChannelWithMeta = ChannelDto &
+  ChannelShareInfo & {
   notificationPref?: string;
   myRole?: string;
   /** Where the viewer filed this channel in their sidebar (their own setting). */

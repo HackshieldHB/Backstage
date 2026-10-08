@@ -82,7 +82,8 @@ export class AttachmentsService {
     }
     if (attachment.message.deletedAt) throw new NotFoundException('Attachment not found');
     if (attachment.message.channelId) {
-      await this.policy.requireChannelMember(userId, attachment.message.channelId);
+      // Includes partners of a shared channel: they can read its messages, so its files too.
+      await this.policy.requireChannelParticipant(userId, attachment.message.channelId);
     } else if (attachment.message.conversationId) {
       await this.policy.requireConversationMember(userId, attachment.message.conversationId);
     } else {

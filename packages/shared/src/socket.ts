@@ -433,6 +433,11 @@ export interface HuddleSettings {
   locked: boolean;
   /** When true, the shared whiteboard surface is available in the meeting. */
   whiteboardOn: boolean;
+  /**
+   * The participant currently recording the huddle (null when nobody is), so
+   * every participant sees that they are being recorded.
+   */
+  recordingBy: string | null;
 }
 
 export interface HuddleSettingsPayload extends HuddleSettings {
@@ -447,6 +452,8 @@ export interface ClientHuddleSettingsPayload {
   waitingRoomEnabled?: boolean;
   locked?: boolean;
   whiteboardOn?: boolean;
+  /** true = I start recording (if nobody is); false = stop the current recording. */
+  recording?: boolean;
 }
 
 /** One participant waiting to be admitted. */

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { Building2, Plug, ShieldCheck, Trash2, Users } from 'lucide-react';
+import { ArrowLeftRight, Building2, Plug, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { WorkspaceMemberDto, WorkspaceRole } from '@backstages/shared';
 import { api } from '@/lib/api';
@@ -13,8 +13,9 @@ import { Dialog } from './dialog';
 import { Avatar } from './avatar';
 import { AtlassianSettings } from './atlassian-dialog';
 import { WorkspaceSecuritySettings } from './workspace-security';
+import { SharedChannelsSettings } from './shared-channels-settings';
 
-type Section = 'general' | 'members' | 'atlassian' | 'security';
+type Section = 'general' | 'members' | 'atlassian' | 'shared' | 'security';
 
 /**
  * Workspace settings, opened from the workspace name. Home for everything that
@@ -64,6 +65,12 @@ export function WorkspaceSettingsDialog({
             active={section === 'atlassian'}
             onClick={() => setSection('atlassian')}
           />
+          <SectionTab
+            icon={<ArrowLeftRight size={15} />}
+            label="Shared channels"
+            active={section === 'shared'}
+            onClick={() => setSection('shared')}
+          />
           {isAdmin && (
             <SectionTab
               icon={<ShieldCheck size={15} />}
@@ -82,6 +89,8 @@ export function WorkspaceSettingsDialog({
             />
           ) : section === 'members' ? (
             <MembersSettings workspaceId={workspaceId} />
+          ) : section === 'shared' ? (
+            <SharedChannelsSettings workspaceId={workspaceId} isAdmin={isAdmin} />
           ) : section === 'security' && isAdmin ? (
             <WorkspaceSecuritySettings workspaceId={workspaceId} isOwner={isOwner} />
           ) : (

@@ -19,6 +19,7 @@ import {
   type HuddleModerationPayload,
   type HuddleCaptionPayload,
   type HuddleRole,
+  type ClientHuddleSettingsPayload,
   type HuddleSettings,
   type HuddleSettingsPayload,
   type HuddleWaitingPayload,
@@ -193,6 +194,9 @@ type SignalData =
   | { kind: 'sdp'; description: RTCSessionDescriptionInit }
   | { kind: 'ice'; candidate: RTCIceCandidateInit };
 
+/** A moderator's settings change (room settings and/or start/stop recording). */
+export type HuddleSettingsPatch = Omit<ClientHuddleSettingsPayload, 'channelId' | 'conversationId'>;
+
 export interface HuddleController {
   /** The channel/DM the local user is currently in a huddle in, or null. */
   activeTarget: Container | null;
@@ -244,7 +248,10 @@ export interface HuddleController {
   admitStatus: AdmitStatus;
   /** People waiting to be admitted (populated for moderators only). */
   waitingList: HuddleWaitingEntry[];
-  updateSettings: (patch: Partial<HuddleSettings>) => void;
+  /** Moderators: change room settings, or start/stop the recording (`recording`). */
+  updateSettings: (patch: HuddleSettingsPatch) => void;
+  /** The local mic/camera stream while joined (e.g. to mix into a recording). */
+  getLocalStream: () => MediaStream | null;
   admit: (userId: string, action: 'admit' | 'deny') => void;
   // ----- whiteboard -----
   whiteboard: HuddleAnnotationShape[];
@@ -349,6 +356,7 @@ export function useHuddle(): HuddleController {
     waitingRoomEnabled: false,
     locked: false,
     whiteboardOn: false,
+    recordingBy: null,
   });
   const [admitStatus, setAdmitStatus] = useState<AdmitStatus>('pending');
   const admitStatusRef = useRef<AdmitStatus>('pending');
@@ -857,7 +865,7 @@ export function useHuddle(): HuddleController {
     setBreakoutRooms([]);
     setBreakoutsOpen(false);
     setBreakoutAssignments({});
-    setSettings({ waitingRoomEnabled: false, locked: false, whiteboardOn: false });
+    setSettings({ waitingRoomEnabled: false, locked: false, whiteboardOn: false, recordingBy: null });
     // Tear down the segmentation pipeline; the raw device track is stopped with the mesh.
     blurProcessor.current?.stop();
     blurProcessor.current = null;
@@ -1169,9 +1177,10 @@ export function useHuddle(): HuddleController {
 
   // ----- room settings / waiting room -----
   const updateSettings = useCallback(
-    (patch: Partial<HuddleSettings>) => emit(CLIENT_EVENTS.HUDDLE_SETTINGS, patch),
+    (patch: HuddleSettingsPatch) => emit(CLIENT_EVENTS.HUDDLE_SETTINGS, patch),
     [emit],
   );
+  const getLocalStream = useCallback(() => localStream.current, []);
   const admit = useCallback(
     (userId: string, action: 'admit' | 'deny') =>
       emit(CLIENT_EVENTS.HUDDLE_ADMIT, { targetUserId: userId, action }),
@@ -1378,7 +1387,12 @@ export function useHuddle(): HuddleController {
 
     const onSettings = (p: HuddleSettingsPayload) => {
       if (!forActive(p)) return;
-      setSettings({ waitingRoomEnabled: p.waitingRoomEnabled, locked: p.locked, whiteboardOn: p.whiteboardOn });
+      setSettings({
+        waitingRoomEnabled: p.waitingRoomEnabled,
+        locked: p.locked,
+        whiteboardOn: p.whiteboardOn,
+        recordingBy: p.recordingBy ?? null,
+      });
     };
     const onWaiting = (p: HuddleWaitingPayload) => {
       if (!forActive(p)) return;
@@ -1681,6 +1695,7 @@ export function useHuddle(): HuddleController {
     admitStatus,
     waitingList,
     updateSettings,
+    getLocalStream,
     admit,
     whiteboard,
     sendWhiteboardOp,

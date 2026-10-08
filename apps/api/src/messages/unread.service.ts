@@ -79,7 +79,17 @@ export class UnreadService {
   async workspaceUnreads(userId: string, workspaceId: string): Promise<UnreadUpdatedPayload[]> {
     const [channelMemberships, conversationMemberships] = await Promise.all([
       this.prisma.channelMember.findMany({
-        where: { userId, channel: { workspaceId, isArchived: false } },
+        where: {
+          userId,
+          channel: {
+            isArchived: false,
+            OR: [
+              { workspaceId },
+              // Joined channels another workspace shared into this one.
+              { shares: { some: { guestWorkspaceId: workspaceId, acceptedAt: { not: null }, revokedAt: null } } },
+            ],
+          },
+        },
         select: { channelId: true },
       }),
       this.prisma.conversationMember.findMany({

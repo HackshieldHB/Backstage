@@ -68,16 +68,30 @@ export class MessagesService {
 
   // ---------- access helpers ----------
 
+  /**
+   * Core messaging access. Channels shared with a partner workspace admit its
+   * members too (`external: true`); everything here is limited to the channel's
+   * own messages, so that is safe.
+   */
   private async requireContainerAccess(userId: string, container: Container) {
     if (container.channelId !== null) {
-      const { channel } = await this.policy.requireChannelMember(userId, container.channelId);
-      return { workspaceId: channel.workspaceId, archived: channel.isArchived };
+      const { channel, external } = await this.policy.requireChannelParticipant(userId, container.channelId);
+      return { workspaceId: channel.workspaceId, archived: channel.isArchived, external };
     }
     const { conversation } = await this.policy.requireConversationMember(
       userId,
       container.conversationId,
     );
-    return { workspaceId: conversation.workspaceId, archived: false };
+    return { workspaceId: conversation.workspaceId, archived: false, external: false };
+  }
+
+  /** True when the channel is currently shared with at least one partner workspace. */
+  private async isSharedChannel(channelId: string | null): Promise<boolean> {
+    if (!channelId) return false;
+    const n = await this.prisma.channelShare.count({
+      where: { channelId, acceptedAt: { not: null }, revokedAt: null },
+    });
+    return n > 0;
   }
 
   private async containerMemberIds(container: Container): Promise<string[]> {
@@ -104,7 +118,7 @@ export class MessagesService {
   // ---------- send ----------
 
   async send(userId: string, container: Container, input: SendMessageInput): Promise<MessageDto> {
-    const { workspaceId, archived } = await this.requireContainerAccess(userId, container);
+    const { workspaceId, archived, external } = await this.requireContainerAccess(userId, container);
     if (archived) throw new ForbiddenException('Channel is archived');
 
     // Idempotency: retries with the same clientMsgId return the original message.
@@ -296,21 +310,28 @@ export class MessagesService {
     }
 
     // Fire-and-forget link unfurling (Jira/Confluence status cards) via any
-    // registered integration app.
-    void this.applyUnfurls(message.id, workspaceId, input.contentText, containerIds);
+    // registered integration app. Never in a channel shared with a partner:
+    // the cards come from the host's own Jira/Confluence, and a partner could
+    // otherwise paste issue links to read titles and statuses.
+    if (!(await this.isSharedChannel(container.channelId))) {
+      void this.applyUnfurls(message.id, workspaceId, input.contentText, containerIds);
+    }
 
-    // Fire-and-forget workflow rules ("when a message is posted in #X …").
-    void this.workflows.onMessagePosted(dto);
+    // The host's workflows and team timeline are about its own people only.
+    if (!external) {
+      // Fire-and-forget workflow rules ("when a message is posted in #X …").
+      void this.workflows.onMessagePosted(dto);
 
-    // Fire-and-forget timeline signal: authoring a real message is COLLABORATION.
-    // Coalesced into a rolling window so a burst of messages is one block.
-    void this.activity.touch({
-      workspaceId,
-      userId,
-      kind: 'COLLABORATION',
-      source: 'MESSAGE',
-      windowSec: 10 * 60,
-    });
+      // Fire-and-forget timeline signal: authoring a real message is COLLABORATION.
+      // Coalesced into a rolling window so a burst of messages is one block.
+      void this.activity.touch({
+        workspaceId,
+        userId,
+        kind: 'COLLABORATION',
+        source: 'MESSAGE',
+        windowSec: 10 * 60,
+      });
+    }
 
     // Push fresh unread counts to every other member (and reset for the author).
     const pushTargets = memberIds;
@@ -733,7 +754,7 @@ export class MessagesService {
   async toggleReaction(userId: string, messageId: string, input: ToggleReactionInput) {
     const message = await this.prisma.message.findUnique({ where: { id: messageId } });
     if (!message || message.deletedAt) throw new NotFoundException('Message not found');
-    await this.requireContainerAccess(userId, containerOf(message));
+    const { external } = await this.requireContainerAccess(userId, containerOf(message));
 
     const existing = await this.prisma.reaction.findUnique({
       where: { messageId_userId_emoji: { messageId, userId, emoji: input.emoji } },
@@ -749,8 +770,9 @@ export class MessagesService {
       // Let integrations turn a reaction on one of their cards into an action
       // (e.g. ✅ on a Jira card → Done). Fire-and-forget: never block or fail
       // the reaction on an integration's behalf.
-      void this.apps.onReaction(userId, message, input.emoji).catch(() => undefined);
-      if (message.channelId) {
+      // Partners from a shared channel never drive the host's integrations or workflows.
+      if (!external) void this.apps.onReaction(userId, message, input.emoji).catch(() => undefined);
+      if (message.channelId && !external) {
         void this.workflowEvents.emit({
           type: 'reaction_added',
           workspaceId: message.workspaceId,

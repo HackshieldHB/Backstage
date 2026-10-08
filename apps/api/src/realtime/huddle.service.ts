@@ -50,7 +50,7 @@ interface BreakoutState {
 }
 
 function defaultSettings(): HuddleSettings {
-  return { waitingRoomEnabled: false, locked: false, whiteboardOn: false };
+  return { waitingRoomEnabled: false, locked: false, whiteboardOn: false, recordingBy: null };
 }
 
 function defaultState(role: HuddleRole): HuddleMemberState {
@@ -375,9 +375,31 @@ export class HuddleService {
       waitingRoomEnabled: patch.waitingRoomEnabled ?? current.waitingRoomEnabled,
       locked: patch.locked ?? current.locked,
       whiteboardOn: patch.whiteboardOn ?? current.whiteboardOn,
+      recordingBy: patch.recordingBy !== undefined ? patch.recordingBy : current.recordingBy,
     };
     this.settings.set(key, next);
     return next;
+  }
+
+  /**
+   * Start (`recorder` = a user id) or stop (null) the huddle recording. Only
+   * one recording at a time: starting while someone else records is refused.
+   * Returns whether anything changed.
+   */
+  setRecording(key: string, recorder: string | null): boolean {
+    const current = this.getSettings(key);
+    if (recorder !== null && current.recordingBy !== null) return false;
+    if (recorder === null && current.recordingBy === null) return false;
+    this.setSettings(key, { recordingBy: recorder });
+    return true;
+  }
+
+  /** A recording ends when its recorder is no longer in the huddle. Returns true if it was cleared. */
+  clearRecordingIfAbsent(key: string): boolean {
+    const by = this.getSettings(key).recordingBy;
+    if (by === null || this.isPresent(key, by)) return false;
+    this.setSettings(key, { recordingBy: null });
+    return true;
   }
 
   // ----- waiting room -----

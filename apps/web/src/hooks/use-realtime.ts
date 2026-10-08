@@ -226,6 +226,18 @@ export function useRealtime(workspaceId: string | null) {
       qc.invalidateQueries({ queryKey: keys.myDay(p.workspaceId) });
     };
 
+    // The server sends READY once a (re)connected socket is in all its rooms.
+    // Anything broadcast while we were disconnected is lost, so refetch the
+    // live views — otherwise a reconnect gap silently drops messages.
+    const onReady = () => {
+      void qc.invalidateQueries({ queryKey: ['messages'] });
+      void qc.invalidateQueries({ queryKey: ['thread'] });
+      void qc.invalidateQueries({ queryKey: keys.channels(workspaceId) });
+      void qc.invalidateQueries({ queryKey: keys.conversations(workspaceId) });
+      void qc.invalidateQueries({ queryKey: keys.unreads(workspaceId) });
+    };
+
+    socket.on(SOCKET_EVENTS.READY, onReady);
     socket.on(SOCKET_EVENTS.MESSAGE_NEW, onMessageNew);
     socket.on(SOCKET_EVENTS.MESSAGE_UPDATED, onMessageUpdated);
     socket.on(SOCKET_EVENTS.MESSAGE_DELETED, onMessageDeleted);
@@ -245,6 +257,7 @@ export function useRealtime(workspaceId: string | null) {
     socket.on(SOCKET_EVENTS.WORKFLOW_REQUESTS_CHANGED, onWorkflowRequests);
 
     return () => {
+      socket.off(SOCKET_EVENTS.READY, onReady);
       socket.off(SOCKET_EVENTS.MESSAGE_NEW, onMessageNew);
       socket.off(SOCKET_EVENTS.MESSAGE_UPDATED, onMessageUpdated);
       socket.off(SOCKET_EVENTS.MESSAGE_DELETED, onMessageDeleted);

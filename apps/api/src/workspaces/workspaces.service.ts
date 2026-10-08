@@ -9,9 +9,11 @@ import {
   CreateInviteInput,
   CreateWorkspaceInput,
   DEFAULT_CHANNEL_NAME,
+  SOCKET_EVENTS,
   UpdateMemberRoleInput,
   UpdateWorkspaceInput,
 } from '@backstages/shared';
+import { RealtimeService, roomForChannel, roomForWorkspace } from '../realtime/realtime.service';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
@@ -31,7 +33,20 @@ export class WorkspacesService {
     private readonly audit: AuditService,
     private readonly email: EmailService,
     private readonly workflowEvents: WorkflowEvents,
+    private readonly realtime: RealtimeService,
   ) {}
+
+  /**
+   * Sockets join their rooms when they connect, so a membership created later
+   * (new workspace, accepted invite) must subscribe the user's open sockets too
+   * — otherwise they see nothing live until they reload.
+   */
+  private async subscribeToWorkspace(userId: string, workspaceId: string, channelId: string | null) {
+    await this.realtime.subscribeUserToRoom(userId, roomForWorkspace(workspaceId)).catch(() => undefined);
+    if (channelId) {
+      await this.realtime.subscribeUserToRoom(userId, roomForChannel(channelId)).catch(() => undefined);
+    }
+  }
 
   async create(userId: string, input: CreateWorkspaceInput) {
     const baseSlug = input.name
@@ -41,7 +56,7 @@ export class WorkspacesService {
       .slice(0, 60);
     const slug = `${baseSlug || 'workspace'}-${randomBytes(3).toString('hex')}`;
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const workspace = await tx.workspace.create({
         data: { name: input.name, slug, ownerId: userId },
       });
@@ -58,8 +73,10 @@ export class WorkspacesService {
         },
       });
       await tx.channelMember.create({ data: { channelId: general.id, userId } });
-      return workspace;
+      return { workspace, generalId: general.id };
     });
+    await this.subscribeToWorkspace(userId, created.workspace.id, created.generalId);
+    return created.workspace;
   }
 
   async listMine(userId: string) {
@@ -242,7 +259,12 @@ export class WorkspacesService {
       });
       return general && invite.role !== 'GUEST' ? general.id : null;
     });
+    await this.subscribeToWorkspace(userId, invite.workspaceId, joinedChannelId);
     if (joinedChannelId) {
+      this.realtime.emitToChannel(joinedChannelId, SOCKET_EVENTS.MEMBER_JOINED, {
+        channelId: joinedChannelId,
+        user: toUserDto(user),
+      });
       void this.workflowEvents.emit({
         type: 'member_joined',
         workspaceId: invite.workspaceId,

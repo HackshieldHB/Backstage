@@ -6,6 +6,7 @@ import {
   Ban,
   Captions,
   ChevronDown,
+  Circle,
   DoorOpen,
   Focus,
   Image as ImageIcon,
@@ -27,6 +28,7 @@ import {
   Smile,
   Sparkles,
   Split,
+  Square,
   SquareStack,
   StickyNote,
   Users,
@@ -38,6 +40,8 @@ import {
 } from 'lucide-react';
 import { HUDDLE_REACTIONS } from '@backstages/shared';
 import type { HuddleController } from '@/hooks/use-huddle';
+import type { HuddleRecordingController } from '@/hooks/use-huddle-recording';
+import { formatDuration } from '@/lib/huddle-recorder';
 import { useAiStatus, useHuddleRecap } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -88,10 +92,13 @@ export function MeetingRoom({
   huddle,
   label,
   workspaceId,
+  recording,
 }: {
   huddle: HuddleController;
   label?: string;
   workspaceId: string;
+  /** Huddle recording (owned by the app shell so it outlives this window). */
+  recording?: HuddleRecordingController;
 }) {
   const me = useAuthStore((s) => s.user);
   const myId = me?.id ?? '';
@@ -293,6 +300,11 @@ export function MeetingRoom({
           data-testid="meeting-restore"
         >
           <SquareStack size={15} /> Return to meeting · {huddle.participants.length}
+          {recording?.recordingBy && (
+            <span className="flex items-center gap-1 rounded-full bg-red-500 px-1.5 text-[11px]" aria-label="This huddle is being recorded">
+              <Circle size={8} fill="currentColor" /> REC
+            </span>
+          )}
         </button>
       </>
     );
@@ -365,6 +377,17 @@ export function MeetingRoom({
         <span className="text-[14px] font-semibold">{label ?? 'Huddle'}</span>
         <span className="text-[12px] text-white/50">{huddle.participants.length} in call</span>
         <ConnBadge state={huddle.connectionState} />
+        {recording?.recordingBy && (
+          <span
+            className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-2 py-0.5 text-[12px] font-medium text-red-300"
+            role="status"
+            data-testid="meeting-recording"
+          >
+            <Circle size={8} fill="currentColor" className="animate-pulse" />
+            {recording.isMine ? `Recording · ${formatDuration(recording.elapsedMs)}` : 'This huddle is being recorded'}
+          </span>
+        )}
+        {recording?.saving && <span className="text-[12px] text-white/60">Saving recording…</span>}
         <span className="flex-1" />
         <div className="hidden items-center gap-1 rounded-lg bg-white/10 p-0.5 sm:flex">
           <LayoutBtn active={layout === 'spotlight'} onClick={() => setLayout('spotlight')} icon={<Focus size={14} />} label="Spotlight" />
@@ -754,6 +777,16 @@ export function MeetingRoom({
                   onClick={() => { huddle.updateSettings({ locked: !huddle.settings.locked }); setMoreMenu(false); }}
                 >
                   {huddle.settings.locked ? 'Unlock meeting' : 'Lock meeting'}
+                </MoreItem>
+              )}
+              {recording?.canStart && (
+                <MoreItem icon={<Circle size={14} />} onClick={() => { recording.start(); setMoreMenu(false); }}>
+                  Record audio
+                </MoreItem>
+              )}
+              {recording?.canStop && (
+                <MoreItem icon={<Square size={14} />} onClick={() => { recording.stop(); setMoreMenu(false); }}>
+                  Stop recording
                 </MoreItem>
               )}
               {isMod && (

@@ -241,10 +241,10 @@ describe('HuddleService', () => {
 
   describe('room settings', () => {
     it('defaults every setting to off and merges partial patches', () => {
-      expect(svc.getSettings(A)).toEqual({ waitingRoomEnabled: false, locked: false, whiteboardOn: false });
+      expect(svc.getSettings(A)).toEqual({ waitingRoomEnabled: false, locked: false, whiteboardOn: false, recordingBy: null });
       svc.setSettings(A, { waitingRoomEnabled: true });
       svc.setSettings(A, { whiteboardOn: true });
-      expect(svc.getSettings(A)).toEqual({ waitingRoomEnabled: true, locked: false, whiteboardOn: true });
+      expect(svc.getSettings(A)).toEqual({ waitingRoomEnabled: true, locked: false, whiteboardOn: true, recordingBy: null });
     });
   });
 
@@ -330,6 +330,29 @@ describe('HuddleService', () => {
       svc.openBreakouts(A, rooms, { u1: 'r1' });
       svc.closeBreakouts(A);
       expect(svc.getBreakouts(A)).toEqual({ open: false, rooms: [], assignments: {} });
+    });
+  });
+
+  describe('recording', () => {
+    it('allows one recorder at a time and clears when they leave', () => {
+      svc.join(A, 'u1', 's1');
+      svc.join(A, 'u2', 's2');
+      expect(svc.getSettings(A).recordingBy).toBeNull();
+      expect(svc.setRecording(A, 'u1')).toBe(true);
+      expect(svc.setRecording(A, 'u2')).toBe(false); // someone is already recording
+      expect(svc.getSettings(A).recordingBy).toBe('u1');
+      // Other settings changes keep the recording state.
+      svc.setSettings(A, { locked: true });
+      expect(svc.getSettings(A)).toMatchObject({ locked: true, recordingBy: 'u1' });
+      expect(svc.clearRecordingIfAbsent(A)).toBe(false);
+
+      svc.leave(A, 'u1', 's1');
+      expect(svc.clearRecordingIfAbsent(A)).toBe(true);
+      expect(svc.getSettings(A).recordingBy).toBeNull();
+      expect(svc.setRecording(A, null)).toBe(false); // nothing to stop
+      expect(svc.setRecording(A, 'u2')).toBe(true);
+      expect(svc.setRecording(A, null)).toBe(true);
+      expect(svc.getSettings(B).recordingBy).toBeNull();
     });
   });
 });
