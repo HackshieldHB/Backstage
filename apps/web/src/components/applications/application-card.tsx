@@ -3,7 +3,7 @@
 import { ExternalLink } from 'lucide-react';
 import type { Application } from './types';
 import { ApplicationLogo } from './application-logo';
-import { relativeTime, StatusPill } from './primitives';
+import { DataSourceBadge, relativeTime, StatusPill } from './primitives';
 
 /**
  * Entry-point card. The whole card previews the application (Path A — Explore);
@@ -27,7 +27,10 @@ export function ApplicationCard({ app, onView }: { app: Application; onView: () 
           <StatusPill status={app.status} reason={app.statusReason} compact />
         </div>
 
-        <h3 className="mt-3 text-[15px] font-semibold tracking-tight text-ink">{app.name}</h3>
+        <h3 className="mt-3 flex items-center gap-2 text-[15px] font-semibold tracking-tight text-ink">
+          {app.name}
+          <DataSourceBadge source={app.dataSource} />
+        </h3>
         <p className="text-[12px] text-ink-3">{app.tagline}</p>
 
         <div className="my-3 border-t border-line" />

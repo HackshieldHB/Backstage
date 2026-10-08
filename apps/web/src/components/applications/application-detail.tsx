@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { ChevronRight, ExternalLink } from 'lucide-react';
 import type { Application } from './types';
 import { ApplicationLogo } from './application-logo';
-import { relativeTime, StatusPill } from './primitives';
+import { DataSourceBadge, relativeTime, StatusPill } from './primitives';
 import { useApplicationData } from './use-applications';
 import { ApplicationExperience, getExperienceTabs, MonitoringUnavailable } from './experiences';
 
@@ -33,6 +33,7 @@ export function ApplicationDetail({ app, onBack }: { app: Application; onBack: (
           <p className="text-[13px] text-ink-3">{app.description}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <StatusPill status={app.status} reason={app.statusReason} />
+            <DataSourceBadge source={app.dataSource} />
             <span className="text-[12px] text-ink-3">Last checked {relativeTime(app.lastChecked)}</span>
           </div>
         </div>

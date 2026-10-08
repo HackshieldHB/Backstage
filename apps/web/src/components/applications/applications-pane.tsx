@@ -9,7 +9,11 @@ import { ApplicationFilters, type StatusFilter } from './application-filters';
 import { ApplicationCard, ApplicationCardSkeleton } from './application-card';
 import { ApplicationPreviewModal } from './application-preview-modal';
 import { ApplicationDetail } from './application-detail';
-import { useApplications, useGlobalActivity } from './use-applications';
+import {
+  ApplicationsWorkspaceContext,
+  useApplications,
+  useGlobalActivity,
+} from './use-applications';
 import type { Application } from './types';
 
 /**
@@ -17,7 +21,7 @@ import type { Application } from './types';
  * platform level (summary, search, filters, grid, preview shell); the per-app
  * experiences it opens are domain-specific.
  */
-export function ApplicationsPane() {
+function ApplicationsHub() {
   const appsQ = useApplications();
   const activityQ = useGlobalActivity();
   const [query, setQuery] = useState('');
@@ -132,4 +136,13 @@ export function ApplicationsPane() {
 
 function rank(a: Application): number {
   return a.status === 'critical' ? 0 : a.status === 'warning' ? 1 : a.status === 'unknown' ? 2 : 3;
+}
+
+/** The hub for one workspace: Atlassian reads live from its connection; the rest are sample data. */
+export function ApplicationsPane({ workspaceId }: { workspaceId?: string | null }) {
+  return (
+    <ApplicationsWorkspaceContext.Provider value={workspaceId ?? null}>
+      <ApplicationsHub />
+    </ApplicationsWorkspaceContext.Provider>
+  );
 }

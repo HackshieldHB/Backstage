@@ -3,7 +3,8 @@
  * external SaaS APIs directly — so a real MiroService / DatadogService / … can be
  * dropped in later without touching components. For now, a mock implementation.
  */
-import type { Application, ApplicationData, MonitoringResult } from './types';
+import type { AtlassianOverviewDto } from '@backstages/shared';
+import type { Application, ApplicationData, AtlassianData, MonitoringResult } from './types';
 import {
   MOCK_APPLICATIONS,
   MOCK_ATLASSIAN,
@@ -69,5 +70,107 @@ export class MockApplicationService implements ApplicationService {
   }
 }
 
-/** Swap this for a composed real service when APIs are available. */
+type LiveAtlassian = Extract<AtlassianOverviewDto, { connected: true }>;
+
+/** The Atlassian card, rebuilt from live figures. Pure, so it can be tested. */
+export function liveAtlassianApp(base: Application, o: LiveAtlassian): Application {
+  const problems = o.problems.length;
+  const fmt = (n: number | null) => (n == null ? '—' : n.toLocaleString());
+  return {
+    ...base,
+    tagline: o.confluenceSpaces != null ? 'Jira • Confluence' : 'Jira',
+    status: problems ? 'warning' : 'healthy',
+    statusReason: problems
+      ? `Some figures couldn’t be read: ${o.problems.join(', ')}`
+      : `Connected to ${o.siteName}`,
+    url: o.siteUrl,
+    lastChecked: o.fetchedAt,
+    metrics: [
+      { label: 'Projects', value: fmt(o.projects) },
+      { label: 'Open issues', value: fmt(o.openIssues) },
+      o.confluenceSpaces != null
+        ? { label: 'Spaces', value: fmt(o.confluenceSpaces) }
+        : { label: 'Linked members', value: fmt(o.linkedMembers) },
+    ],
+    dataSource: 'live',
+  };
+}
+
+/** Live Atlassian domain data for the detail view. Pure, so it can be tested. */
+export function liveAtlassianData(o: LiveAtlassian): AtlassianData {
+  const products: AtlassianData['products'] = [
+    {
+      key: 'jira',
+      name: 'Jira',
+      metricLabel: 'Projects',
+      metricValue: o.projects ?? 0,
+      status: o.projects == null ? 'unknown' : 'healthy',
+    },
+  ];
+  if (o.confluenceSpaces != null) {
+    products.push({
+      key: 'confluence',
+      name: 'Confluence',
+      metricLabel: 'Spaces',
+      metricValue: o.confluenceSpaces,
+      status: 'healthy',
+    });
+  }
+  return {
+    products,
+    users: o.linkedMembers,
+    projects: o.projects ?? 0,
+    openIssues: o.openIssues ?? 0,
+    activity: o.recent.map((r) => ({
+      id: r.key,
+      at: r.updated ?? o.fetchedAt,
+      text: `${r.key} · ${r.summary}${r.status ? ` — ${r.status}` : ''}`,
+    })),
+  };
+}
+
+/**
+ * The real service for a workspace: Atlassian comes from the workspace's live
+ * connection when there is one; the other applications (no connections yet)
+ * keep the sample data and are marked `dataSource: 'demo'`.
+ */
+export class WorkspaceApplicationService implements ApplicationService {
+  private readonly demo = new MockApplicationService();
+
+  constructor(private readonly fetchAtlassian: () => Promise<AtlassianOverviewDto>) {}
+
+  private async atlassian(): Promise<LiveAtlassian | null> {
+    try {
+      const o = await this.fetchAtlassian();
+      return o.connected ? o : null;
+    } catch {
+      return null; // treat as not connected; the card stays clearly marked as demo
+    }
+  }
+
+  async getApplications(): Promise<Application[]> {
+    const [apps, live] = await Promise.all([this.demo.getApplications(), this.atlassian()]);
+    return apps.map((a) =>
+      a.id === 'atlassian' && live ? liveAtlassianApp(a, live) : { ...a, dataSource: 'demo' as const },
+    );
+  }
+
+  async getApplication(id: string): Promise<Application | null> {
+    return (await this.getApplications()).find((a) => a.id === id) ?? null;
+  }
+
+  async getApplicationData(id: string): Promise<MonitoringResult<ApplicationData>> {
+    if (id === 'atlassian') {
+      const live = await this.atlassian();
+      if (live) return { ok: true, data: { experience: 'atlassian', data: liveAtlassianData(live) } };
+    }
+    return this.demo.getApplicationData(id);
+  }
+
+  getGlobalActivity(): Promise<GlobalActivity> {
+    return this.demo.getGlobalActivity();
+  }
+}
+
+/** Sample-data service (no workspace) — used where no workspace is known. */
 export const applicationService: ApplicationService = new MockApplicationService();

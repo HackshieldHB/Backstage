@@ -206,7 +206,7 @@ function AppShell() {
           ) : mainView === 'tasks' ? (
             <TasksPane workspaceId={workspaceId} onNavigate={navigate} />
           ) : mainView === 'applications' ? (
-            <ApplicationsPane />
+            <ApplicationsPane workspaceId={workspaceId} />
           ) : container ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <GettingStarted workspaceId={workspaceId} />

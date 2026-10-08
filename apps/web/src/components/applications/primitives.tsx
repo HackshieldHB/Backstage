@@ -62,6 +62,27 @@ export const STATUS_META: Record<ApplicationStatus, StatusMeta> = {
   },
 };
 
+/** Says whether an application's numbers are live or sample data — never pass demo off as real. */
+export function DataSourceBadge({ source }: { source?: 'live' | 'demo' }) {
+  if (!source) return null;
+  return source === 'live' ? (
+    <span
+      className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-600 bg-green-500/10 dark:text-green-400"
+      title="Read from your connected account"
+    >
+      Live
+    </span>
+  ) : (
+    <span
+      className="rounded bg-hovered px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-3"
+      title="Sample data — this application isn’t connected yet"
+      data-testid="demo-badge"
+    >
+      Demo data
+    </span>
+  );
+}
+
 /** A status pill that conveys state with an icon + label, never colour alone. */
 export function StatusPill({
   status,

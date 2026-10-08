@@ -47,6 +47,8 @@ export interface Application {
   lastChecked: string;
   /** 2–3 domain-specific headline metrics for the card. */
   metrics: CardMetric[];
+  /** 'live' = read from a real connection; 'demo' = sample data (no connection yet). */
+  dataSource?: 'live' | 'demo';
 }
 
 /** A monitoring fetch either succeeds with domain data, or reports that monitoring
