@@ -6,7 +6,7 @@ export const AskSchema = z.object({
 export type AskInput = z.infer<typeof AskSchema>;
 
 export interface AskSourceDto {
-  kind: 'decision' | 'message';
+  kind: 'decision' | 'message' | 'task';
   label: string;
   ref: string;
   channelId: string | null;

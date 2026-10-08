@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, Hash, MessageCircleQuestion, MessageSquarePlus, Sparkles, Users } from 'lucide-react';
+import { CheckSquare, ClipboardCheck, Hash, MessageCircleQuestion, MessageSquarePlus, Sparkles, Users } from 'lucide-react';
 import type { AskAnswerDto, AskSourceDto } from '@backstages/shared';
 import { api } from '@/lib/api';
+import { useUiStore } from '@/stores/ui-store';
 import { Dialog } from './dialog';
 import { Avatar } from './avatar';
 import { keys, useExperts, type Container } from '@/hooks/queries';
@@ -19,6 +20,7 @@ export function AskDialog({
   onNavigate: (c: Container, messageId?: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const setMainView = useUiStore((s) => s.setMainView);
   const [question, setQuestion] = useState('');
   const [asked, setAsked] = useState('');
   const [loading, setLoading] = useState(false);
@@ -76,6 +78,9 @@ export function AskDialog({
     if (s.kind === 'message' && s.channelId) {
       onNavigate({ kind: 'channel', id: s.channelId }, s.ref);
       close();
+    } else if (s.kind === 'task') {
+      setMainView('tasks');
+      close();
     }
   };
 
@@ -121,11 +126,17 @@ export function AskDialog({
                   <li key={i}>
                     <button
                       onClick={() => openSource(s)}
-                      disabled={s.kind !== 'message' || !s.channelId}
+                      disabled={s.kind === 'decision' || (s.kind === 'message' && !s.channelId)}
                       className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink-2 enabled:hover:bg-hovered enabled:hover:text-ink disabled:cursor-default"
                     >
                       <span className="shrink-0 text-ink-3">{i + 1}.</span>
-                      {s.kind === 'decision' ? <ClipboardCheck size={13} className="shrink-0 text-accent" /> : <Hash size={13} className="shrink-0 text-ink-3" />}
+                      {s.kind === 'decision' ? (
+                        <ClipboardCheck size={13} className="shrink-0 text-accent" />
+                      ) : s.kind === 'task' ? (
+                        <CheckSquare size={13} className="shrink-0 text-accent" />
+                      ) : (
+                        <Hash size={13} className="shrink-0 text-ink-3" />
+                      )}
                       <span className="truncate">{s.label}</span>
                     </button>
                   </li>

@@ -314,6 +314,36 @@ describe('tasks & message reminders (e2e)', () => {
         .set(auth(mallory))
         .expect(404);
     });
+
+    it('search finds only tasks the caller created or is assigned', async () => {
+      const word = `quokka${run}`;
+      await http()
+        .post(`/workspaces/${workspaceId}/tasks`)
+        .set(auth(alice))
+        .send({ title: `Feed the ${word}`, assigneeId: bob.id })
+        .expect(201);
+      await http()
+        .post(`/workspaces/${workspaceId}/tasks`)
+        .set(auth(alice))
+        .send({ title: `Private ${word} plan` })
+        .expect(201);
+
+      const q = (who: Actor) =>
+        http()
+          .get(`/workspaces/${workspaceId}/search?q=${word}&type=tasks`)
+          .set(auth(who))
+          .expect(200);
+      const titles = async (who: Actor) =>
+        (await q(who)).body.data.tasks.map((t: { title: string }) => t.title).sort();
+
+      expect(await titles(alice)).toEqual([`Feed the ${word}`, `Private ${word} plan`]);
+      expect(await titles(bob)).toEqual([`Feed the ${word}`]);
+      expect(await titles(carol)).toEqual([]);
+      await http()
+        .get(`/workspaces/${workspaceId}/search?q=${word}&type=tasks`)
+        .set(auth(mallory))
+        .expect(404);
+    });
   });
 
   describe('remind me about a message', () => {

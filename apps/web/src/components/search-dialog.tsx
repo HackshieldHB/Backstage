@@ -3,14 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { format } from 'date-fns';
-import { FileText, Gavel, Hash, Lock, MessageSquare, Search } from 'lucide-react';
+import { CheckSquare, FileText, Gavel, Hash, Lock, MessageSquare, Search } from 'lucide-react';
 import { fileUrl } from '@/lib/api';
 import { useSearch, type Container } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
+import { useUiStore } from '@/stores/ui-store';
 import { Avatar } from './avatar';
 import { MessageBody } from './message-body';
 
-const TABS = ['messages', 'files', 'channels', 'people', 'decisions'] as const;
+const TABS = ['messages', 'files', 'channels', 'people', 'tasks', 'decisions'] as const;
 type Tab = (typeof TABS)[number];
 
 export function SearchDialog({
@@ -28,6 +29,11 @@ export function SearchDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const results = useSearch(workspaceId, debounced);
   const me = useAuthStore((s) => s.user);
+  const setMainView = useUiStore((s) => s.setMainView);
+  const openTasks = () => {
+    setMainView('tasks');
+    onClose();
+  };
 
   // Quick-filter chips build the same modifiers the server already parses.
   const hasToken = (tok: string) => q.includes(tok);
@@ -59,6 +65,7 @@ export function SearchDialog({
     channels: results.data?.channels.length ?? 0,
     people: results.data?.people.length ?? 0,
     decisions: results.data?.decisions.length ?? 0,
+    tasks: results.data?.tasks.length ?? 0,
   };
 
   return (
@@ -86,6 +93,8 @@ export function SearchDialog({
               } else if (tab === 'people' && results.data.people[0]) {
                 window.dispatchEvent(new CustomEvent('bs:open-dm', { detail: results.data.people[0].id }));
                 onClose();
+              } else if (tab === 'tasks' && results.data.tasks[0]) {
+                openTasks();
               }
             }}
             placeholder="Jump to or search — try: report from:alice in:general has:file"
@@ -223,6 +232,31 @@ export function SearchDialog({
                 <span className="truncate text-xs text-gray-500 dark:text-gray-400">{p.email}</span>
                 <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-medium text-accent">
                   <MessageSquare size={13} /> Message
+                </span>
+              </button>
+            ))}
+
+          {debounced && tab === 'tasks' &&
+            (results.data?.tasks ?? []).map((t) => (
+              <button
+                key={t.id}
+                onClick={openTasks}
+                className="mb-1 flex w-full items-start gap-2 rounded-lg p-3 text-left hover:bg-hovered"
+                data-testid="search-result-task"
+              >
+                <CheckSquare
+                  size={15}
+                  className={clsx('mt-0.5 shrink-0', t.status === 'DONE' ? 'text-green-500' : 'text-accent')}
+                />
+                <span className="min-w-0">
+                  <span className={clsx('block text-sm font-medium', t.status === 'DONE' && 'text-ink-3 line-through')}>
+                    {t.title}
+                  </span>
+                  <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                    {t.status === 'DONE' ? 'Done' : 'Open'}
+                    {t.dueAt && ` · due ${format(new Date(t.dueAt), 'MMM d')}`}
+                    {t.assigneeName && ` · ${t.assigneeName}`}
+                  </span>
                 </span>
               </button>
             ))}

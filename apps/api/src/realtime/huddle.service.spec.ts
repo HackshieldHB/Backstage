@@ -230,9 +230,12 @@ describe('HuddleService', () => {
       svc.setNotes(A, 'notes');
       svc.createPoll(A, { id: 'p', question: 'q', options: ['a', 'b'], votes: {}, createdBy: 'u1', closed: false });
       svc.leave(A, 'u1', 's1');
-      expect(svc.getNotes(A)).toBe('');
       expect(svc.getPoll(A)).toBeNull();
       expect(svc.userIds(A)).toEqual([]);
+      // Notes deliberately outlive the room so the gateway can persist the meeting;
+      // draining them (as endMeetingIfEmpty does) leaves nothing for the next one.
+      expect(svc.takeNotes(A)).toBe('notes');
+      expect(svc.getNotes(A)).toBe('');
     });
   });
 

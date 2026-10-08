@@ -29,6 +29,7 @@ export class SearchService {
       channels: [],
       people: [],
       decisions: [],
+      tasks: [],
     };
     const wants = (t: string) => input.type === 'all' || input.type === t;
 
@@ -50,6 +51,9 @@ export class SearchService {
     if (wants('people') && parsed.text) {
       response.people = await this.searchPeople(workspaceId, parsed.text, input.limit);
     }
+    if (wants('tasks') && parsed.text) {
+      response.tasks = await this.searchTasks(userId, workspaceId, parsed.text, input.limit);
+    }
     if (wants('decisions') && parsed.text) {
       response.decisions = await this.searchDecisions(
         workspaceId,
@@ -59,6 +63,36 @@ export class SearchService {
       );
     }
     return response;
+  }
+
+  /** Only tasks the caller created or is assigned — the same visibility as the Tasks pane. */
+  private async searchTasks(userId: string, workspaceId: string, text: string, limit: number) {
+    const rows = await this.prisma.task.findMany({
+      where: {
+        workspaceId,
+        OR: [{ createdById: userId }, { assigneeId: userId }],
+        AND: [
+          {
+            OR: [
+              { title: { contains: text, mode: 'insensitive' } },
+              { notes: { contains: text, mode: 'insensitive' } },
+            ],
+          },
+        ],
+      },
+      include: { assignee: { select: { displayName: true } } },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      take: limit,
+    });
+    return rows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      notes: t.notes,
+      status: t.status,
+      dueAt: t.dueAt?.toISOString() ?? null,
+      assigneeName: t.assignee?.displayName ?? null,
+      createdAt: t.createdAt.toISOString(),
+    }));
   }
 
   private async searchDecisions(

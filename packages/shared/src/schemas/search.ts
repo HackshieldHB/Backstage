@@ -6,7 +6,7 @@ import { AttachmentDtoSchema, MessageDtoSchema } from './message';
 export const SearchQuerySchema = z.object({
   /** Free text plus modifiers: from: in: before: after: has:link has:file */
   q: z.string().min(1).max(500),
-  type: z.enum(['messages', 'files', 'channels', 'people', 'decisions', 'all']).default('all'),
+  type: z.enum(['messages', 'files', 'channels', 'people', 'decisions', 'tasks', 'all']).default('all'),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 export type SearchQueryInput = z.infer<typeof SearchQuerySchema>;
@@ -21,6 +21,17 @@ export const SearchDecisionResultSchema = z.object({
   createdAt: z.string(),
 });
 export type SearchDecisionResult = z.infer<typeof SearchDecisionResultSchema>;
+
+export const SearchTaskResultSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  notes: z.string(),
+  status: z.enum(['OPEN', 'DONE']),
+  dueAt: z.string().nullable(),
+  assigneeName: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type SearchTaskResult = z.infer<typeof SearchTaskResultSchema>;
 
 export const SearchFileResultSchema = AttachmentDtoSchema.extend({
   messageId: z.string().nullable(),
@@ -37,5 +48,6 @@ export const SearchResponseSchema = z.object({
   channels: z.array(ChannelDtoSchema),
   people: z.array(UserDtoSchema),
   decisions: z.array(SearchDecisionResultSchema),
+  tasks: z.array(SearchTaskResultSchema),
 });
 export type SearchResponse = z.infer<typeof SearchResponseSchema>;

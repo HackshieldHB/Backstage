@@ -326,7 +326,12 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
     });
 
     it('a forged state is rejected', async () => {
-      await http().get('/atlassian/callback?code=x&state=forged').expect(401);
+      // The callback never shows users a raw error page: a forged/expired state is
+      // refused before any code exchange and bounced to the login error screen.
+      const before = await prisma.atlassianConnection.count();
+      const res = await http().get('/atlassian/callback?code=x&state=forged').expect(302);
+      expect(res.headers.location).toMatch(/\/login\?error=atlassian-failed$/);
+      expect(await prisma.atlassianConnection.count()).toBe(before);
     });
   });
 

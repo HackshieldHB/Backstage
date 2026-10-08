@@ -111,7 +111,7 @@ export class AiService {
     const terms = [...new Set((question.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []))].slice(0, 8);
     if (terms.length === 0) return { answer: 'Please ask a more specific question.', sources: [] };
 
-    const [decisions, messages] = await Promise.all([
+    const [decisions, messages, tasks] = await Promise.all([
       this.prisma.decision.findMany({
         where: {
           workspaceId,
@@ -135,6 +135,24 @@ export class AiService {
         orderBy: { createdAt: 'desc' },
         include: { user: { select: { displayName: true } }, channel: { select: { id: true, name: true } } },
       }),
+      // Only tasks the caller created or is assigned (same visibility as the Tasks pane).
+      this.prisma.task.findMany({
+        where: {
+          workspaceId,
+          OR: [{ createdById: userId }, { assigneeId: userId }],
+          AND: [
+            {
+              OR: terms.flatMap((t) => [
+                { title: { contains: t, mode: 'insensitive' as const } },
+                { notes: { contains: t, mode: 'insensitive' as const } },
+              ]),
+            },
+          ],
+        },
+        take: 6,
+        orderBy: { createdAt: 'desc' },
+        include: { assignee: { select: { displayName: true } } },
+      }),
     ]);
 
     const sources: AskSourceDto[] = [];
@@ -157,9 +175,17 @@ export class AiService {
       );
     }
 
+    for (const t of tasks) {
+      sources.push({ kind: 'task', label: t.title, ref: t.id, channelId: t.channelId });
+      const due = t.dueAt ? `, due ${t.dueAt.toISOString().slice(0, 10)}` : '';
+      ctx.push(
+        `[${sources.length}] TASK "${t.title}" — ${t.status === 'DONE' ? 'done' : 'open'}${due}${t.assignee ? `, assigned to ${t.assignee.displayName}` : ''}`,
+      );
+    }
+
     if (ctx.length === 0) {
       return {
-        answer: "I couldn't find anything about that in this workspace's decisions or your channels.",
+        answer: "I couldn't find anything about that in this workspace's decisions, tasks or your channels.",
         sources: [],
       };
     }

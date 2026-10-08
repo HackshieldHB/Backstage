@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth-store';
-import { useUiStore } from '@/stores/ui-store';
+import { useUiStore, type RightPanel } from '@/stores/ui-store';
 import { useRealtime, useTypingJanitor } from '@/hooks/use-realtime';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -36,6 +36,10 @@ import { GettingStarted } from '@/components/getting-started';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ShortcutsHelp } from '@/components/shortcuts-help';
 import { Toaster } from '@/components/toaster';
+
+/** Right-panel views that are workspace-wide (not tied to the open channel), so
+ *  they can open over any main view — Tasks, Inbox, Discover… */
+const WORKSPACE_PANELS = new Set<RightPanel['kind']>(['activity', 'saved', 'threads', 'thread']);
 
 function AppShell() {
   const router = useRouter();
@@ -219,7 +223,9 @@ function AppShell() {
           )}
         </ErrorBoundary>
       </main>
-      {mainView === 'chat' && rightPanel.kind !== 'none' && container && (
+      {rightPanel.kind !== 'none' &&
+        container &&
+        (mainView === 'chat' || WORKSPACE_PANELS.has(rightPanel.kind)) && (
         <ErrorBoundary key={`right:${rightPanel.kind}`}>
           <RightPanelView
             workspaceId={workspaceId}

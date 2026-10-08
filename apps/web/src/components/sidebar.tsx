@@ -697,6 +697,8 @@ function SectionButton({
       ref={buttonRef}
       onClick={onClick}
       data-testid={testId}
+      aria-label={badge != null && badge > 0 ? `${label} (${badge})` : label}
+      aria-current={active ? 'page' : undefined}
       className={clsx(
         'relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors',
         active

@@ -365,7 +365,7 @@ describe('realtime (two-socket e2e)', () => {
       .post(`/workspaces/${workspaceId}/conversations`)
       .set(auth(alice))
       .send({ memberIds: [bob.id] })
-      .expect(201);
+      .expect(200); // DM open is idempotent: 200 whether new or existing
     const conversationId = conv.body.data.id as string;
 
     // Opening the DM subscribes both members' live sockets to its room, so bob
@@ -397,7 +397,7 @@ describe('realtime (two-socket e2e)', () => {
       .post(`/workspaces/${workspaceId}/conversations`)
       .set(auth(alice))
       .send({ memberIds: [bob.id] })
-      .expect(201);
+      .expect(200); // DM open is idempotent: 200 whether new or existing
     const conversationId = conv.body.data.id as string;
 
     // carol is not in the DM's room, so her join is ignored: no broadcast reaches alice.
