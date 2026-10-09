@@ -34,6 +34,11 @@ export const ResetPasswordSchema = z.object({
 });
 export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>;
 
+export const VerifyEmailSchema = z.object({
+  token: z.string().min(10).max(2000),
+});
+export type VerifyEmailInput = z.infer<typeof VerifyEmailSchema>;
+
 /** Public shape of a user, safe to send to any client. */
 export const UserDtoSchema = z.object({
   id: z.string(),
@@ -43,6 +48,8 @@ export const UserDtoSchema = z.object({
   isProvisional: z.boolean(),
   statusEmoji: z.string().nullable(),
   statusText: z.string().nullable(),
+  /** Whether the person has proved they own `email`. */
+  emailVerified: z.boolean().optional(),
 });
 export type UserDto = z.infer<typeof UserDtoSchema>;
 

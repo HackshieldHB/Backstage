@@ -70,6 +70,11 @@ describe('authorization (e2e attack suite)', () => {
       .expect(201);
     secretsId = secrets.body.data.id;
 
+    // Email invites need a confirmed address (as if each clicked their verification link).
+    await prisma.user.updateMany({
+      where: { id: { in: [actors.admin.id, actors.member.id, actors.guest.id] } },
+      data: { emailVerifiedAt: new Date() },
+    });
     // Bring admin/member/guest into ws1 via invites.
     for (const [name, role] of [
       ['admin', 'ADMIN'],

@@ -16,6 +16,8 @@ import {
   SignupSchema,
   TwoFactorCodeInput,
   TwoFactorCodeSchema,
+  VerifyEmailInput,
+  VerifyEmailSchema,
 } from '@backstages/shared';
 import { AuthService } from './auth.service';
 import { TwoFactorService } from './two-factor.service';
@@ -94,6 +96,24 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthUser) {
     return this.authService.getMe(user.id);
+  }
+
+  // ---------- email verification ----------
+
+  @HumanOnly()
+  @RateLimit({ limit: 3, windowSeconds: 600, bucket: 'verify-email-send' })
+  @HttpCode(200)
+  @Post('verify-email/send')
+  sendVerification(@CurrentUser() user: AuthUser) {
+    return this.authService.sendVerification(user.id);
+  }
+
+  @Public()
+  @RateLimit(AUTH_RATE_LIMIT)
+  @HttpCode(200)
+  @Post('verify-email')
+  verifyEmail(@Body(new ZodValidationPipe(VerifyEmailSchema)) body: VerifyEmailInput) {
+    return this.authService.verifyEmail(body.token);
   }
 
   // ---------- two-factor authentication (sessions only — never via API token) ----------

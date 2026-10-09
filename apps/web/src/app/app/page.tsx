@@ -16,6 +16,7 @@ import {
 import { api } from '@/lib/api';
 import { useHuddle } from '@/hooks/use-huddle';
 import { useHuddleRecording } from '@/hooks/use-huddle-recording';
+import { VerifyEmailBanner } from '@/components/verify-email-banner';
 import { WorkspaceRail } from '@/components/workspace-rail';
 import { Sidebar } from '@/components/sidebar';
 import { MainPane } from '@/components/main-pane';
@@ -188,6 +189,7 @@ function AppShell() {
       )}
       {huddle.joined && <MeetingRoom huddle={huddle} label={huddleLabel} workspaceId={workspaceId} recording={huddleRecording} />}
       <main className="flex min-w-0 flex-1 flex-col bg-surface">
+        <VerifyEmailBanner />
         <ErrorBoundary key={`${mainView}:${container?.id ?? 'none'}`}>
           {mainView === 'timeline' ? (
             <TeamTimelinePane workspaceId={workspaceId} />

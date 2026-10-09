@@ -21,6 +21,8 @@ export class SearchService {
       userId,
       workspaceId,
     );
+    // Channels other workspaces shared into this one (joined) are searchable here too.
+    const sharedIds = await this.policy.sharedChannelIdsIn(userId, workspaceId);
     const parsed = parseSearchQuery(input.q);
 
     const response: SearchResponse = {
@@ -38,15 +40,16 @@ export class SearchService {
         workspaceId,
         channelIds,
         conversationIds,
+        sharedIds,
         parsed,
         input.limit,
       );
     }
     if (wants('files')) {
-      response.files = await this.searchFiles(channelIds, conversationIds, parsed, input.limit);
+      response.files = await this.searchFiles([...channelIds, ...sharedIds], conversationIds, parsed, input.limit);
     }
     if (wants('channels') && parsed.text) {
-      response.channels = await this.searchChannels(userId, workspaceId, channelIds, parsed.text, input.limit);
+      response.channels = await this.searchChannels(userId, workspaceId, channelIds, sharedIds, parsed.text, input.limit);
     }
     if (wants('people') && parsed.text) {
       response.people = await this.searchPeople(workspaceId, parsed.text, input.limit);
@@ -130,15 +133,18 @@ export class SearchService {
     workspaceId: string,
     channelIds: string[],
     conversationIds: string[],
+    sharedIds: string[],
     parsed: ReturnType<typeof parseSearchQuery>,
     limit: number,
   ) {
-    if (channelIds.length === 0 && conversationIds.length === 0) return [];
+    if (channelIds.length === 0 && conversationIds.length === 0 && sharedIds.length === 0) return [];
+    const allChannelIds = [...channelIds, ...sharedIds];
 
     const conditions: Prisma.Sql[] = [
-      Prisma.sql`m."workspaceId" = ${workspaceId}`,
+      // This workspace's messages, plus those of channels shared into it.
+      Prisma.sql`(m."workspaceId" = ${workspaceId} OR m."channelId" = ANY(${sharedIds}))`,
       Prisma.sql`m."deletedAt" IS NULL`,
-      Prisma.sql`(m."channelId" = ANY(${channelIds}) OR m."conversationId" = ANY(${conversationIds}))`,
+      Prisma.sql`(m."channelId" = ANY(${allChannelIds}) OR m."conversationId" = ANY(${conversationIds}))`,
     ];
 
     if (parsed.text) {
@@ -149,7 +155,15 @@ export class SearchService {
     if (parsed.from) {
       const users = await this.prisma.user.findMany({
         where: {
-          workspaceMemberships: { some: { workspaceId } },
+          AND: [
+            {
+              OR: [
+                { workspaceMemberships: { some: { workspaceId } } },
+                // Partners of a shared channel the caller can read.
+                { channelMemberships: { some: { channelId: { in: allChannelIds } } } },
+              ],
+            },
+          ],
           OR: [
             { email: { equals: parsed.from, mode: 'insensitive' } },
             { displayName: { contains: parsed.from, mode: 'insensitive' } },
@@ -163,7 +177,10 @@ export class SearchService {
     }
     if (parsed.in) {
       const channel = await this.prisma.channel.findFirst({
-        where: { workspaceId, name: parsed.in, id: { in: channelIds } },
+        where: {
+          name: parsed.in,
+          OR: [{ workspaceId, id: { in: channelIds } }, { id: { in: sharedIds } }],
+        },
         select: { id: true },
       });
       if (!channel) return []; // unknown or inaccessible channel: empty, never leak
@@ -230,18 +247,25 @@ export class SearchService {
     userId: string,
     workspaceId: string,
     memberChannelIds: string[],
+    sharedIds: string[],
     text: string,
     limit: number,
   ) {
     const member = await this.policy.requireWorkspaceMember(userId, workspaceId);
     const rows = await this.prisma.channel.findMany({
       where: {
-        workspaceId,
         name: { contains: text, mode: 'insensitive' },
-        // Guests search only their channels; others also see public ones.
-        ...(member.role === 'GUEST'
-          ? { id: { in: memberChannelIds } }
-          : { OR: [{ isPrivate: false }, { id: { in: memberChannelIds } }] }),
+        OR: [
+          {
+            workspaceId,
+            // Guests search only their channels; others also see public ones.
+            ...(member.role === 'GUEST'
+              ? { id: { in: memberChannelIds } }
+              : { OR: [{ isPrivate: false }, { id: { in: memberChannelIds } }] }),
+          },
+          // Joined channels shared into this workspace.
+          { id: { in: sharedIds } },
+        ],
       },
       include: { _count: { select: { members: true } } },
       take: limit,
@@ -257,7 +281,7 @@ export class SearchService {
       isArchived: c.isArchived,
       isDefault: c.isDefault,
       memberCount: c._count.members,
-      isMember: memberChannelIds.includes(c.id),
+      isMember: memberChannelIds.includes(c.id) || sharedIds.includes(c.id),
     }));
   }
 

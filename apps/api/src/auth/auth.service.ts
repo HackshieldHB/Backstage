@@ -30,6 +30,7 @@ export function toUserDto(user: User): UserDto {
     isProvisional: user.isProvisional,
     statusEmoji: user.statusEmoji,
     statusText: user.statusText,
+    emailVerified: !!user.emailVerifiedAt,
   };
 }
 
@@ -73,6 +74,8 @@ export class AuthService {
           data: { email: input.email, passwordHash, displayName: input.displayName },
         });
 
+    // Fire-and-forget: a mail outage must not block signup.
+    void this.sendVerification(user.id).catch(() => undefined);
     return this.buildAuthResponse(user);
   }
 
@@ -157,10 +160,44 @@ export class AuthService {
         where: { id: record.id },
         data: { usedAt: new Date() },
       }),
-      this.prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
+      // The reset link went to their inbox, so this also proves they own the address.
+      this.prisma.user.update({
+        where: { id: record.userId },
+        data: { passwordHash, emailVerifiedAt: new Date() },
+      }),
     ]);
     // A password reset invalidates every existing session.
     await this.tokenService.revokeAllForUser(record.userId);
+  }
+
+  /**
+   * Email a link that proves the person owns their address. No-op when already
+   * verified (and for bots, whose addresses are unroutable).
+   */
+  async sendVerification(userId: string): Promise<{ sent: boolean }> {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (user.emailVerifiedAt || user.isBot) return { sent: false };
+    const token = await this.tokenService.signEmailVerification(user);
+    const web = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+    await this.emailService.send({
+      to: user.email,
+      subject: 'Confirm your email for Backstages',
+      body: `Confirm this is your address (link valid 24 hours): ${web}/verify-email#token=${encodeURIComponent(token)}`,
+    });
+    return { sent: true };
+  }
+
+  async verifyEmail(token: string): Promise<UserDto> {
+    const { userId, email } = await this.tokenService.verifyEmailToken(token);
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    // The link only counts for the address it was sent to.
+    if (!user || user.email.toLowerCase() !== email.toLowerCase()) {
+      throw new UnauthorizedException('This verification link is invalid or has expired');
+    }
+    const updated = user.emailVerifiedAt
+      ? user
+      : await this.prisma.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } });
+    return toUserDto(updated);
   }
 
   async getMe(userId: string): Promise<UserDto> {

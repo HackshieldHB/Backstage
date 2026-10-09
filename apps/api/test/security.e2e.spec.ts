@@ -9,6 +9,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { TxtResolver } from '../src/security/domains.service';
 import { DataGovernanceService } from '../src/security/data-governance.service';
 import { base32Decode, totp } from '../src/auth/totp';
+import { TokenService } from '../src/auth/token.service';
 
 describe('enterprise security (e2e)', () => {
   let app: INestApplication;
@@ -296,6 +297,71 @@ describe('enterprise security (e2e)', () => {
       const login = await api().post('/auth/login').send({ email: tfa.email, password: 'password123!' }).expect(200);
       expect(login.body.data.accessToken).toBeTruthy();
       expect(await prisma.recoveryCode.count({ where: { userId: tfa.id } })).toBe(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+
+  describe('email verification', () => {
+    let fresh: Actor;
+    beforeAll(async () => {
+      fresh = await signup('fresh');
+    });
+
+    it('new accounts start unverified and cannot take an email-addressed invite', async () => {
+      const me = await api().get('/auth/me').set(auth(fresh)).expect(200);
+      expect(me.body.data.emailVerified).toBe(false);
+      const inv = await api()
+        .post(`/workspaces/${workspaceId}/invites`)
+        .set(auth(owner))
+        .send({ email: fresh.email })
+        .expect(201);
+      const res = await api().post('/invites/accept').set(auth(fresh)).send({ token: inv.body.data.token }).expect(403);
+      expect(res.body.error.message).toMatch(/Confirm your email/);
+      // Link invites (no address) still work for unverified people.
+      const link = await api().post(`/workspaces/${workspaceId}/invites`).set(auth(owner)).send({}).expect(201);
+      expect(link.body.data.token).toBeTruthy();
+    });
+
+    it('the emailed link verifies only the address it was sent to', async () => {
+      const tokens = app.get(TokenService);
+      await api().post('/auth/verify-email/send').set(auth(fresh)).expect(200);
+      await api().post('/auth/verify-email').send({ token: 'not-a-real-token-at-all' }).expect(401);
+      // A session token is not a verification token.
+      await api().post('/auth/verify-email').send({ token: fresh.token }).expect(401);
+      const stale = await tokens.signEmailVerification({ id: fresh.id, email: `old-${run}@test.local` });
+      await api().post('/auth/verify-email').send({ token: stale }).expect(401);
+
+      const good = await tokens.signEmailVerification({ id: fresh.id, email: fresh.email });
+      const res = await api().post('/auth/verify-email').send({ token: good }).expect(200);
+      expect(res.body.data.emailVerified).toBe(true);
+      // ...and the verification token can't be used as a session.
+      await api().get('/auth/me').set({ Authorization: `Bearer ${good}` }).expect(401);
+
+      const inv = await api()
+        .post(`/workspaces/${workspaceId}/invites`)
+        .set(auth(owner))
+        .send({ email: fresh.email })
+        .expect(201);
+      await api().post('/invites/accept').set(auth(fresh)).send({ token: inv.body.data.token }).expect(200);
+      const again = await api().post('/auth/verify-email/send').set(auth(fresh)).expect(200);
+      expect(again.body.data).toEqual({ sent: false });
+    });
+
+    it('a password reset also proves the mailbox', async () => {
+      const other = await signup('resetter');
+      await api().post('/auth/forgot-password').send({ email: other.email }).expect(200);
+      // Read the raw token the way the email would carry it: issue one directly.
+      const raw = `reset-${run}-${Date.now()}`;
+      await prisma.passwordResetToken.create({
+        data: {
+          userId: other.id,
+          tokenHash: createHash('sha256').update(raw).digest('hex'),
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+      await api().post('/auth/reset-password').send({ token: raw, password: 'password456!' }).expect(200);
+      expect((await prisma.user.findUniqueOrThrow({ where: { id: other.id } })).emailVerifiedAt).not.toBeNull();
     });
   });
 

@@ -105,6 +105,26 @@ export class PolicyService {
   }
 
   /**
+   * Channels another workspace shared into `workspaceId` that the user has
+   * joined (and may still use) — e.g. so they are searchable from there.
+   */
+  async sharedChannelIdsIn(userId: string, workspaceId: string): Promise<string[]> {
+    const member = await this.requireWorkspaceMember(userId, workspaceId);
+    if (member.role === 'GUEST') return [];
+    const rows = await this.prisma.channelMember.findMany({
+      where: {
+        userId,
+        channel: {
+          workspaceId: { not: workspaceId },
+          shares: { some: { guestWorkspaceId: workspaceId, acceptedAt: { not: null }, revokedAt: null } },
+        },
+      },
+      select: { channelId: true },
+    });
+    return rows.map((r) => r.channelId);
+  }
+
+  /**
    * Admin-level access to a channel: role is verified against the channel's OWN
    * workspace (an admin of another workspace has no power here).
    */

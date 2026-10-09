@@ -296,6 +296,17 @@ export class SsoService {
         data: { isProvisional: false, displayName: claimedName(claims) ?? user.displayName },
       });
     }
+    // The IdP vouching for this exact address on a verified domain proves ownership.
+    const asserted = claimedEmail(claims);
+    if (
+      !user.emailVerifiedAt &&
+      asserted === user.email.toLowerCase() &&
+      claims.email_verified !== false &&
+      claims.email_verified !== 'false' &&
+      (await this.domains.isVerifiedFor(conn.workspaceId, asserted))
+    ) {
+      user = await this.prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
+    }
     return user;
   }
 

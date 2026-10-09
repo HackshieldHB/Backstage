@@ -205,6 +205,37 @@ describe('shared channels across workspaces (e2e)', () => {
     await api().get(`/attachments/${up.body.data.id}`).set(auth(hostMember)).expect(200);
   });
 
+  it('is searchable from both workspaces, and only by people in it', async () => {
+    await post(hostMember, `quokka-${run} from the host`).expect(201);
+    const fromGuest = await api()
+      .get(`/workspaces/${guestWs}/search?q=quokka-${run}`)
+      .set(auth(guestMember))
+      .expect(200);
+    expect(fromGuest.body.data.messages.map((m: { contentText: string }) => m.contentText)).toEqual([
+      `quokka-${run} from the host`,
+    ]);
+    const byChannel = await api()
+      .get(`/workspaces/${guestWs}/search?q=${encodeURIComponent(`quokka-${run} in:shared-${run}`)}`)
+      .set(auth(guestMember))
+      .expect(200);
+    expect(byChannel.body.data.messages).toHaveLength(1);
+    const channels = await api().get(`/workspaces/${guestWs}/search?q=shared-${run}&type=channels`).set(auth(guestMember)).expect(200);
+    expect(channels.body.data.channels.map((c: { id: string }) => c.id)).toEqual([channelId]);
+
+    // Host members find the partner's messages, including by author.
+    const fromHost = await api()
+      .get(`/workspaces/${hostWs}/search?q=${encodeURIComponent('hosts from:guestmember')}`)
+      .set(auth(hostMember))
+      .expect(200);
+    expect(fromHost.body.data.messages.map((m: { contentText: string }) => m.contentText)).toContain(`hello hosts ${run}`);
+
+    // Partner admins who never joined, and partner guests, find nothing.
+    for (const who of [guestAdmin, guestGuest]) {
+      const res = await api().get(`/workspaces/${guestWs}/search?q=quokka-${run}`).set(auth(who)).expect(200);
+      expect(res.body.data.messages).toEqual([]);
+    }
+  });
+
   it("partners never reach the host's admin, integration or membership tools", async () => {
     await api().patch(`/channels/${channelId}`).set(auth(guestMember)).send({ topic: 'hijacked' }).expect(404);
     await api().post(`/channels/${channelId}/members`).set(auth(guestMember)).send({ userId: guestAdmin.id }).expect(404);

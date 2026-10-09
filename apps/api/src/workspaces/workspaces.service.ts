@@ -230,6 +230,11 @@ export class WorkspacesService {
     if (invite.email && invite.email.toLowerCase() !== user.email.toLowerCase()) {
       throw new ForbiddenException('This invite was issued for a different email address');
     }
+    // An invite addressed to a person is only theirs once they've proved they own
+    // that address — otherwise anyone could sign up with it and take the seat.
+    if (invite.email && !user.emailVerifiedAt) {
+      throw new ForbiddenException('Confirm your email address first — check your inbox for the link');
+    }
     if (invite.email && invite.usedAt) {
       throw new UnauthorizedException('Invite already used');
     }

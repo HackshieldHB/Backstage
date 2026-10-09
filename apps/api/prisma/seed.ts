@@ -108,7 +108,8 @@ async function main() {
   for (const def of userDefs) {
     users.push(
       await prisma.user.create({
-        data: { email: def.email, displayName: def.displayName, passwordHash },
+        // Demo accounts are treated as confirmed so the app does not nag about email.
+        data: { email: def.email, displayName: def.displayName, passwordHash, emailVerifiedAt: new Date() },
       }),
     );
   }

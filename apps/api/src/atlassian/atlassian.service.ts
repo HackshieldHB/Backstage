@@ -238,6 +238,15 @@ export class AtlassianService {
         },
       });
     }
+    // Atlassian verified this exact address, so the person owns it.
+    if (
+      !user.emailVerifiedAt &&
+      profile.email &&
+      profile.emailVerified &&
+      profile.email.toLowerCase() === user.email.toLowerCase()
+    ) {
+      user = await this.prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
+    }
 
     await this.prisma.atlassianAccountLink.upsert({
       where: { userId: user.id },

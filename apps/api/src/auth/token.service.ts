@@ -10,6 +10,7 @@ export function sha256(value: string): string {
 }
 
 const mfaSecret = () => `${process.env.JWT_ACCESS_SECRET ?? ''}:mfa-step`;
+const verifyEmailSecret = () => `${process.env.JWT_ACCESS_SECRET ?? ''}:verify-email`;
 
 @Injectable()
 export class TokenService {
@@ -42,6 +43,29 @@ export class TokenService {
       return { userId: payload.sub, jti: payload.jti };
     } catch {
       throw new UnauthorizedException('Your sign-in expired — enter your password again');
+    }
+  }
+
+  /**
+   * Email-verification link token (24 h). Bound to the address it was sent to,
+   * so it stops working if the account's email changes.
+   */
+  async signEmailVerification(user: { id: string; email: string }): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: user.id, email: user.email, typ: 'verify-email' },
+      { secret: verifyEmailSecret(), expiresIn: '24h' },
+    );
+  }
+
+  async verifyEmailToken(token: string): Promise<{ userId: string; email: string }> {
+    try {
+      const payload = await this.jwtService.verifyAsync<{ sub: string; email: string; typ?: string }>(token, {
+        secret: verifyEmailSecret(),
+      });
+      if (payload.typ !== 'verify-email') throw new Error('wrong token type');
+      return { userId: payload.sub, email: payload.email };
+    } catch {
+      throw new UnauthorizedException('This verification link is invalid or has expired');
     }
   }
 
