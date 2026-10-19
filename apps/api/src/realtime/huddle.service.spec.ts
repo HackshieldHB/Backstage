@@ -355,4 +355,73 @@ describe('HuddleService', () => {
       expect(svc.getSettings(B).recordingBy).toBeNull();
     });
   });
+
+  describe('restart survival (snapshot / restore)', () => {
+    function liveMeeting(svc: HuddleService) {
+      svc.join(A, 'host', 's1');
+      svc.join(A, 'u2', 's2');
+      svc.setRole(A, 'u2', 'cohost');
+      svc.setNotes(A, 'decisions so far');
+      svc.createPoll(A, { id: 'p1', question: 'Ship?', options: ['yes', 'no'], votes: { u2: 0 }, createdBy: 'host', closed: false });
+      svc.whiteboardCreate(A, { id: 'w1', tool: 'pen' } as never, 'u2');
+      svc.setSettings(A, { waitingRoomEnabled: true, locked: false });
+      svc.setRecording(A, 'host');
+      svc.appendTranscript(A, { userId: 'host', name: 'Host', text: 'hello', at: 1, kind: 'caption' });
+      return svc.snapshot(A)!;
+    }
+
+    it('snapshots a live room and restores it into a fresh service', () => {
+      const snap = liveMeeting(svc);
+      expect(snap.roles).toEqual({
+        host: { role: 'host', canAnnotate: true },
+        u2: { role: 'cohost', canAnnotate: true },
+      });
+      // Round-trip through JSON, as Redis does.
+      const fresh = new HuddleService();
+      expect(fresh.restore(A, JSON.parse(JSON.stringify(snap)))).toBe(true);
+      expect(fresh.getNotes(A)).toBe('decisions so far');
+      expect(fresh.getPoll(A)?.votes).toEqual({ u2: 0 });
+      expect(fresh.whiteboardShapes(A).map((x) => x.id)).toEqual(['w1']);
+      expect(fresh.whiteboardOwner(A, 'w1')).toBe('u2');
+      expect(fresh.getSettings(A)).toMatchObject({ waitingRoomEnabled: true, recordingBy: null });
+      expect(fresh.takeTranscript(A).map((l) => l.text)).toEqual(['hello']);
+    });
+
+    it('gives returning members their old roles and lets them skip the gate', () => {
+      const fresh = new HuddleService();
+      fresh.restore(A, JSON.parse(JSON.stringify(liveMeeting(svc))));
+      expect(fresh.wasMember(A, 'u2')).toBe(true);
+      expect(fresh.wasMember(A, 'stranger')).toBe(false);
+      fresh.join(A, 'host', 'n1');
+      fresh.join(A, 'u2', 'n2');
+      expect(fresh.roleOf(A, 'host')).toBe('host');
+      expect(fresh.roleOf(A, 'u2')).toBe('cohost');
+      expect(fresh.wasMember(A, 'u2')).toBe(false); // consumed on re-join
+    });
+
+    it('never leaves a restored meeting without a host', () => {
+      const fresh = new HuddleService();
+      fresh.restore(A, JSON.parse(JSON.stringify(liveMeeting(svc))));
+      fresh.join(A, 'u2', 'n2'); // the old host isn't back yet
+      expect(fresh.roleOf(A, 'u2')).toBe('host');
+      fresh.join(A, 'host', 'n1');
+      expect(fresh.roleOf(A, 'host')).toBe('cohost');
+    });
+
+    it('does not restore over a room that is already live, and forgets on room cleanup', () => {
+      const snap = liveMeeting(svc);
+      expect(svc.restore(A, snap)).toBe(false);
+      const fresh = new HuddleService();
+      fresh.restore(A, snap);
+      fresh.join(A, 'x', 's');
+      fresh.leave(A, 'x', 's'); // room empties → restored roles dropped
+      expect(fresh.wasMember(A, 'u2')).toBe(false);
+      expect(fresh.snapshot(A)).toBeNull();
+    });
+
+    it('rejects an incompatible snapshot version', () => {
+      const fresh = new HuddleService();
+      expect(fresh.restore(A, { v: 2 } as never)).toBe(false);
+    });
+  });
 });

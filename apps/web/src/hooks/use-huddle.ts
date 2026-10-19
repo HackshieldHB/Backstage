@@ -31,6 +31,7 @@ import {
 } from '@backstages/shared';
 import { getSocket } from '@/lib/socket';
 import { api } from '@/lib/api';
+import { track } from '@/lib/usage';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { BackgroundBlurProcessor, backgroundBlurSupported } from '@/lib/background-blur';
@@ -125,8 +126,9 @@ interface SpeechRecognitionLike {
  *   NEXT_PUBLIC_TURN_USERNAME / NEXT_PUBLIC_TURN_CREDENTIAL
  * Without TURN, STUN-only connectivity can fail on symmetric-NAT / locked-down
  * corporate networks. NOTE: NEXT_PUBLIC_* values are baked into the client bundle,
- * so use short-lived (ephemeral) TURN credentials, ideally minted per session by
- * an API endpoint — never long-lived static secrets here.
+ * so prefer configuring the relay on the API (TURN_URLS + TURN_SECRET, or
+ * Cloudflare TURN), which mints short-lived credentials per user — see
+ * refreshIceServers(). This env config is only the starting/fallback value.
  */
 function buildIceServers(): RTCIceServer[] {
   const split = (v?: string) => v?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
@@ -159,7 +161,32 @@ function buildIceServers(): RTCIceServer[] {
   return servers;
 }
 
-const ICE: RTCConfiguration = { iceServers: buildIceServers() };
+/**
+ * Live ICE config. Starts from the build-time env (above) and is replaced by
+ * short-lived credentials from the API (`GET /huddles/ice-servers`), which keeps
+ * relay secrets out of the bundle. Peers created after a refresh use the new
+ * credentials; existing connections keep their allocation.
+ */
+let ICE: RTCConfiguration = { iceServers: buildIceServers() };
+let iceExpiresAt = 0;
+
+/** Fetch fresh ICE servers if ours expire within 10 min. Never throws, never
+ *  blocks for more than ~3 s (a slow API must not hold up joining). */
+async function refreshIceServers(): Promise<void> {
+  if (Date.now() < iceExpiresAt - 10 * 60_000) return;
+  try {
+    const cfg = await Promise.race([
+      api<{ iceServers: RTCIceServer[]; ttlSeconds: number }>('GET', '/huddles/ice-servers'),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+    ]);
+    if (Array.isArray(cfg.iceServers) && cfg.iceServers.length) {
+      ICE = { iceServers: cfg.iceServers };
+      iceExpiresAt = Date.now() + Math.max(600, cfg.ttlSeconds) * 1000;
+    }
+  } catch {
+    /* keep the current (build-time or previous) servers */
+  }
+}
 
 /** Best-effort: raise the screen-share encoding ceiling so a large, high-motion
  *  screen stays sharp and fluid instead of being throttled to a low bitrate.
@@ -668,6 +695,13 @@ export function useHuddle(): HuddleController {
   useEffect(() => {
     mutedRef.current = muted;
   }, [muted]);
+  // Keep relay credentials fresh through a long meeting, so peers that join
+  // late still get valid TURN credentials (a no-op until they near expiry).
+  useEffect(() => {
+    if (!joined) return;
+    const id = window.setInterval(() => void refreshIceServers(), 5 * 60_000);
+    return () => window.clearInterval(id);
+  }, [joined]);
   useEffect(() => {
     handRaisedRef.current = handRaised;
   }, [handRaised]);
@@ -884,7 +918,11 @@ export function useHuddle(): HuddleController {
         leaveInternal();
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Fetch relay credentials while the mic prompt is up, before any peer exists.
+        const [stream] = await Promise.all([
+          navigator.mediaDevices.getUserMedia({ audio: true }),
+          refreshIceServers(),
+        ]);
         localStream.current = stream;
         joinedRef.current = true;
         activeTargetRef.current = target;
@@ -897,6 +935,7 @@ export function useHuddle(): HuddleController {
         stream.getAudioTracks().forEach((t) => (t.enabled = !startMuted));
         setMuted(startMuted);
         getSocket().emit(CLIENT_EVENTS.HUDDLE_JOIN, bodyFor(target));
+        track('huddle:join');
       } catch {
         useUiStore
           .getState()

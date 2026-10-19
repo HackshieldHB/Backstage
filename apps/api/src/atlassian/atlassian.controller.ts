@@ -65,6 +65,17 @@ const CreateChannelIssueSchema = z.object({
   priority: z.enum(['Highest', 'High', 'Medium', 'Low', 'Lowest']).optional(),
 });
 
+const ATL_COOKIE = 'bs_atl_browser';
+const ATL_COOKIE_PATH = '/atlassian/callback';
+
+function readCookie(header: string | undefined, name: string): string | undefined {
+  for (const part of (header ?? '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return undefined;
+}
+
 @Controller()
 export class AtlassianController {
   private readonly atlassianLogger = new Logger(AtlassianController.name);
@@ -116,7 +127,9 @@ export class AtlassianController {
       return res.redirect(`${web}/login?error=atlassian-denied`);
     }
     try {
-      const { redirect } = await this.atlassian.handleCallback(code, state);
+      const browserSecret = readCookie(res.req.headers.cookie, ATL_COOKIE);
+      res.clearCookie(ATL_COOKIE, { path: ATL_COOKIE_PATH });
+      const { redirect } = await this.atlassian.handleCallback(code, state, browserSecret);
       res.redirect(redirect);
     } catch (err) {
       // Never dump a raw API error page at users mid-login: log it, bounce home.
@@ -131,7 +144,15 @@ export class AtlassianController {
   @Public()
   @Get('auth/atlassian')
   async ssoStart(@Res() res: Response) {
-    const { url } = await this.atlassian.ssoUrl();
+    const { url, browserSecret } = await this.atlassian.ssoUrl();
+    // Binds the login to this browser; checked when Atlassian redirects back.
+    res.cookie(ATL_COOKIE, browserSecret, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: (process.env.PUBLIC_API_URL ?? '').startsWith('https://'),
+      path: ATL_COOKIE_PATH,
+      maxAge: 10 * 60 * 1000,
+    });
     res.redirect(url);
   }
 

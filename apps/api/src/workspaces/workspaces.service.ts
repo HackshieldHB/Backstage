@@ -12,7 +12,9 @@ import {
   SOCKET_EVENTS,
   UpdateMemberRoleInput,
   UpdateWorkspaceInput,
+  type MyInvitationDto,
 } from '@backstages/shared';
+import type { WorkspaceInvite } from '@prisma/client';
 import { RealtimeService, roomForChannel, roomForWorkspace } from '../realtime/realtime.service';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,8 +24,20 @@ import { EmailService } from '../email/email.service';
 import { WorkflowEvents } from '../workflows/workflow-events';
 import { sha256 } from '../auth/token.service';
 import { toUserDto } from '../auth/auth.service';
+import { textDoc } from '../workflows/workflow-utils';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/** Posted in #general when a workspace is created. */
+const WELCOME_TEXT = [
+  '👋 Welcome to your new workspace!',
+  'A few things to try:',
+  '• Invite your team with the invite button next to the workspace name.',
+  '• Start a huddle from any channel or DM for voice, video and screen sharing.',
+  '• Plan meetings in Calendar — everyone invited gets a reminder before it starts.',
+  '• Turn messages into Tasks, and see your day in My day.',
+  '• Press Ctrl/⌘ K to jump anywhere. Found a bug or have an idea? Use “Send feedback”.',
+].join('\n');
 
 @Injectable()
 export class WorkspacesService {
@@ -73,6 +87,18 @@ export class WorkspacesService {
         },
       });
       await tx.channelMember.create({ data: { channelId: general.id, userId } });
+      // A short orientation so a brand-new workspace isn't a blank page.
+      await tx.message.create({
+        data: {
+          workspaceId: workspace.id,
+          channelId: general.id,
+          userId: null,
+          kind: 'INTEGRATION',
+          appName: 'Backstages',
+          contentText: WELCOME_TEXT,
+          contentJson: textDoc(WELCOME_TEXT),
+        },
+      });
       return { workspace, generalId: general.id };
     });
     await this.subscribeToWorkspace(userId, created.workspace.id, created.generalId);
@@ -223,6 +249,56 @@ export class WorkspacesService {
     const invite = await this.prisma.workspaceInvite.findUnique({
       where: { tokenHash: sha256(rawToken) },
     });
+    return this.acceptInviteRecord(userId, invite);
+  }
+
+  /**
+   * Invitations addressed to the caller's email that they can still accept
+   * (shown on /welcome as "Join an existing workspace"). Only for a verified
+   * address — the same rule acceptance enforces.
+   */
+  async myInvitations(userId: string): Promise<MyInvitationDto[]> {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (!user.emailVerifiedAt || user.isBot) return [];
+    const invites = await this.prisma.workspaceInvite.findMany({
+      where: {
+        email: { equals: user.email, mode: 'insensitive' },
+        revokedAt: null,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+        workspace: { members: { none: { userId } } },
+      },
+      include: {
+        workspace: { select: { id: true, name: true, _count: { select: { members: { where: { deactivatedAt: null } } } } } },
+        createdBy: { select: { displayName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    // One entry per workspace (the newest invite wins).
+    const seen = new Set<string>();
+    return invites
+      .filter((i) => (seen.has(i.workspaceId) ? false : (seen.add(i.workspaceId), true)))
+      .map((i) => ({
+        id: i.id,
+        workspace: { id: i.workspace.id, name: i.workspace.name, memberCount: i.workspace._count.members },
+        invitedBy: i.createdBy.displayName,
+        role: i.role,
+        expiresAt: i.expiresAt.toISOString(),
+      }));
+  }
+
+  /** Accept an invitation addressed to the caller (no link needed — it's theirs). */
+  async acceptMyInvitation(userId: string, inviteId: string) {
+    const invite = await this.prisma.workspaceInvite.findUnique({ where: { id: inviteId } });
+    // Only invitations addressed to someone; link invites need the link itself.
+    if (!invite?.email) throw new NotFoundException('Invitation not found');
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (invite.email.toLowerCase() !== user.email.toLowerCase()) throw new NotFoundException('Invitation not found');
+    return this.acceptInviteRecord(userId, invite);
+  }
+
+  private async acceptInviteRecord(userId: string, invite: WorkspaceInvite | null) {
     if (!invite || invite.revokedAt || invite.expiresAt < new Date()) {
       throw new UnauthorizedException('Invalid or expired invite');
     }

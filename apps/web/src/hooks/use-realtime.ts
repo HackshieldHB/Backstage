@@ -141,8 +141,6 @@ export function useRealtime(workspaceId: string | null) {
 
     const onNotification = (p: NotificationNewPayload) => {
       qc.invalidateQueries({ queryKey: keys.notifications });
-      if (useUiStore.getState().notificationsMuted) return;
-
       const pl = (p.payload ?? {}) as {
         source?: string;
         action?: string;
@@ -150,7 +148,16 @@ export function useRealtime(workspaceId: string | null) {
         title?: string;
         direction?: string;
         text?: string;
+        scheduledHuddleId?: string;
       };
+      // A meeting was created/changed/answered — refresh calendars and banners.
+      const meetingId = pl.source === 'scheduled-huddle' ? pl.scheduledHuddleId : undefined;
+      if (pl.source === 'scheduled-huddle') {
+        qc.invalidateQueries({ queryKey: ['scheduled-huddles'] });
+        qc.invalidateQueries({ queryKey: ['meetings'] });
+      }
+      if (useUiStore.getState().notificationsMuted) return;
+
       const title =
         taskOrReminderText(pl, p.actor?.displayName) ??
         (pl.action === 'created' && pl.source === 'jira'
@@ -184,6 +191,7 @@ export function useRealtime(workspaceId: string | null) {
         const n = new Notification(title, { tag: p.id });
         n.onclick = () => {
           window.focus();
+          if (meetingId) useUiStore.getState().setMeetingDetailId(meetingId);
           n.close();
         };
       }

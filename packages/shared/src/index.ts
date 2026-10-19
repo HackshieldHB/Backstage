@@ -32,4 +32,6 @@ export * from './schemas/my-day';
 export * from './schemas/sidebar';
 export * from './schemas/atlassian-overview';
 export * from './schemas/security';
+export * from './schemas/feedback';
 export * from './socket';
+export * from './meeting-notice';

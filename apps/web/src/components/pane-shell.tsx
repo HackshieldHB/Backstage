@@ -26,7 +26,7 @@ export function PaneShell({
 }) {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-surface">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
       <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-5">
         <button
           onClick={() => toggleSidebar(true)}

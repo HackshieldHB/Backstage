@@ -12,7 +12,8 @@ async function signup(page: Page, name: string) {
   await page.getByTestId('signup-email').fill(email);
   await page.getByTestId('signup-password').fill('password123!');
   await page.getByRole('button', { name: /create account/i }).click();
-  await page.waitForURL(/\/app/);
+  // New accounts go through /welcome (create or join a workspace) first.
+  await page.waitForURL(/\/welcome/);
   return email;
 }
 

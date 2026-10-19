@@ -54,6 +54,18 @@ export class RealtimeService {
     else if (container.conversationId) this.emitToConversation(container.conversationId, event, payload);
   }
 
+  /** True when the user has at least one open socket on any instance. Errs on
+   *  "not connected" if the server isn't bound or the adapter can't answer. */
+  async isUserConnected(userId: string): Promise<boolean> {
+    if (!this.server) return false;
+    try {
+      const sockets = await this.server.in(roomForUser(userId)).fetchSockets();
+      return sockets.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
   /** Subscribes every open socket of a user to a room (e.g. after joining a channel). */
   async subscribeUserToRoom(userId: string, room: string) {
     await this.io().in(roomForUser(userId)).socketsJoin(room);

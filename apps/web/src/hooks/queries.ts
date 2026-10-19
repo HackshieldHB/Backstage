@@ -61,7 +61,10 @@ import type {
   RecommendationFeedbackInput,
   HuddleRecapDto,
   ScheduledHuddleDto,
+  ScheduledHuddleDetailDto,
   ScheduleHuddleInput,
+  UpdateScheduledHuddleInput,
+  MeetingResponse,
   TaskDto,
   CreateTaskInput,
   UpdateTaskInput,
@@ -434,6 +437,16 @@ export interface WorkspaceAnalytics {
   activeUsers7d: number;
   messagesByDay: { date: string; count: number }[];
   topChannels: { name: string; count: number }[];
+  /** Feature usage, last 30 days (count + distinct people). */
+  featureUsage?: import('@backstages/shared').FeatureUsageDto[];
+}
+
+export function useFeedbackList(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['feedback', workspaceId],
+    queryFn: () => api<import('@backstages/shared').FeedbackDto[]>('GET', `/workspaces/${workspaceId}/feedback`),
+    enabled: enabled && !!workspaceId,
+  });
 }
 export function useAnalytics(workspaceId: string, enabled = true) {
   return useQuery({
@@ -557,20 +570,128 @@ export function useScheduledHuddles(container: Container | null) {
   });
 }
 
-export function useScheduleHuddle(container: Container) {
+/** Every cached meeting list (per channel/DM, calendar ranges, details) — a
+ *  change to one meeting can show up in any of them. */
+function invalidateMeetings(qc: ReturnType<typeof useQueryClient>) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ['scheduled-huddles'] }),
+    qc.invalidateQueries({ queryKey: ['meetings'] }),
+  ]);
+}
+
+export function useScheduleHuddle(container: Container | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: ScheduleHuddleInput) =>
-      api<ScheduledHuddleDto>('POST', `${containerPath(container)}/scheduled-huddles`, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['scheduled-huddles', container.id] }),
+    // The target can also be passed per call (the calendar picks it in the dialog).
+    mutationFn: ({ target, ...input }: ScheduleHuddleInput & { target?: Container }) => {
+      const where = target ?? container;
+      if (!where) throw new Error('Pick where the meeting happens');
+      return api<ScheduledHuddleDto>('POST', `${containerPath(where)}/scheduled-huddles`, input);
+    },
+    onSuccess: () => invalidateMeetings(qc),
   });
 }
 
-export function useCancelScheduledHuddle(container: Container) {
+export function useCancelScheduledHuddle(_container?: Container) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api<{ ok: boolean }>('DELETE', `/scheduled-huddles/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['scheduled-huddles', container.id] }),
+    mutationFn: (args: string | { id: string; scope?: 'series' | 'occurrence' }) => {
+      const { id, scope } = typeof args === 'string' ? { id: args, scope: undefined } : args;
+      return api<{ ok: boolean }>('DELETE', `/scheduled-huddles/${id}${scope === 'occurrence' ? '?scope=occurrence' : ''}`);
+    },
+    onSuccess: () => invalidateMeetings(qc),
+  });
+}
+
+/** Meetings overlapping [from, to) across the workspace (calendar view). */
+export function useCalendarMeetings(workspaceId: string, from: Date, to: Date) {
+  const fromIso = from.toISOString();
+  const toIso = to.toISOString();
+  return useQuery({
+    queryKey: ['meetings', 'range', workspaceId, fromIso, toIso],
+    queryFn: () =>
+      api<ScheduledHuddleDto[]>(
+        'GET',
+        `/workspaces/${workspaceId}/scheduled-huddles?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`,
+      ),
+    enabled: !!workspaceId,
+    refetchInterval: 60000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+// ---------- calendar sharing ----------
+
+export function useCalendarSharing(workspaceId: string) {
+  return useQuery({
+    queryKey: ['calendar-sharing', workspaceId],
+    queryFn: () => api<import('@backstages/shared').CalendarSharingDto>('GET', `/workspaces/${workspaceId}/calendar-sharing`),
+    enabled: !!workspaceId,
+  });
+}
+
+export function useSetCalendarSharing(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (visibility: import('@backstages/shared').CalendarVisibility) =>
+      api<import('@backstages/shared').CalendarSharingDto>('PUT', `/workspaces/${workspaceId}/calendar-sharing`, { visibility }),
+    onSuccess: (res) => qc.setQueryData(['calendar-sharing', workspaceId], res),
+  });
+}
+
+/** Teammates who share their calendar with the workspace. */
+export function useSharedCalendarPeople(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['shared-calendars', workspaceId],
+    queryFn: () =>
+      api<import('@backstages/shared').SharedCalendarPersonDto[]>('GET', `/workspaces/${workspaceId}/shared-calendars`),
+    enabled: enabled && !!workspaceId,
+    staleTime: 60_000,
+  });
+}
+
+/** Up to 10 people's calendars over [from, to), as the server lets this viewer see them. */
+export function usePeopleCalendars(workspaceId: string, userIds: string[], from: Date, to: Date) {
+  const ids = [...userIds].sort().slice(0, 10);
+  const fromIso = from.toISOString();
+  const toIso = to.toISOString();
+  return useQuery({
+    queryKey: ['meetings', 'people', workspaceId, ids.join(','), fromIso, toIso],
+    queryFn: () =>
+      api<import('@backstages/shared').PersonCalendarDto[]>(
+        'GET',
+        `/workspaces/${workspaceId}/people-calendars?users=${ids.map(encodeURIComponent).join(',')}&from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`,
+      ),
+    enabled: !!workspaceId && ids.length > 0 && to > from,
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useMeetingDetail(id: string | null) {
+  return useQuery({
+    queryKey: ['meetings', 'detail', id ?? 'none'],
+    queryFn: () => api<ScheduledHuddleDetailDto>('GET', `/scheduled-huddles/${id}`),
+    enabled: !!id,
+    retry: false,
+  });
+}
+
+export function useUpdateMeeting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: UpdateScheduledHuddleInput & { id: string }) =>
+      api<ScheduledHuddleDto>('PATCH', `/scheduled-huddles/${id}`, input),
+    onSuccess: () => invalidateMeetings(qc),
+  });
+}
+
+export function useRespondMeeting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, response }: { id: string; response: MeetingResponse }) =>
+      api<ScheduledHuddleDto>('POST', `/scheduled-huddles/${id}/respond`, { response }),
+    onSuccess: () => invalidateMeetings(qc),
   });
 }
 

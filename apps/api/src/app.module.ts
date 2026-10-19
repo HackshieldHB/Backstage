@@ -18,6 +18,8 @@ import { EmojiModule } from './emoji/emoji.module';
 import { ShareModule } from './share/share.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { SfuModule } from './sfu/sfu.module';
+import { IceModule } from './ice/ice.module';
+import { CalendarSharingModule } from './calendar-sharing/calendar-sharing.module';
 import { AuditModule } from './admin/audit.service';
 import { AdminModule } from './admin/admin.module';
 import { UserGroupsModule } from './user-groups/user-groups.module';
@@ -80,6 +82,8 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     TaskEventsModule,
     WorkflowsModule,
     SfuModule,
+    IceModule,
+    CalendarSharingModule,
     AuditModule,
     AdminModule,
     UserGroupsModule,

@@ -14,7 +14,8 @@ import { AtlassianApiService } from './atlassian-api.service';
 import { AtlassianSyncService } from './sync.service';
 import { decryptToken, encryptToken } from './crypto';
 import { hasGranularConfluence } from './scopes';
-import { TokenService } from '../auth/token.service';
+import { sha256, TokenService } from '../auth/token.service';
+import { SocialLoginError, SocialLoginService } from '../auth/social-login.service';
 import { toUserDto } from '../auth/auth.service';
 
 const CONNECT_SCOPES = [
@@ -37,6 +38,8 @@ interface OAuthState {
   workspaceId?: string;
   userId?: string;
   nonce: string;
+  /** SSO only: sha256 of the browser-binding cookie set by /auth/atlassian. */
+  bh?: string;
 }
 
 @Injectable()
@@ -50,6 +53,7 @@ export class AtlassianService {
     private readonly api: AtlassianApiService,
     private readonly sync: AtlassianSyncService,
     private readonly tokens: TokenService,
+    private readonly social: SocialLoginService,
   ) {}
 
   // ---------- connect (workspace OWNER/ADMIN) ----------
@@ -99,7 +103,7 @@ export class AtlassianService {
   }
 
   /** OAuth redirect target for ALL flows; dispatches on the signed state. */
-  async handleCallback(code: string, rawState: string): Promise<{ redirect: string }> {
+  async handleCallback(code: string, rawState: string, browserSecret?: string): Promise<{ redirect: string }> {
     let state: OAuthState;
     try {
       state = await this.jwtService.verifyAsync<OAuthState>(rawState);
@@ -108,6 +112,11 @@ export class AtlassianService {
     }
     if (state.kind === 'connect') return this.completeConnect(code, state);
     if (state.kind === 'user-connect') return this.completeUserConnect(code, state);
+    // Login is bound to the browser that started it (login-CSRF guard).
+    if (!state.bh || !browserSecret || sha256(browserSecret) !== state.bh) {
+      const web = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+      return { redirect: `${web}/login?error=oauth-browser` };
+    }
     return this.completeSso(code);
   }
 
@@ -185,12 +194,14 @@ export class AtlassianService {
 
   // ---------- SSO ("Log in with Atlassian") ----------
 
-  async ssoUrl(): Promise<{ url: string }> {
+  /** Returns the Atlassian URL plus the browser-binding secret to set as a cookie. */
+  async ssoUrl(): Promise<{ url: string; browserSecret: string }> {
+    const browserSecret = randomBytes(24).toString('base64url');
     const state = await this.jwtService.signAsync(
-      { kind: 'sso', nonce: randomBytes(8).toString('hex') } satisfies OAuthState,
+      { kind: 'sso', nonce: randomBytes(8).toString('hex'), bh: sha256(browserSecret) } satisfies OAuthState,
       { expiresIn: '10m' },
     );
-    return { url: this.api.authorizeUrl(state, SSO_SCOPES) };
+    return { url: this.api.authorizeUrl(state, SSO_SCOPES), browserSecret };
   }
 
   private async completeSso(code: string): Promise<{ redirect: string }> {
@@ -204,6 +215,11 @@ export class AtlassianService {
     });
     if (!user && profile.email && profile.emailVerified) {
       user = await this.prisma.user.findUnique({ where: { email: profile.email } });
+      // Pre-account-hijacking guard (same rule as Google/GitHub sign-in): never
+      // attach to an unverified password account someone else may have created.
+      if (user?.passwordHash && !user.emailVerifiedAt && !user.isProvisional) {
+        return { redirect: `${web}/login?error=oauth-unverified-account` };
+      }
     }
     if (!user) {
       if (!profile.email || !profile.emailVerified) {
@@ -268,10 +284,14 @@ export class AtlassianService {
       },
     });
 
-    const accessToken = await this.tokens.signAccessToken(user);
-    const refreshToken = await this.tokens.issueRefreshToken(user.id);
-    const fragment = new URLSearchParams({ access: accessToken, refresh: refreshToken });
-    return { redirect: `${web}/sso#${fragment.toString()}` };
+    // Shared finish: "SSO required" policy, 2FA, and a one-time code instead of
+    // tokens in the URL.
+    try {
+      return { redirect: await this.social.loginRedirect(user) };
+    } catch (err) {
+      if (err instanceof SocialLoginError) return { redirect: `${web}/login?error=oauth-${err.reason}` };
+      throw err;
+    }
   }
 
   // ---------- token access for API calls (auto-refresh) ----------

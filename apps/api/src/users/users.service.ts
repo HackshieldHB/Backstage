@@ -31,6 +31,17 @@ export class UsersService {
     return toUserDto(user);
   }
 
+  /** /welcome step 1: confirm the name, and mark the profile as set up. */
+  async completeOnboarding(userId: string, displayName: string) {
+    const current = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { onboardedAt: true } });
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { displayName: displayName.trim(), onboardedAt: current.onboardedAt ?? new Date() },
+    });
+    await this.broadcastProfile(user.id);
+    return toUserDto(user);
+  }
+
   async setAvatar(
     userId: string,
     file: { originalname?: string; mimetype?: string; buffer: Buffer; size: number } | undefined,

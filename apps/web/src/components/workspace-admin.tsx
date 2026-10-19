@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import {
   useAnalytics,
   useAuditLog,
+  useFeedbackList,
   useMembers,
   useUserGroups,
 } from '@/hooks/queries';
@@ -106,8 +107,22 @@ export function UserGroupsDialog({ workspaceId, onClose }: { workspaceId: string
 
 // ---------- analytics ----------
 
+/** "view:calendar" → "Calendar view", "huddle:join" → "Huddle join". */
+function featureLabel(name: string): string {
+  const [area, ...rest] = name.split(':');
+  const words = (area === 'view' ? [...rest, 'view'] : [area, ...rest]).join(' ').replace(/[-_.]/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+const FEEDBACK_BADGE: Record<string, string> = {
+  BUG: 'bg-red-500/10 text-red-600 dark:text-red-400',
+  IDEA: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+  OTHER: 'bg-hovered text-ink-2',
+};
+
 export function AnalyticsDialog({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
   const a = useAnalytics(workspaceId);
+  const feedback = useFeedbackList(workspaceId);
   const max = Math.max(1, ...(a.data?.messagesByDay.map((d) => d.count) ?? [1]));
   return (
     <Dialog title="Workspace analytics" onClose={onClose} wide>
@@ -148,6 +163,60 @@ export function AnalyticsDialog({ workspaceId, onClose }: { workspaceId: string;
                 </li>
               ))}
             </ul>
+          </div>
+          <div data-testid="feature-usage">
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Feature usage (last 30 days)
+            </h3>
+            {a.data.featureUsage && a.data.featureUsage.length > 0 ? (
+              <ul className="space-y-1">
+                {a.data.featureUsage.map((f) => {
+                  const top = a.data!.featureUsage![0].count;
+                  return (
+                    <li key={f.name} className="text-sm">
+                      <div className="flex justify-between">
+                        <span>{featureLabel(f.name)}</span>
+                        <span className="text-gray-500">
+                          {f.count} · {f.users} {f.users === 1 ? 'person' : 'people'}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 h-1 rounded bg-hovered">
+                        <div className="h-1 rounded bg-accent" style={{ width: `${(f.count / top) * 100}%` }} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500">No usage recorded yet.</p>
+            )}
+          </div>
+          <div data-testid="feedback-list">
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Feedback {feedback.data ? `· ${feedback.data.length}` : ''}
+            </h3>
+            {feedback.data && feedback.data.length > 0 ? (
+              <ul className="thin-scrollbar max-h-64 space-y-2 overflow-y-auto">
+                {feedback.data.map((f) => (
+                  <li key={f.id} className="rounded-md border border-line p-2 text-[13px]">
+                    <div className="mb-1 flex items-center gap-2">
+                      <Avatar user={f.user} size="xs" />
+                      <span className="font-medium">{f.user.displayName}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${FEEDBACK_BADGE[f.category]}`}>
+                        {f.category === 'BUG' ? 'Bug' : f.category === 'IDEA' ? 'Idea' : 'Other'}
+                      </span>
+                      <span className="ml-auto text-[11px] text-gray-500">
+                        {formatDistanceToNow(new Date(f.createdAt), { addSuffix: true })}
+                      </span>
+                    </div>
+                    <p className="whitespace-pre-wrap">{f.message}</p>
+                    {f.page && <p className="mt-1 truncate text-[11px] text-gray-500">{f.page}</p>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500">No feedback yet.</p>
+            )}
           </div>
         </div>
       )}

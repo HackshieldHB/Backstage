@@ -1,0 +1,143 @@
+# Backstages — single-server production stack.
+#
+#   cp deploy/.env.example deploy/.env      # then fill it in
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
+#
+# Optional extras (enable with --profile):
+#   --profile tunnel   Cloudflare named tunnel: stable public URLs, no open ports
+#   --profile turn     coturn relay for huddles behind strict NAT/firewalls
+#
+# Run from the repository root (the build context is the whole workspace).
+# See docs/deploy.md for the walkthrough.
+
+name: backstages
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: backstages
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot: applies pending migrations, then exits. api waits for it.
+  migrate:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: backstages-api:latest
+    # Runs from /repo/apps/api; calls the prisma CLI directly (no pnpm needed at runtime).
+    command: ['node', 'node_modules/prisma/build/index.js', 'migrate', 'deploy']
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/backstages
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    # Same build as `migrate` (cached, built once) so compose never tries to pull it.
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: backstages-api:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/backstages
+      REDIS_URL: redis://redis:6379
+      WEB_ORIGIN: ${WEB_URL:?set WEB_URL in deploy/.env}
+      PUBLIC_API_URL: ${API_URL:?set API_URL in deploy/.env}
+      ATLASSIAN_REDIRECT_URI: ${API_URL}/atlassian/callback
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      - '${API_PORT:-3001}:3001'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Baked into the client bundle at build time — rebuild if API_URL changes.
+        NEXT_PUBLIC_API_URL: ${API_URL}
+        NEXT_PUBLIC_SOCKET_URL: ${API_URL}
+    image: backstages-web:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+    depends_on:
+      - api
+
+  # Cloudflare named tunnel (dashboard-managed). In the Zero Trust dashboard,
+  # route  WEB_URL's host → http://web:3000  and  API_URL's host → http://api:3001.
+  tunnel:
+    profiles: ['tunnel']
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ['tunnel', '--no-autoupdate', '--protocol', 'http2', 'run']
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN for --profile tunnel}
+    depends_on:
+      - web
+      - api
+
+  # coturn relay. Pair with TURN_URLS + TURN_SECRET in deploy/.env (the API then
+  # mints short-lived credentials). Needs UDP 3478 and 49160-49200 open.
+  turn:
+    profiles: ['turn']
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:?set TURN_SECRET for --profile turn}
+      - --realm=${TURN_REALM:-backstages}
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --fingerprint
+      - --no-cli
+      - --no-multicast-peers
+      # Never relay into the server's own private networks.
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

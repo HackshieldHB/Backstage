@@ -24,7 +24,8 @@ export type MainView =
   | 'discover'
   | 'applications'
   | 'tasks'
-  | 'myday';
+  | 'myday'
+  | 'calendar';
 
 interface TypingEntry {
   userId: string;
@@ -106,6 +107,15 @@ interface UiState {
   setLang: (lang: 'en' | 'id') => void;
   /** Transient toast notifications. */
   toasts: Toast[];
+  /** "Send feedback" dialog visibility. */
+  feedbackOpen: boolean;
+  setFeedbackOpen: (open: boolean) => void;
+  /** Meeting whose details dialog is open (from the calendar or a notification). */
+  meetingDetailId: string | null;
+  /** The clicked entry when it is a projected occurrence of a repeating meeting
+   *  (its time differs from the stored row's). */
+  meetingPreview: import('@backstages/shared').ScheduledHuddleDto | null;
+  setMeetingDetailId: (id: string | null, preview?: import('@backstages/shared').ScheduledHuddleDto | null) => void;
 
   pushToast: (message: string, kind?: Toast['kind']) => void;
   dismissToast: (id: string) => void;
@@ -143,6 +153,11 @@ export const useUiStore = create<UiState>((set) => ({
     set({ lang });
   },
   toasts: [],
+  feedbackOpen: false,
+  setFeedbackOpen: (open) => set({ feedbackOpen: open }),
+  meetingDetailId: null,
+  meetingPreview: null,
+  setMeetingDetailId: (id, preview = null) => set({ meetingDetailId: id, meetingPreview: preview }),
 
   pushToast: (message, kind = 'info') => {
     const id = Math.random().toString(36).slice(2);

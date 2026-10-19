@@ -47,6 +47,9 @@ const DICT: Record<string, { en: string; id: string }> = {
   tasks: { en: 'Tasks', id: 'Tugas' },
   discover: { en: 'Discover', id: 'Jelajahi' },
   applications: { en: 'Applications', id: 'Aplikasi' },
+  calendar: { en: 'Calendar', id: 'Kalender' },
+  today: { en: 'Today', id: 'Hari ini' },
+  new_meeting: { en: 'New meeting', id: 'Rapat baru' },
 
   // Tasks
   tasks_subtitle: {

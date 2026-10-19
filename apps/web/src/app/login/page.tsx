@@ -8,6 +8,8 @@ import type { SsoDiscoveryDto } from '@backstages/shared';
 import { api, API_URL } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { AuthCard, Field, FormError, SubmitButton } from '@/components/auth/auth-card';
+import { SocialButtons } from '@/components/auth/social-buttons';
+import { MFA_HANDOFF_KEY } from '@/lib/auth-handoff';
 
 /** Friendly copy for the ?error= codes the Atlassian and SSO callbacks bounce back with. */
 const LOGIN_ERRORS: Record<string, string> = {
@@ -23,6 +25,19 @@ const LOGIN_ERRORS: Record<string, string> = {
   'sso-no-email': 'Your identity provider did not share an email address with Backstages.',
   'sso-deactivated': 'Your account in this workspace has been deactivated. Contact a workspace admin.',
   'sso-not-configured': 'Single sign-on is not set up for this workspace.',
+  'oauth-denied': 'Sign-in was cancelled. You can try again or use email & password.',
+  'oauth-expired': 'That sign-in took too long. Please try again.',
+  'oauth-state': 'That sign-in link is not valid. Please start again from this page.',
+  'oauth-browser':
+    'That sign-in was started in a different browser or tab session. For your safety, please start it again here.',
+  'oauth-no-verified-email':
+    "Your account there doesn't have a verified email address we can use. Verify your email with the provider (for GitHub: a verified, non-private address), or sign up with email & password.",
+  'oauth-unverified-account':
+    "An account with this email already exists but its email was never confirmed. Sign in with your password (or use “Forgot password?”) first — then you can connect Google or GitHub from Account security.",
+  'oauth-sso-required': "Your organization requires single sign-on. Use “Continue with SSO” with your work email.",
+  'oauth-not-configured': 'That sign-in option is not set up on this server.',
+  'oauth-provider': "We couldn't complete sign-in with the provider. Please try again in a moment.",
+  'oauth-failed': 'Sign-in failed. Please try again in a moment, or use email & password.',
 };
 
 export default function LoginPage() {
@@ -43,6 +58,16 @@ export default function LoginPage() {
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get('error');
     if (code) setError(LOGIN_ERRORS[code] ?? 'Sign-in failed. Please try again.');
+    // A social sign-in for an account with 2FA on continues here.
+    try {
+      const handoff = window.sessionStorage.getItem(MFA_HANDOFF_KEY);
+      if (handoff) {
+        window.sessionStorage.removeItem(MFA_HANDOFF_KEY);
+        setMfaToken(handoff);
+      }
+    } catch {
+      /* storage unavailable: the person signs in again */
+    }
   }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -185,6 +210,9 @@ export default function LoginPage() {
         <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
         <span className="text-xs text-gray-500 dark:text-gray-400">or</span>
         <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+      </div>
+      <div className="mb-2">
+        <SocialButtons />
       </div>
       <button
         type="button"

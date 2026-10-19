@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  CompleteOnboardingInput,
+  CompleteOnboardingSchema,
   MarkNotificationsReadInput,
   MarkNotificationsReadSchema,
   MAX_UPLOAD_BYTES,
@@ -24,6 +26,7 @@ import {
 import { UsersService } from './users.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { HumanOnly } from '../common/human-only.decorator';
 
 @Controller('me')
 export class UsersController {
@@ -62,6 +65,16 @@ export class UsersController {
     @Body(new ZodValidationPipe(UpdateProfileSchema)) body: UpdateProfileInput,
   ) {
     return this.users.updateProfile(user.id, body);
+  }
+
+  @HumanOnly()
+  @HttpCode(200)
+  @Post('onboarding')
+  completeOnboarding(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(CompleteOnboardingSchema)) body: CompleteOnboardingInput,
+  ) {
+    return this.users.completeOnboarding(user.id, body.displayName);
   }
 
   @Post('avatar')

@@ -1,3 +1,5 @@
+import { isMeetingNotice, meetingNoticeText, type MeetingNoticePayload } from '@backstages/shared';
+
 /** Payload fields carried by task / reminder SYSTEM notifications. */
 export interface TaskReminderPayload {
   source?: string;
@@ -14,7 +16,9 @@ export function taskOrReminderText(
   pl: TaskReminderPayload,
   actorName?: string | null,
 ): string | null {
+  if (isMeetingNotice(pl)) return meetingNoticeText(pl as MeetingNoticePayload, actorName);
   if (pl.source === 'reminder') return `⏰ Reminder: ${pl.text ?? ''}`.trim();
+  if (pl.source === 'feedback') return `💬 ${actorName ?? 'Someone'} sent feedback: ${pl.text ?? ''}`.trim();
   if (pl.source === 'workflow_request') {
     const what = pl.action === 'form' ? 'needs you to fill in a form' : 'needs your approval';
     return `${pl.title ?? 'A workflow'} ${what}`;

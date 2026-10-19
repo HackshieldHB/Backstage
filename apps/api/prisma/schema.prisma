@@ -102,6 +102,9 @@ model User {
   totpEnabledAt   DateTime?
   /// Last accepted TOTP time step — a code can't be replayed within its window.
   totpLastStep    Int?
+  /// Set once the person confirmed their profile (name). Null for accounts just
+  /// created by Google/GitHub/Atlassian/SSO sign-in → the web app shows /welcome.
+  onboardedAt     DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -160,7 +163,10 @@ model User {
   calendarLink            CalendarLink?
   recommendationFeedback  RecommendationFeedback[]
   scheduledHuddles        ScheduledHuddle[]        @relation("ScheduledHuddleCreator")
-  tasksCreated            Task[]                   @relation("TaskCreator")
+  meetingResponses        ScheduledHuddleResponse[]
+  feedbackGiven           Feedback[]
+  usageEvents             UsageEvent[]
+  tasksCreated           Task[]                   @relation("TaskCreator")
   tasksAssigned           Task[]                   @relation("TaskAssignee")
   workflowRunsTriggered   WorkflowRun[]            @relation("WorkflowRunTrigger")
   workflowRequests        WorkflowRun[]            @relation("WorkflowRunPending")
@@ -270,6 +276,8 @@ model Workspace {
   recommendationFeedback RecommendationFeedback[]
   scheduledHuddles       ScheduledHuddle[]
   meetingRecords         MeetingRecord[]
+  feedback               Feedback[]
+  usageEvents            UsageEvent[]
   tasks                  Task[]
   workflowRuns           WorkflowRun[]
   sidebarSections        SidebarSection[]
@@ -316,6 +324,8 @@ model WorkspaceMember {
   /// Out-of-office window + auto message; while active, alerts are muted.
   oooUntil          DateTime?
   oooMessage        String?
+  /// Who in this workspace may look at the member's calendar (opt-in).
+  calendarVisibility CalendarVisibility @default(PRIVATE)
   createdAt         DateTime      @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -928,31 +938,78 @@ model HuddleParticipant {
   @@index([userId])
 }
 
-/// A huddle planned for a future time in a channel or DM. A background queue
-/// fires a "starting now" reminder to every member when `scheduledFor` arrives
-/// (marking `notifiedAt`), then keeps the row briefly for the upcoming list.
+/// A meeting (huddle) planned for a future time in a channel or DM. A background
+/// queue fires an early "starting soon" reminder `reminderMins` before the start
+/// (marking `reminderSentAt`) and a "starting now" one at the start (marking
+/// `notifiedAt`). Rows are kept for a while afterwards so the calendar can show
+/// past meetings. A recurring meeting is one row at a time: when an occurrence
+/// starts, the next one is created with the same `seriesId`.
 model ScheduledHuddle {
-  id             String    @id @default(cuid())
+  id             String                @id @default(cuid())
   workspaceId    String
   channelId      String?
   conversationId String?
   createdById    String
   title          String
+  /// Optional agenda / notes shown in the invite.
+  description    String?
   scheduledFor   DateTime
   durationMins   Int?
+  /// Minutes before the start to send the "starting soon" reminder; 0 = none.
+  reminderMins   Int                   @default(10)
+  /// Set once the early reminder has been delivered, so it fires exactly once.
+  reminderSentAt DateTime?
   /// Set once the start reminder has been delivered, so it fires exactly once.
   notifiedAt     DateTime?
-  createdAt      DateTime  @default(now())
+  recurrence     MeetingRecurrence     @default(NONE)
+  /// IANA zone of the organiser, used to keep a recurring meeting on the same
+  /// local weekday/time.
+  timeZone       String?
+  /// Shared by every occurrence of a recurring meeting (the first row's id).
+  seriesId       String?
+  createdAt      DateTime              @default(now())
 
-  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  channel      Channel?      @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  createdBy    User          @relation("ScheduledHuddleCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  workspace    Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel      Channel?                  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation Conversation?             @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdBy    User                      @relation("ScheduledHuddleCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  responses    ScheduledHuddleResponse[]
 
   @@index([scheduledFor])
+  @@index([seriesId])
   @@index([workspaceId])
   @@index([channelId])
   @@index([conversationId])
+}
+
+enum MeetingRecurrence {
+  NONE
+  DAILY
+  WEEKDAYS
+  WEEKLY
+}
+
+enum MeetingResponse {
+  ACCEPTED
+  TENTATIVE
+  DECLINED
+}
+
+/// A guest's RSVP to one meeting occurrence. Guests are the members of the
+/// meeting's channel/DM; no row means "not answered yet". Declined guests get
+/// no reminders.
+model ScheduledHuddleResponse {
+  id                String          @id @default(cuid())
+  scheduledHuddleId String
+  userId            String
+  response          MeetingResponse
+  updatedAt         DateTime        @updatedAt
+
+  scheduledHuddle ScheduledHuddle @relation(fields: [scheduledHuddleId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduledHuddleId, userId])
+  @@index([userId])
 }
 
 /// A finished huddle's captured transcript (live captions + in-meeting chat) plus
@@ -1610,15 +1667,69 @@ model WorkspaceDomain {
   @@index([domain])
 }
 
+/// An external sign-in linked to a user: a workspace's OIDC IdP, or a social
+/// login (issuer "https://accounts.google.com" / "https://github.com").
 model SsoIdentity {
   id        String   @id @default(cuid())
   userId    String
   issuer    String
   subject   String
+  /// Shown in Account security ("you@gmail.com", "@octocat"); null for older rows.
+  label     String?
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([issuer, subject])
   @@index([userId])
+}
+
+enum FeedbackCategory {
+  BUG
+  IDEA
+  OTHER
+}
+
+/// In-app feedback from a member ("Send feedback"). Owners are notified; admins
+/// read the list in Workspace analytics.
+model Feedback {
+  id          String           @id @default(cuid())
+  workspaceId String
+  userId      String
+  category    FeedbackCategory
+  message     String
+  /// Where in the app it was sent from (path + query, no origin).
+  page        String?
+  userAgent   String?
+  createdAt   DateTime         @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+/// A feature-usage ping (e.g. "view:calendar", "huddle:join"). Only aggregated
+/// (count + unique users per feature) for admins; pruned after 90 days.
+model UsageEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  name        String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([createdAt])
+}
+
+/// PRIVATE: only you. FREE_BUSY: teammates see when you're busy, no titles.
+/// DETAILS: teammates also see meeting titles — but only for meetings they
+/// could open themselves (shared channel/DM); everything else stays "Busy".
+enum CalendarVisibility {
+  PRIVATE
+  FREE_BUSY
+  DETAILS
 }

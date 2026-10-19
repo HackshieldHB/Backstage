@@ -1,4 +1,4 @@
-import { Logger, OnApplicationShutdown } from '@nestjs/common';
+import { BeforeApplicationShutdown, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
@@ -45,6 +45,7 @@ import {
   roomForWorkspace,
 } from './realtime.service';
 import { HuddleService } from './huddle.service';
+import { HuddlePersistenceService } from './huddle-persistence.service';
 import { HuddleSessionService } from '../timesheet/huddle-session.service';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { PresenceService } from '../presence/presence.service';
@@ -58,10 +59,13 @@ interface AuthedSocket extends Socket {
   cors: { origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000', credentials: true },
 })
 export class RealtimeGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnApplicationShutdown
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, BeforeApplicationShutdown, OnApplicationShutdown
 {
   private readonly logger = new Logger(RealtimeGateway.name);
   private redisClients: Redis[] = [];
+  /** Set once shutdown begins: sockets dropping because the server is going
+   *  away must not end meetings — they resume from their snapshot on restart. */
+  private draining = false;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -71,6 +75,7 @@ export class RealtimeGateway
     private readonly huddle: HuddleService,
     private readonly huddleSession: HuddleSessionService,
     private readonly meetingMinutes: MeetingMinutesService,
+    private readonly persistence: HuddlePersistenceService,
   ) {}
 
   afterInit(server: Server) {
@@ -102,6 +107,16 @@ export class RealtimeGateway
     // Only now is it safe for feature services to emit.
     this.realtime.bindServer(server);
     this.logger.log('Gateway initialized (redis adapter attached)');
+
+    // Meetings interrupted by a crash/restart that nobody re-joins within two
+    // minutes are wrapped up from their snapshot (minutes saved, snapshot dropped).
+    if (this.persistence.enabled) setTimeout(() => void this.finalizeOrphanedMeetings(), 120_000).unref();
+  }
+
+  async beforeApplicationShutdown() {
+    this.draining = true;
+    // Last snapshot before the sockets close, so nothing since the last flush is lost.
+    await this.persistence.flush().catch(() => undefined);
   }
 
   async onApplicationShutdown() {
@@ -130,6 +145,7 @@ export class RealtimeGateway
   }
 
   async handleDisconnect(socket: AuthedSocket) {
+    if (this.draining) return; // server shutting down — the meeting resumes after restart
     if (socket.data.userId) {
       // Drop the socket from any huddles and refresh those rooms.
       for (const key of this.huddle.removeSocket(socket.data.userId, socket.id)) {
@@ -164,13 +180,19 @@ export class RealtimeGateway
     // Only members of the channel/DM (who are in its room) may join its huddle.
     if (!key || !socket.rooms.has(key)) return;
     const userId = socket.data.userId;
+    // First one back after an API restart: bring the meeting's state back.
+    if (!this.huddle.hasRoom(key) && this.persistence.enabled) {
+      const snap = await this.persistence.load(key);
+      if (snap && this.huddle.restore(key, snap)) this.logger.log(`Restored huddle ${key} after restart`);
+    }
     const settings = this.huddle.getSettings(key);
     const alreadyPresent = this.huddle.isPresent(key, userId);
     // The very first person into an empty huddle is always admitted (they become
     // host). Lock and waiting room only gate later joiners who aren't yet present.
     const roomHasMembers = this.huddle.userIds(key).length > 0;
 
-    if (!alreadyPresent && roomHasMembers) {
+    // People who were in the meeting before a restart walk straight back in.
+    if (!alreadyPresent && roomHasMembers && !this.huddle.wasMember(key, userId)) {
       if (settings.locked) {
         this.emitWaitingStatus(socket, key, 'denied');
         return;
@@ -242,6 +264,14 @@ export class RealtimeGateway
         op: { kind: 'sync', shapes },
       });
     }
+    // Shared notes and the open poll, so late joiners (and everyone re-joining a
+    // meeting restored after a restart) see what the room already has.
+    const notes = this.huddle.getNotes(key);
+    if (notes) {
+      this.realtime.emitToUser(userId, SOCKET_EVENTS.HUDDLE_NOTES, { ...idField, content: notes, updatedBy: 'server' });
+    }
+    const poll = this.huddle.getPoll(key);
+    if (poll) this.realtime.emitToUser(userId, SOCKET_EVENTS.HUDDLE_POLL, { ...idField, poll });
     const annShapes = this.huddle.annotationShapes(key);
     if (annShapes.length) {
       this.realtime.emitToUser(userId, SOCKET_EVENTS.HUDDLE_ANNOTATION, {
@@ -272,9 +302,27 @@ export class RealtimeGateway
    *  MeetingRecord so the meeting leaves a durable, searchable artifact. */
   private async endMeetingIfEmpty(key: string) {
     if (this.huddle.userIds(key).length > 0) return;
+    await this.persistence.remove(key);
     const lines = this.huddle.takeTranscript(key);
     const notes = this.huddle.takeNotes(key);
     if (lines.length || notes.trim()) await this.meetingMinutes.persistFromHuddle(key, lines, notes);
+  }
+
+  /** Save minutes for snapshotted meetings nobody came back to, then forget them. */
+  private async finalizeOrphanedMeetings() {
+    try {
+      for (const key of await this.persistence.orphanKeys()) {
+        const snap = await this.persistence.load(key);
+        if (this.huddle.hasRoom(key)) continue; // someone re-joined meanwhile
+        await this.persistence.remove(key);
+        if (snap && (snap.transcript?.length || snap.notes?.trim())) {
+          await this.meetingMinutes.persistFromHuddle(key, snap.transcript ?? [], snap.notes ?? '');
+        }
+        this.logger.log(`Wrapped up huddle ${key} interrupted by a restart`);
+      }
+    } catch (err) {
+      this.logger.warn(`Finalizing interrupted huddles failed: ${String(err)}`);
+    }
   }
 
   @SubscribeMessage(CLIENT_EVENTS.HUDDLE_SIGNAL)

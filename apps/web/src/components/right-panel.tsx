@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import { format, formatDistanceToNow } from 'date-fns';
-import { AlarmClock, ArrowLeft, AtSign, Bell, BellOff, CheckSquare, Clock, FileText, Hash, Link2, ListChecks, MessageSquareText, Reply, Smile, Sparkles, SquareKanban, Trash2, X } from 'lucide-react';
+import { AlarmClock, ArrowLeft, CalendarClock, AtSign, Bell, BellOff, CheckSquare, Clock, FileText, Hash, Link2, ListChecks, MessageSquareText, Reply, Smile, Sparkles, SquareKanban, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, fileUrl } from '@/lib/api';
 import { taskOrReminderText } from '@/lib/notification-text';
@@ -648,11 +648,13 @@ interface NotifPayload {
   url?: string;
   direction?: string;
   emoji?: string;
+  scheduledHuddleId?: string;
 }
 
 function iconForNotification(type: string, pl: NotifPayload) {
   if (type === 'SYSTEM' && (pl.source === 'task' || pl.source === 'workflow_request')) return <CheckSquare size={14} className="text-accent" />;
   if (type === 'SYSTEM' && pl.source === 'reminder') return <AlarmClock size={14} className="text-amber-500" />;
+  if (type === 'SYSTEM' && pl.source === 'scheduled-huddle') return <CalendarClock size={14} className="text-accent" />;
   if (type === 'SYSTEM' && pl.source === 'jira')
     return <SquareKanban size={14} className="text-[#2684FF]" />;
   if (type === 'SYSTEM' && pl.source === 'confluence')
@@ -683,6 +685,7 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
   const muted = useUiStore((s) => s.notificationsMuted);
   const setMuted = useUiStore((s) => s.setNotificationsMuted);
   const setMainView = useUiStore((s) => s.setMainView);
+  const openMeeting = useUiStore((s) => s.setMeetingDetailId);
   const [priorityOnly, setPriorityOnly] = useState(false);
 
   const all = notifications.data?.notifications ?? [];
@@ -732,6 +735,10 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
         const open = () => {
           if (pl.source === 'task' || pl.source === 'workflow_request') {
             setMainView('tasks');
+            return;
+          }
+          if (pl.source === 'scheduled-huddle' && pl.scheduledHuddleId) {
+            openMeeting(pl.scheduledHuddleId);
             return;
           }
           if (pl.url) window.open(pl.url, '_blank', 'noopener');

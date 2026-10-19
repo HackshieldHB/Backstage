@@ -31,6 +31,7 @@ export function toUserDto(user: User): UserDto {
     statusEmoji: user.statusEmoji,
     statusText: user.statusText,
     emailVerified: !!user.emailVerifiedAt,
+    needsOnboarding: !user.onboardedAt && !user.isBot,
   };
 }
 
@@ -68,10 +69,15 @@ export class AuthService {
     const user = existing
       ? await this.prisma.user.update({
           where: { id: existing.id },
-          data: { passwordHash, displayName: input.displayName, isProvisional: false },
+          data: {
+            passwordHash,
+            displayName: input.displayName,
+            isProvisional: false,
+            onboardedAt: existing.onboardedAt ?? new Date(),
+          },
         })
       : await this.prisma.user.create({
-          data: { email: input.email, passwordHash, displayName: input.displayName },
+          data: { email: input.email, passwordHash, displayName: input.displayName, onboardedAt: new Date() },
         });
 
     // Fire-and-forget: a mail outage must not block signup.

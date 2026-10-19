@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Post } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
+import { WebPushService } from '../notifications/web-push.service';
 
 interface SubscriptionInput {
   endpoint: string;
@@ -8,17 +9,21 @@ interface SubscriptionInput {
 }
 
 /**
- * Stores browser Web Push subscriptions. Actual push delivery requires VAPID
- * keys + a sender (documented in docs/pwa-push.md); this endpoint captures the
- * subscription so the PWA install/notify flow works end-to-end on the client.
+ * Stores browser Web Push subscriptions. Delivery is done by WebPushService
+ * (NotificationsService pushes when the user has no open tab) and needs
+ * VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY; without them the public key is withheld
+ * so browsers don't subscribe to pushes that would never come.
  */
 @Controller('push')
 export class PushController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly push: WebPushService,
+  ) {}
 
   @Get('status')
   status() {
-    return { vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? null };
+    return { vapidPublicKey: this.push.isEnabled ? (process.env.VAPID_PUBLIC_KEY ?? null) : null };
   }
 
   @Post('subscribe')
@@ -38,9 +43,10 @@ export class PushController {
   }
 
   @Delete('subscribe')
-  async unsubscribe(@Body() body: { endpoint: string }) {
+  async unsubscribe(@CurrentUser() user: AuthUser, @Body() body: { endpoint: string }) {
     if (body?.endpoint) {
-      await this.prisma.pushSubscription.deleteMany({ where: { endpoint: body.endpoint } });
+      // Scoped to the caller so nobody can drop another user's subscription.
+      await this.prisma.pushSubscription.deleteMany({ where: { endpoint: body.endpoint, userId: user.id } });
     }
     return { ok: true };
   }

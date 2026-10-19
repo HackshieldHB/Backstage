@@ -63,7 +63,9 @@ export function decodeJwt(token: string): {
 export function verifyIdToken(
   token: string,
   keys: Jwk[],
-  expected: { issuer: string; clientId: string; nonce: string; nowSeconds?: number },
+  /** `issuer` may list several accepted spellings (Google uses both
+   *  "https://accounts.google.com" and "accounts.google.com"). */
+  expected: { issuer: string | string[]; clientId: string; nonce: string; nowSeconds?: number },
 ): IdTokenClaims {
   const { header, payload, signingInput, signature } = decodeJwt(token);
   const alg = header.alg;
@@ -91,7 +93,8 @@ export function verifyIdToken(
 
   const claims = payload as unknown as IdTokenClaims;
   const now = expected.nowSeconds ?? Math.floor(Date.now() / 1000);
-  if (trimSlash(String(claims.iss)) !== trimSlash(expected.issuer)) throw new Error('ID token issuer mismatch');
+  const issuers = (Array.isArray(expected.issuer) ? expected.issuer : [expected.issuer]).map(trimSlash);
+  if (!issuers.includes(trimSlash(String(claims.iss)))) throw new Error('ID token issuer mismatch');
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   if (!aud.includes(expected.clientId)) throw new Error('ID token audience mismatch');
   if (aud.length > 1 && claims.azp !== expected.clientId) throw new Error('ID token azp mismatch');

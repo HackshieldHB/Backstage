@@ -27,7 +27,8 @@ self.addEventListener('fetch', (e) => {
   );
 });
 
-// Web Push (fires only once the server sends notifications via VAPID).
+// Web Push — sent by the API (VAPID) when the user has no Backstages tab open,
+// e.g. "Sprint sync starts in 10 min".
 self.addEventListener('push', (e) => {
   let data = {};
   try {
@@ -40,6 +41,8 @@ self.addEventListener('push', (e) => {
       body: data.body || '',
       icon: '/icon.svg',
       badge: '/icon.svg',
+      // Same tag = replaces the earlier notification instead of stacking.
+      ...(data.tag ? { tag: data.tag } : {}),
       data: data.url ? { url: data.url } : {},
     }),
   );
@@ -47,6 +50,18 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = e.notification.data?.url || '/app';
-  e.waitUntil(self.clients.openWindow(url));
+  const url = new URL(e.notification.data?.url || '/app', self.location.origin).href;
+  e.waitUntil(
+    (async () => {
+      // Reuse an open Backstages tab when there is one.
+      const tabs = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const tab = tabs.find((c) => new URL(c.url).origin === self.location.origin);
+      if (tab) {
+        await tab.focus();
+        if ('navigate' in tab) await tab.navigate(url).catch(() => undefined);
+        return;
+      }
+      await self.clients.openWindow(url);
+    })(),
+  );
 });

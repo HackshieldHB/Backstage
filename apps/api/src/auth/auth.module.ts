@@ -6,6 +6,8 @@ import { AuthService } from './auth.service';
 import { TokenService } from './token.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { TwoFactorService } from './two-factor.service';
+import { SocialLoginService } from './social-login.service';
+import { SocialLoginController } from './social-login.controller';
 
 @Module({
   imports: [
@@ -17,8 +19,8 @@ import { TwoFactorService } from './two-factor.service';
       }),
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, TokenService, TwoFactorService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
-  exports: [TokenService, AuthService, TwoFactorService],
+  controllers: [AuthController, SocialLoginController],
+  providers: [AuthService, TokenService, TwoFactorService, SocialLoginService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
+  exports: [TokenService, AuthService, TwoFactorService, SocialLoginService],
 })
 export class AuthModule {}

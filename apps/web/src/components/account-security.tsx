@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { Copy, KeyRound, ShieldCheck, Trash2 } from 'lucide-react';
+import { Copy, KeyRound, Link2, ShieldCheck, Trash2 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  ConnectedAccountsDto,
+  OAuthProvider,
   ApiTokenDto,
   ApiTokenScope,
   CreatedApiTokenDto,
@@ -14,6 +16,7 @@ import type {
 import { api } from '@/lib/api';
 import { useUiStore } from '@/stores/ui-store';
 import { Dialog } from './dialog';
+import { GithubIcon, GoogleIcon } from './auth/social-buttons';
 
 export const inputCls =
   'w-full rounded-md border border-line-strong px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';
@@ -60,6 +63,7 @@ export function AccountSecurityDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog title="Account security" onClose={onClose} wide>
       <div className="space-y-6">
+        <ConnectedAccountsSection />
         <TwoFactorSection />
         <ApiTokensSection />
       </div>
@@ -332,6 +336,106 @@ function ApiTokensSection() {
           Create token
         </button>
       </div>
+    </section>
+  );
+}
+
+// ---------- connected sign-in methods ----------
+
+const PROVIDER_LABEL: Record<OAuthProvider, string> = { google: 'Google', github: 'GitHub' };
+
+function ProviderIcon({ provider }: { provider: OAuthProvider | 'sso' }) {
+  if (provider === 'google') return <GoogleIcon />;
+  if (provider === 'github') return <GithubIcon />;
+  return <KeyRound size={16} />;
+}
+
+/** Sign in with Google / GitHub as well as (or instead of) a password. */
+function ConnectedAccountsSection() {
+  const qc = useQueryClient();
+  const pushToast = useUiStore((s) => s.pushToast);
+  const [busy, setBusy] = useState<string | null>(null);
+  const data = useQuery({
+    queryKey: ['connected-accounts'],
+    queryFn: () => api<ConnectedAccountsDto>('GET', '/auth/oauth/identities'),
+  });
+  const d = data.data;
+  const enabled = d ? (Object.keys(PROVIDER_LABEL) as OAuthProvider[]).filter((p) => d.providers[p]) : [];
+  // Nothing to manage when no social provider is configured and nothing is linked.
+  if (!d || (enabled.length === 0 && d.accounts.length === 0)) return null;
+
+  const connect = async (provider: OAuthProvider) => {
+    setBusy(provider);
+    try {
+      const { url } = await api<{ url: string }>('POST', `/auth/oauth/${provider}/link`);
+      window.location.href = url; // comes back to /app?oauth-link=…
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : 'Could not start connecting', 'error');
+      setBusy(null);
+    }
+  };
+
+  const disconnect = async (id: string, name: string) => {
+    setBusy(id);
+    try {
+      const next = await api<ConnectedAccountsDto>('DELETE', `/auth/oauth/identities/${id}`);
+      qc.setQueryData(['connected-accounts'], next);
+      pushToast(`${name} disconnected.`, 'success');
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : 'Could not disconnect', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section aria-labelledby="connected-heading" data-testid="connected-accounts">
+      <h3 id="connected-heading" className="mb-1 flex items-center gap-2 text-sm font-semibold">
+        <Link2 size={16} /> Sign-in methods
+      </h3>
+      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+        Connect Google or GitHub to sign in with one click. Your Backstages email doesn&apos;t change.
+      </p>
+      <ul className="space-y-2">
+        <li className="flex items-center gap-2 rounded-md border border-line p-2 text-sm">
+          <KeyRound size={16} />
+          <span className="flex-1">Email &amp; password</span>
+          <span className="text-xs text-gray-500">{d.hasPassword ? 'Set' : 'Not set — use “Forgot password?” to add one'}</span>
+        </li>
+        {d.accounts.map((a) => {
+          const name = a.provider === 'sso' ? 'Work SSO' : PROVIDER_LABEL[a.provider];
+          return (
+            <li key={a.id} className="flex items-center gap-2 rounded-md border border-line p-2 text-sm">
+              <ProviderIcon provider={a.provider} />
+              <span className="min-w-0 flex-1 truncate">
+                {name}
+                {a.label && <span className="text-gray-500"> · {a.label}</span>}
+              </span>
+              {a.provider !== 'sso' && (
+                <button
+                  className={secondaryBtn}
+                  disabled={busy !== null}
+                  onClick={() => void disconnect(a.id, name)}
+                  data-testid={`disconnect-${a.provider}`}
+                >
+                  {busy === a.id ? 'Disconnecting…' : 'Disconnect'}
+                </button>
+              )}
+            </li>
+          );
+        })}
+        {enabled
+          .filter((p) => !d.accounts.some((a) => a.provider === p))
+          .map((p) => (
+            <li key={p} className="flex items-center gap-2 rounded-md border border-dashed border-line p-2 text-sm">
+              <ProviderIcon provider={p} />
+              <span className="flex-1 text-gray-500">{PROVIDER_LABEL[p]}</span>
+              <button className={secondaryBtn} disabled={busy !== null} onClick={() => void connect(p)} data-testid={`connect-${p}`}>
+                {busy === p ? 'Redirecting…' : 'Connect'}
+              </button>
+            </li>
+          ))}
+      </ul>
     </section>
   );
 }

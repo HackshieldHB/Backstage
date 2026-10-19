@@ -8,6 +8,7 @@ import {
   Bookmark,
   Briefcase,
   CalendarClock,
+  CalendarDays,
   CheckSquare,
   ChevronDown,
   LayoutGrid,
@@ -25,6 +26,7 @@ import {
   Lock,
   LogOut,
   MessageSquare,
+  MessageSquareHeart,
   Plus,
   Search,
   Smile,
@@ -73,6 +75,7 @@ import { Tooltip } from './tooltip';
 import { GuidedTour, type TourStep } from './guided-tour';
 import { CustomSections, MoveToSectionMenu, useSidebarSections } from './sidebar-sections';
 import { AccountSecurityDialog } from './account-security';
+import { enableNotifications as enableBrowserNotifications } from './pwa-registrar';
 
 export function Sidebar({
   workspaceId,
@@ -324,6 +327,13 @@ export function Sidebar({
           testId="my-day-button"
         />
         <SectionButton
+          icon={<CalendarDays size={15} />}
+          label={t('calendar')}
+          active={mainView === 'calendar'}
+          onClick={() => setMainView('calendar')}
+          testId="calendar-button"
+        />
+        <SectionButton
           icon={<Inbox size={15} />}
           label={t('inbox')}
           badge={activityBadge}
@@ -566,6 +576,16 @@ export function Sidebar({
             className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
           >
             <Clock size={15} />
+          </button>
+        </Tooltip>
+        <Tooltip label="Send feedback">
+          <button
+            aria-label="Send feedback"
+            onClick={() => useUiStore.getState().setFeedbackOpen(true)}
+            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            data-testid="feedback-button"
+          >
+            <MessageSquareHeart size={15} />
           </button>
         </Tooltip>
         <ThemePicker />
@@ -1152,7 +1172,8 @@ function ProfileDialog({
 
   const enableNotifications = async () => {
     if (typeof Notification === 'undefined') return;
-    setNotifPerm(await Notification.requestPermission());
+    // Also subscribes this browser to push, so reminders arrive with no tab open.
+    setNotifPerm(await enableBrowserNotifications());
   };
 
   const onPickPhoto = async (e: ChangeEvent<HTMLInputElement>) => {

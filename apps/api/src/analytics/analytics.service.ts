@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
+import type { FeatureUsageDto } from '@backstages/shared';
+import { UsageService } from './usage.service';
 
 export interface WorkspaceAnalytics {
   totalMessages: number;
@@ -9,6 +11,8 @@ export interface WorkspaceAnalytics {
   activeUsers7d: number;
   messagesByDay: { date: string; count: number }[];
   topChannels: { name: string; count: number }[];
+  /** Feature usage over the last 30 days (aggregated only). */
+  featureUsage: FeatureUsageDto[];
 }
 
 @Injectable()
@@ -16,6 +20,7 @@ export class AnalyticsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
+    private readonly usage: UsageService,
   ) {}
 
   async workspace(userId: string, workspaceId: string): Promise<WorkspaceAnalytics> {
@@ -63,6 +68,7 @@ export class AnalyticsService {
         name: nameById.get(r.channelId!) ?? 'unknown',
         count: r._count._all,
       })),
+      featureUsage: await this.usage.topFeatures(workspaceId),
     };
   }
 }

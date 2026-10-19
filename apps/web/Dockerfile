@@ -46,4 +46,6 @@ COPY --from=build /repo/apps/web/next.config.mjs /repo/apps/web/next.config.mjs
 WORKDIR /repo/apps/web
 USER node
 EXPOSE 3000
-CMD ["pnpm", "start"]
+# Run next directly: pnpm comes from corepack, which was prepared for root and
+# would try to download itself again as the unprivileged node user.
+CMD ["node", "node_modules/next/dist/bin/next", "start"]

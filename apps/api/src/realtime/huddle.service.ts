@@ -114,6 +114,8 @@ export class HuddleService {
    *  cleanupRoom — the gateway drains it via takeTranscript when the room empties,
    *  so the meeting can be persisted after everyone has gone. */
   private readonly transcripts = new Map<string, HuddleTranscriptLine[]>();
+  /** key -> roles members held before an API restart, applied as they re-join. */
+  private readonly restoredRoles = new Map<string, Map<string, { role: HuddleRole; canAnnotate: boolean }>>();
 
   join(key: string, userId: string, socketId: string): void {
     let room = this.rooms.get(key);
@@ -135,8 +137,22 @@ export class HuddleService {
       this.states.set(key, state);
     }
     if (!state.has(userId)) {
-      const role: HuddleRole = state.size === 0 ? 'host' : 'participant';
-      state.set(userId, defaultState(role));
+      const restored = this.restoredRoles.get(key)?.get(userId);
+      const hasHost = [...state.values()].some((s) => s.role === 'host');
+      let role: HuddleRole;
+      if (!hasHost) {
+        // Whoever is first back (or first in) holds the meeting — never leave it hostless.
+        role = 'host';
+      } else if (restored) {
+        // The original host returning after someone else took over is a co-host.
+        role = restored.role === 'host' ? 'cohost' : restored.role;
+      } else {
+        role = 'participant';
+      }
+      const next = defaultState(role);
+      if (restored) next.canAnnotate = restored.canAnnotate;
+      state.set(userId, next);
+      this.restoredRoles.get(key)?.delete(userId);
     }
   }
 
@@ -205,6 +221,7 @@ export class HuddleService {
     this.whiteboard.delete(key);
     this.whiteboardOwners.delete(key);
     this.breakouts.delete(key);
+    this.restoredRoles.delete(key);
   }
 
   userIds(key: string): string[] {
@@ -525,4 +542,86 @@ export class HuddleService {
     this.transcripts.delete(key);
     return lines;
   }
+
+  // ----- restart survival (see HuddlePersistenceService) -----
+
+  /** Keys of huddles with at least one participant right now. */
+  activeKeys(): string[] {
+    return [...this.rooms.keys()];
+  }
+
+  hasRoom(key: string): boolean {
+    return (this.rooms.get(key)?.size ?? 0) > 0;
+  }
+
+  /** Was this user in the meeting before a restart (so they rejoin without the
+   *  waiting room / lock gate, like any present member)? */
+  wasMember(key: string, userId: string): boolean {
+    return this.restoredRoles.get(key)?.has(userId) ?? false;
+  }
+
+  /** Everything about a live meeting worth keeping across an API restart.
+   *  Sockets are not — clients reconnect and re-join on their own. */
+  snapshot(key: string): HuddleSnapshot | null {
+    const state = this.states.get(key);
+    if (!this.hasRoom(key) || !state) return null;
+    const breakouts = this.breakouts.get(key);
+    return {
+      v: 1,
+      roles: Object.fromEntries([...state].map(([uid, s]) => [uid, { role: s.role, canAnnotate: s.canAnnotate }])),
+      annotationMode: this.annotationMode(key),
+      poll: this.polls.get(key) ?? null,
+      notes: this.notes.get(key) ?? '',
+      annotations: this.annotationShapes(key),
+      annotationOwners: Object.fromEntries(this.annotationOwners.get(key) ?? []),
+      // A recording lives in the recorder's browser and stops when they drop.
+      settings: { ...this.getSettings(key), recordingBy: null },
+      whiteboard: this.whiteboardShapes(key),
+      whiteboardOwners: Object.fromEntries(this.whiteboardOwners.get(key) ?? []),
+      breakouts: breakouts ? { rooms: breakouts.rooms, assignments: Object.fromEntries(breakouts.assignments) } : null,
+      transcript: this.transcripts.get(key) ?? [],
+    };
+  }
+
+  /** Re-seed an empty room from a snapshot; a no-op if the room is already live. */
+  restore(key: string, snap: HuddleSnapshot): boolean {
+    if (this.hasRoom(key) || snap?.v !== 1) return false;
+    this.restoredRoles.set(key, new Map(Object.entries(snap.roles ?? {})));
+    this.annotationModes.set(key, snap.annotationMode ?? 'everyone');
+    if (snap.poll) this.polls.set(key, snap.poll);
+    if (snap.notes) this.notes.set(key, snap.notes);
+    if (snap.annotations?.length) this.annotations.set(key, new Map(snap.annotations.map((s) => [s.id, s])));
+    if (snap.annotationOwners) this.annotationOwners.set(key, new Map(Object.entries(snap.annotationOwners)));
+    if (snap.settings) this.settings.set(key, { ...defaultSettings(), ...snap.settings, recordingBy: null });
+    if (snap.whiteboard?.length) this.whiteboard.set(key, new Map(snap.whiteboard.map((s) => [s.id, s])));
+    if (snap.whiteboardOwners) this.whiteboardOwners.set(key, new Map(Object.entries(snap.whiteboardOwners)));
+    if (snap.breakouts) {
+      this.breakouts.set(key, {
+        rooms: snap.breakouts.rooms,
+        assignments: new Map(Object.entries(snap.breakouts.assignments)),
+      });
+    }
+    // Keep lines captured since the restart (if any) after the restored ones.
+    if (snap.transcript?.length) {
+      const since = this.transcripts.get(key) ?? [];
+      this.transcripts.set(key, [...snap.transcript, ...since].slice(-TRANSCRIPT_CAP));
+    }
+    return true;
+  }
+}
+
+/** Serialized meeting state; `v` guards against restoring an incompatible shape. */
+export interface HuddleSnapshot {
+  v: 1;
+  roles: Record<string, { role: HuddleRole; canAnnotate: boolean }>;
+  annotationMode: AnnotationMode;
+  poll: HuddlePoll | null;
+  notes: string;
+  annotations: HuddleAnnotationShape[];
+  annotationOwners: Record<string, string>;
+  settings: HuddleSettings;
+  whiteboard: HuddleAnnotationShape[];
+  whiteboardOwners: Record<string, string>;
+  breakouts: { rooms: BreakoutRoom[]; assignments: Record<string, string> } | null;
+  transcript: HuddleTranscriptLine[];
 }

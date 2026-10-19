@@ -32,6 +32,10 @@ import { DiscoverPane } from '@/components/discover-pane';
 import { ApplicationsPane } from '@/components/applications/applications-pane';
 import { TasksPane } from '@/components/tasks-pane';
 import { MyDayPane } from '@/components/my-day-pane';
+import { CalendarPane } from '@/components/calendar-pane';
+import { MeetingDetailDialog } from '@/components/meeting-detail';
+import { FeedbackDialog } from '@/components/feedback-dialog';
+import { setUsageWorkspace, track, trackView } from '@/lib/usage';
 import { AskDialog } from '@/components/ask-dialog';
 import { SearchDialog } from '@/components/search-dialog';
 import { CommandPalette } from '@/components/command-palette';
@@ -87,6 +91,55 @@ function AppShell() {
   useRealtime(workspaceId);
   useTypingJanitor();
 
+  // Feature-usage analytics: which areas of the app people actually open.
+  useEffect(() => {
+    setUsageWorkspace(workspaceId);
+  }, [workspaceId]);
+  useEffect(() => {
+    if (workspaceId) trackView(mainView);
+  }, [workspaceId, mainView]);
+  useEffect(() => {
+    if (searchOpen) track('search:open');
+  }, [searchOpen]);
+
+  // Back from connecting Google/GitHub in Account security: finish the link with
+  // this session (the server checks it's the same person who started it).
+  const linkCode = params.get('oauth-link');
+  const linkError = params.get('oauth-link-error');
+  useEffect(() => {
+    if (!user || (!linkCode && !linkError)) return;
+    const clean = () => {
+      const next = new URLSearchParams(window.location.search);
+      next.delete('oauth-link');
+      next.delete('oauth-link-error');
+      router.replace(`/app${next.toString() ? `?${next}` : ''}`);
+    };
+    const toast = useUiStore.getState().pushToast;
+    if (linkError) {
+      toast(
+        linkError === 'denied'
+          ? 'Connecting was cancelled.'
+          : linkError === 'expired'
+            ? 'That took too long — try connecting again.'
+            : 'Could not connect that account. Please try again.',
+        'error',
+      );
+      clean();
+      return;
+    }
+    if (!linkCode || handledLinkCodes.has(linkCode)) return; // single-use; StrictMode runs effects twice
+    handledLinkCodes.add(linkCode);
+    api<import('@backstages/shared').ConnectedAccountsDto>('POST', '/auth/oauth/link/confirm', { code: linkCode })
+      .then((res) => {
+        qc.setQueryData(['connected-accounts'], res);
+        toast('Account connected — you can now sign in with it.', 'success');
+      })
+      .catch((e) => toast(e instanceof Error ? e.message : 'Could not connect that account.', 'error'))
+      .finally(clean);
+    // Run once per code.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, linkCode, linkError]);
+
   // The huddle lives at the shell (not inside MainPane) so it keeps running when
   // you navigate to another channel or DM.
   const huddle = useHuddle();
@@ -126,7 +179,7 @@ function AppShell() {
   // Pending invite from an /invite/<token> visit pre-login.
   useEffect(() => {
     const pending = window.localStorage.getItem('bs.pendingInvite');
-    if (pending && user) {
+    if (pending && user && !user.needsOnboarding) {
       window.localStorage.removeItem('bs.pendingInvite');
       api<{ id: string }>('POST', '/invites/accept', { token: pending })
         .then((ws) => router.replace(`/app?ws=${ws.id}`))
@@ -150,16 +203,18 @@ function AppShell() {
     if (!loading && !user) router.replace('/login');
   }, [loading, user, router]);
 
-  if (loading || !user) {
+  // First run (new social sign-up, or no workspace yet): the /welcome flow.
+  const needsWelcome = !!user && (!!user.needsOnboarding || (workspaces.isSuccess && workspaces.data.length === 0));
+  useEffect(() => {
+    if (needsWelcome) router.replace('/welcome');
+  }, [needsWelcome, router]);
+
+  if (loading || !user || needsWelcome) {
     return (
       <main className="flex min-h-screen items-center justify-center">
         <div className="animate-pulse text-lg font-semibold text-sidebar dark:text-white">Backstages</div>
       </main>
     );
-  }
-
-  if (workspaces.isSuccess && workspaces.data.length === 0) {
-    return <CreateFirstWorkspace onCreated={(id) => router.replace(`/app?ws=${id}`)} />;
   }
 
   if (!workspaceId) {
@@ -209,6 +264,8 @@ function AppShell() {
             <MyDayPane workspaceId={workspaceId} onNavigate={navigate} />
           ) : mainView === 'tasks' ? (
             <TasksPane workspaceId={workspaceId} onNavigate={navigate} />
+          ) : mainView === 'calendar' ? (
+            <CalendarPane workspaceId={workspaceId} />
           ) : mainView === 'applications' ? (
             <ApplicationsPane workspaceId={workspaceId} />
           ) : container ? (
@@ -252,6 +309,8 @@ function AppShell() {
           }}
         />
       )}
+      <MeetingDetailDialog huddle={huddle} onNavigate={navigate} />
+      <FeedbackDialog workspaceId={workspaceId} />
       <ShortcutsHelp />
       <CommandPalette />
       <AskDialog workspaceId={workspaceId} onNavigate={navigate} />
@@ -260,45 +319,8 @@ function AppShell() {
   );
 }
 
-function CreateFirstWorkspace({ onCreated }: { onCreated: (id: string) => void }) {
-  const [name, setName] = useState('');
-  const [busy, setBusy] = useState(false);
-  const qc = useQueryClient();
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
-      <form
-        className="w-full max-w-sm rounded-xl border border-line bg-white p-6 shadow-sm dark:border-line dark:bg-gray-900"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          const ws = await api<{ id: string }>('POST', '/workspaces', { name });
-          await qc.invalidateQueries({ queryKey: keys.workspaces });
-          onCreated(ws.id);
-        }}
-      >
-        <h1 className="mb-1 text-lg font-semibold">Create your workspace</h1>
-        <p className="mb-4 text-sm text-gray-500">A home for your team&apos;s conversations.</p>
-        <input
-          className="mb-3 w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
-          placeholder="Workspace name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-          autoFocus
-          data-testid="workspace-name"
-        />
-        <button
-          type="submit"
-          disabled={busy || !name.trim()}
-          className="w-full rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
-          data-testid="workspace-create"
-        >
-          {busy ? 'Creating…' : 'Create workspace'}
-        </button>
-      </form>
-    </main>
-  );
-}
+/** Link codes already confirmed in this page load. */
+const handledLinkCodes = new Set<string>();
 
 export default function AppPage() {
   return (

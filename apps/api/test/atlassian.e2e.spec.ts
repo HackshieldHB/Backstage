@@ -493,12 +493,25 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
       const start = await http().get('/auth/atlassian');
       expect(start.status).toBe(302);
       const state = new URL(start.headers.location).searchParams.get('state')!;
+      const cookie = start.headers['set-cookie'] as unknown as string[];
 
-      const cb = await http().get(`/atlassian/callback?code=sso-code&state=${encodeURIComponent(state)}`);
+      // Without the browser-binding cookie the callback refuses (login CSRF).
+      const foreign = await http().get(`/atlassian/callback?code=sso-code&state=${encodeURIComponent(state)}`);
+      expect(foreign.headers.location).toContain('error=oauth-browser');
+
+      const cb = await http()
+        .get(`/atlassian/callback?code=sso-code&state=${encodeURIComponent(state)}`)
+        .set('Cookie', cookie);
       expect(cb.status).toBe(302);
-      const fragment = new URLSearchParams(cb.headers.location.split('#')[1]);
-      const access = fragment.get('access')!;
+      // No tokens in the URL — a one-time code the web app exchanges.
+      expect(cb.headers.location).not.toContain('access=');
+      const loginCode = new URLSearchParams(cb.headers.location.split('#')[1]).get('code')!;
+      expect(loginCode).toBeTruthy();
+      const exchanged = await http().post('/auth/oauth/exchange').send({ code: loginCode }).expect(200);
+      const access = exchanged.body.data.accessToken as string;
       expect(access).toBeTruthy();
+      // Single use.
+      await http().post('/auth/oauth/exchange').send({ code: loginCode }).expect(401);
 
       const me = await http().get('/auth/me').set('Authorization', `Bearer ${access}`).expect(200);
       expect(me.body.data.email).toBe(`atl-sso-${run}@test.local`);
@@ -515,7 +528,9 @@ describe('atlassian integration (e2e, mocked Atlassian API)', () => {
       };
       const start = await http().get('/auth/atlassian');
       const state = new URL(start.headers.location).searchParams.get('state')!;
-      const cb = await http().get(`/atlassian/callback?code=x&state=${encodeURIComponent(state)}`);
+      const cb = await http()
+        .get(`/atlassian/callback?code=x&state=${encodeURIComponent(state)}`)
+        .set('Cookie', start.headers['set-cookie'] as unknown as string[]);
       expect(cb.status).toBe(302);
       expect(cb.headers.location).toContain('error=atlassian-email-unverified');
     });

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth-store';
 import { AuthCard, Field, FormError, SubmitButton } from '@/components/auth/auth-card';
+import { OrDivider, SocialButtons, useOAuthProviders } from '@/components/auth/social-buttons';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -14,6 +15,8 @@ export default function SignupPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const providers = useOAuthProviders();
+  const hasSocial = !!providers && (providers.google || providers.github);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +33,12 @@ export default function SignupPage() {
 
   return (
     <AuthCard title="Create your account">
+      {hasSocial && (
+        <>
+          <SocialButtons verb="Sign up" />
+          <OrDivider />
+        </>
+      )}
       <form onSubmit={onSubmit}>
         <FormError message={error} />
         <Field

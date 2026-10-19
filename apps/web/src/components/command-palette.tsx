@@ -24,6 +24,7 @@ import {
   Users,
   Webhook,
   Workflow,
+  CalendarDays,
 } from 'lucide-react';
 import { ACCENTS, ACCENT_LABEL, ACCENT_SWATCH, useUiStore } from '@/stores/ui-store';
 import type { MainView } from '@/stores/ui-store';
@@ -91,8 +92,10 @@ export function CommandPalette() {
       { id: 'v-projects', label: 'Open Clients & Projects', group: 'Navigate', icon: Briefcase, keywords: 'billability margin revenue budget', run: go('projects') },
       { id: 'v-incidents', label: 'Open Incidents', group: 'Navigate', icon: Siren, keywords: 'oncall on-call sev outage postmortem', run: go('incidents') },
       { id: 'v-myday', label: 'Open My day', group: 'Navigate', icon: Sun, keywords: 'today plan agenda focus schedule meetings priorities', run: go('myday') },
+      { id: 'v-calendar', label: 'Open Calendar', group: 'Navigate', icon: CalendarDays, keywords: 'meetings schedule huddle invite reminder agenda week gmeet', run: go('calendar') },
       { id: 'v-tasks', label: 'Open Tasks', group: 'Navigate', icon: CheckSquare, keywords: 'todo to-do action items assigned due reminders', run: go('tasks') },
       { id: 'v-applications', label: 'Open Applications', group: 'Navigate', icon: LayoutGrid, keywords: 'apps hub tools miro launchdarkly atlassian datadog salesforce status monitoring', run: go('applications') },
+      { id: 'feedback', label: 'Send feedback', group: 'Navigate', icon: MessageCircleQuestion, keywords: 'bug report idea suggestion problem help support', run: () => { useUiStore.getState().setFeedbackOpen(true); setCommandOpen(false); } },
       { id: 'search', label: 'Search messages, files & people…', group: 'Navigate', icon: Search, keywords: 'find', run: () => { setSearchOpen(true); setCommandOpen(false); } },
     ];
     const ask: Cmd = {

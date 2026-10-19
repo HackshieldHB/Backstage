@@ -14,6 +14,7 @@ import {
 import { WorkspacesService } from './workspaces.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { HumanOnly } from '../common/human-only.decorator';
 
 @Controller()
 export class WorkspacesController {
@@ -100,5 +101,19 @@ export class WorkspacesController {
     @Body(new ZodValidationPipe(AcceptInviteSchema)) body: AcceptInviteInput,
   ) {
     return this.workspaces.acceptInvite(user.id, body.token);
+  }
+
+  /** Invitations addressed to my (verified) email — "Join an existing workspace". */
+  @HumanOnly()
+  @Get('me/invitations')
+  myInvitations(@CurrentUser() user: AuthUser) {
+    return this.workspaces.myInvitations(user.id);
+  }
+
+  @HumanOnly()
+  @HttpCode(200)
+  @Post('me/invitations/:inviteId/accept')
+  acceptMyInvitation(@CurrentUser() user: AuthUser, @Param('inviteId') inviteId: string) {
+    return this.workspaces.acceptMyInvitation(user.id, inviteId);
   }
 }
