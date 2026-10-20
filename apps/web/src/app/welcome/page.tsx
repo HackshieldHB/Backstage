@@ -1,15 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Link2, Mail, Plus, Users } from 'lucide-react';
-import type { MyInvitationDto, UserDto } from '@backstages/shared';
+import { useQueryClient } from '@tanstack/react-query';
+import { Building2, Mail, Plus, Users } from 'lucide-react';
+import type { UserDto } from '@backstages/shared';
 import { api } from '@/lib/api';
-import { inviteTokenFrom } from '@/lib/invite-link';
 import { keys, useWorkspaces } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
 import { Avatar } from '@/components/avatar';
+import { JoinWorkspaceSection } from '@/components/join-workspace-section';
 
 const PENDING_INVITE = 'bs.pendingInvite';
 
@@ -17,8 +17,6 @@ const input =
   'w-full rounded-md border border-line-strong bg-elevated px-3 py-2 text-sm text-ink outline-none focus:border-accent';
 const primary =
   'flex w-full items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50';
-const secondary =
-  'rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-ink hover:bg-hovered disabled:opacity-50';
 
 function takePendingInvite(): string | null {
   try {
@@ -107,7 +105,7 @@ export default function WelcomePage() {
         {step === 'profile' ? (
           <ProfileStep user={user} onDone={setUser} onError={setError} />
         ) : (
-          <WorkspaceStep onJoinToken={joinWithToken} onError={setError} />
+          <WorkspaceStep onError={setError} />
         )}
         <p className="mt-6 text-center text-xs text-ink-3">
           Signed in as {user.email} ·{' '}
@@ -177,28 +175,16 @@ function ProfileStep({
   );
 }
 
-function WorkspaceStep({
-  onJoinToken,
-  onError,
-}: {
-  onJoinToken: (token: string) => Promise<void>;
-  onError: (msg: string | null) => void;
-}) {
+function WorkspaceStep({ onError }: { onError: (msg: string | null) => void }) {
   const router = useRouter();
   const qc = useQueryClient();
   const [name, setName] = useState('');
-  const [link, setLink] = useState('');
-  const [busy, setBusy] = useState<string | null>(null);
-  const invitations = useQuery({
-    queryKey: ['my-invitations'],
-    queryFn: () => api<MyInvitationDto[]>('GET', '/me/invitations'),
-  });
-  const linkToken = useMemo(() => inviteTokenFrom(link), [link]);
+  const [busy, setBusy] = useState(false);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    setBusy('create');
+    setBusy(true);
     onError(null);
     try {
       const ws = await api<{ id: string }>('POST', '/workspaces', { name: name.trim() });
@@ -206,25 +192,10 @@ function WorkspaceStep({
       router.replace(`/app?ws=${ws.id}`);
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Could not create the workspace');
-      setBusy(null);
+      setBusy(false);
     }
   };
 
-  const accept = async (inv: MyInvitationDto) => {
-    setBusy(inv.id);
-    onError(null);
-    try {
-      const ws = await api<{ id: string }>('POST', `/me/invitations/${inv.id}/accept`, undefined, { retry: false });
-      await qc.invalidateQueries({ queryKey: keys.workspaces });
-      router.replace(`/app?ws=${ws.id}`);
-    } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not join that workspace');
-      setBusy(null);
-      void invitations.refetch();
-    }
-  };
-
-  const invites = invitations.data ?? [];
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <section className="rounded-xl border border-line bg-surface p-6 shadow-sm" data-testid="welcome-join">
@@ -232,60 +203,7 @@ function WorkspaceStep({
           <Users size={18} /> Join an existing workspace
         </h2>
         <p className="mb-4 text-sm text-ink-2">Your team already uses Backstages? Join them.</p>
-
-        {invitations.isLoading ? (
-          <p className="mb-4 text-sm text-ink-3">Looking for invitations…</p>
-        ) : invites.length > 0 ? (
-          <ul className="mb-4 space-y-2">
-            {invites.map((inv) => (
-              <li key={inv.id} className="flex items-center gap-3 rounded-lg border border-line p-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-sm font-bold text-accent">
-                  {inv.workspace.name.charAt(0).toUpperCase()}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-ink">{inv.workspace.name}</span>
-                  <span className="block truncate text-xs text-ink-3">
-                    {inv.invitedBy} invited you · {inv.workspace.memberCount} member{inv.workspace.memberCount === 1 ? '' : 's'}
-                  </span>
-                </span>
-                <button className={secondary} disabled={busy !== null} onClick={() => void accept(inv)} data-testid="welcome-accept-invite">
-                  {busy === inv.id ? 'Joining…' : 'Join'}
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mb-4 rounded-lg bg-hovered px-3 py-2 text-sm text-ink-2">
-            No invitations for your email yet. Ask a teammate to invite you, or paste an invite link below.
-          </p>
-        )}
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!linkToken) return;
-            setBusy('link');
-            void onJoinToken(linkToken).finally(() => setBusy(null));
-          }}
-        >
-          <label className="mb-1 flex items-center gap-1.5 text-sm font-medium text-ink-2" htmlFor="welcome-link">
-            <Link2 size={14} /> Have an invite link?
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="welcome-link"
-              value={link}
-              onChange={(e) => setLink(e.target.value)}
-              placeholder="https://…/invite/…"
-              className={input}
-              data-testid="welcome-invite-link"
-            />
-            <button type="submit" className={secondary} disabled={!linkToken || busy !== null}>
-              {busy === 'link' ? 'Joining…' : 'Join'}
-            </button>
-          </div>
-          {link.trim() && !linkToken && <p className="mt-1 text-xs text-red-600">That doesn&apos;t look like an invite link.</p>}
-        </form>
+        <JoinWorkspaceSection onJoined={(id) => router.replace(`/app?ws=${id}`)} onError={onError} />
       </section>
 
       <section className="rounded-xl border border-line bg-surface p-6 shadow-sm" data-testid="welcome-create">
@@ -306,8 +224,8 @@ function WorkspaceStep({
             className={`${input} mb-4`}
             data-testid="workspace-name"
           />
-          <button type="submit" disabled={busy !== null || !name.trim()} className={primary} data-testid="workspace-create">
-            <Plus size={15} /> {busy === 'create' ? 'Creating…' : 'Create workspace'}
+          <button type="submit" disabled={busy || !name.trim()} className={primary} data-testid="workspace-create">
+            <Plus size={15} /> {busy ? 'Creating…' : 'Create workspace'}
           </button>
         </form>
       </section>

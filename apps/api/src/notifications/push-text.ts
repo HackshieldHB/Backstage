@@ -25,6 +25,11 @@ export function pushText(
     return { title, body };
   }
   if (pl.source === 'reminder') return { title: '⏰ Reminder', body: pl.text };
+  if (pl.source === 'join_request') {
+    if (pl.action === 'approved') return { title: `🎉 You're in: ${pl.workspaceName ?? 'workspace'}`, body: 'Your join request was approved' };
+    if (pl.action === 'denied') return { title: 'Join request declined', body: pl.workspaceName };
+    return { title: `🙋 ${who} asked to join`, body: 'Open Workspace settings → Members to approve' };
+  }
   if (pl.source === 'feedback') return { title: `💬 Feedback from ${who}`, body: pl.text };
   if (pl.source === 'task') return { title: `Task: ${pl.title ?? ''}`.trim(), body: pl.action ? `${who} · ${pl.action}` : undefined };
 

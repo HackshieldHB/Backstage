@@ -6,6 +6,7 @@ import {
   HttpCode,
   Logger,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -18,12 +19,14 @@ import {
   CreateBotSchema,
   RetentionSettingsSchema,
   SsoConnectionSchema,
+  UpdateDomainSchema,
   WORKSPACE_EXPORT_SCOPES,
   type AddDomainInput,
   type CreateApiTokenInput,
   type CreateBotInput,
   type RetentionSettingsInput,
   type SsoConnectionInput,
+  type UpdateDomainInput,
   type WorkspaceExportScope,
 } from '@backstages/shared';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
@@ -169,6 +172,16 @@ export class SecurityController {
   @Post('domains/:id/verify')
   verifyDomain(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.domains.verify(user.id, id);
+  }
+
+  @HumanOnly()
+  @Patch('domains/:id')
+  updateDomain(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateDomainSchema)) body: UpdateDomainInput,
+  ) {
+    return this.domains.setJoinPolicy(user.id, id, body.joinPolicy);
   }
 
   @HumanOnly()

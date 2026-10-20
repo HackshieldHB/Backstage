@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { keys, type WorkspaceWithRole } from '@/hooks/queries';
 import { Dialog } from './dialog';
+import { JoinWorkspaceSection } from './join-workspace-section';
 
 export function WorkspaceRail({
   workspaces,
@@ -19,6 +20,7 @@ export function WorkspaceRail({
 }) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
+  const [joinError, setJoinError] = useState<string | null>(null);
   const qc = useQueryClient();
 
   return (
@@ -39,7 +41,8 @@ export function WorkspaceRail({
         </button>
       ))}
       <button
-        title="Create workspace"
+        title="Add a workspace"
+        aria-label="Add a workspace"
         onClick={() => setCreating(true)}
         className="mt-1 flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
       >
@@ -47,7 +50,8 @@ export function WorkspaceRail({
       </button>
 
       {creating && (
-        <Dialog title="Create workspace" onClose={() => setCreating(false)}>
+        <Dialog title="Add a workspace" onClose={() => setCreating(false)}>
+          <h3 className="mb-2 text-sm font-semibold text-ink">Create a new workspace</h3>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -73,6 +77,19 @@ export function WorkspaceRail({
               Create
             </button>
           </form>
+          <div className="my-4 flex items-center gap-3">
+            <span className="h-px flex-1 bg-line" />
+            <span className="text-xs text-ink-3">or join one</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+          {joinError && <p className="mb-2 text-sm text-red-600">{joinError}</p>}
+          <JoinWorkspaceSection
+            onJoined={(id) => {
+              setCreating(false);
+              onSelect(id);
+            }}
+            onError={setJoinError}
+          />
         </Dialog>
       )}
     </nav>

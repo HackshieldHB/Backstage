@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Bot, Download, Globe, History, KeyRound, Trash2, Users } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  DomainJoinPolicy,
   ApiTokenScope,
   BotDto,
   CreatedApiTokenDto,
@@ -88,6 +89,22 @@ function DomainsSection({ workspaceId, isOwner }: { workspaceId: string; isOwner
       setBusyId(null);
     }
   };
+  const setJoinPolicy = async (id: string, joinPolicy: DomainJoinPolicy) => {
+    try {
+      await api('PATCH', `/domains/${id}`, { joinPolicy });
+      await refresh();
+      pushToast(
+        joinPolicy === 'OFF'
+          ? 'People on this domain can no longer find the workspace.'
+          : joinPolicy === 'AUTO'
+            ? 'People on this domain can now join directly.'
+            : 'People on this domain can now ask to join.',
+        'success',
+      );
+    } catch (err) {
+      pushToast(errText(err, 'Could not change who can join'), 'error');
+    }
+  };
   const remove = async (id: string) => {
     try {
       await api('DELETE', `/domains/${id}`);
@@ -130,6 +147,28 @@ function DomainsSection({ workspaceId, isOwner }: { workspaceId: string; isOwner
                 </span>
               )}
             </div>
+            {d.verified && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-gray-500">People with a verified @{d.domain} email:</span>
+                {isOwner ? (
+                  <select
+                    className="rounded-md border border-line-strong bg-elevated px-2 py-1 text-xs"
+                    value={d.joinPolicy}
+                    onChange={(e) => void setJoinPolicy(d.id, e.target.value as DomainJoinPolicy)}
+                    aria-label={`Who on ${d.domain} can join`}
+                    data-testid="domain-join-policy"
+                  >
+                    <option value="OFF">can't find this workspace</option>
+                    <option value="REQUEST">can ask to join (admins approve)</option>
+                    <option value="AUTO">can join directly</option>
+                  </select>
+                ) : (
+                  <span className="font-medium">
+                    {d.joinPolicy === 'AUTO' ? 'can join directly' : d.joinPolicy === 'REQUEST' ? 'can ask to join' : "can't find this workspace"}
+                  </span>
+                )}
+              </div>
+            )}
             {!d.verified && (
               <p className="mt-1.5 text-xs text-gray-500">
                 Add a DNS <b>TXT</b> record named <code className="break-all">{d.txtRecordName}</code> with the value{' '}

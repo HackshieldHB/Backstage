@@ -3,8 +3,8 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { ArrowLeftRight, Building2, Plug, ShieldCheck, Trash2, Users } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
-import type { WorkspaceMemberDto, WorkspaceRole } from '@backstages/shared';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { JoinRequestDto, WorkspaceMemberDto, WorkspaceRole } from '@backstages/shared';
 import { api } from '@/lib/api';
 import { keys, useMembers, useRemoveMember, useUpdateMemberRole } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
@@ -172,6 +172,67 @@ const ROLE_BADGE: Record<WorkspaceRole, string> = {
 };
 const title = (r: string) => r[0] + r.slice(1).toLowerCase();
 
+/** Pending "ask to join" requests (from people on an open email domain). */
+function JoinRequests({ workspaceId }: { workspaceId: string }) {
+  const qc = useQueryClient();
+  const pushToast = useUiStore((s) => s.pushToast);
+  const [busy, setBusy] = useState<string | null>(null);
+  const requests = useQuery({
+    queryKey: ['join-requests', workspaceId],
+    queryFn: () => api<JoinRequestDto[]>('GET', `/workspaces/${workspaceId}/join-requests`),
+  });
+  const decide = async (r: JoinRequestDto, approve: boolean) => {
+    setBusy(r.id);
+    try {
+      await api('POST', `/workspaces/${workspaceId}/join-requests/${r.id}/${approve ? 'approve' : 'deny'}`);
+      pushToast(approve ? `${r.user.displayName} joined the workspace.` : `Request from ${r.user.displayName} declined.`, 'success');
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['join-requests', workspaceId] }),
+        qc.invalidateQueries({ queryKey: keys.members(workspaceId) }),
+      ]);
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : 'Could not update the request.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+  const rows = requests.data ?? [];
+  if (!rows.length) return null;
+  return (
+    <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-2.5 dark:border-amber-700/60 dark:bg-amber-950/30" data-testid="join-requests">
+      <p className="mb-2 text-[12px] font-semibold text-amber-800 dark:text-amber-200">
+        {rows.length} {rows.length === 1 ? 'person wants' : 'people want'} to join
+      </p>
+      <ul className="space-y-1.5">
+        {rows.map((r) => (
+          <li key={r.id} className="flex items-center gap-2">
+            <Avatar user={r.user} size="sm" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium">{r.user.displayName}</span>
+              <span className="block truncate text-[11px] text-gray-500">{r.user.email}</span>
+            </span>
+            <button
+              onClick={() => void decide(r, false)}
+              disabled={busy !== null}
+              className="rounded-md px-2 py-1 text-[12px] text-gray-600 hover:bg-hovered disabled:opacity-50 dark:text-gray-300"
+            >
+              Decline
+            </button>
+            <button
+              onClick={() => void decide(r, true)}
+              disabled={busy !== null}
+              className="rounded-md bg-accent px-2 py-1 text-[12px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+              data-testid="approve-join"
+            >
+              {busy === r.id ? '…' : 'Approve'}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Admin member management: change roles, remove members. Mirrors the server's
  *  rules so the UI never offers an action the API would reject. */
 function MembersSettings({ workspaceId }: { workspaceId: string }) {
@@ -233,6 +294,7 @@ function MembersSettings({ workspaceId }: { workspaceId: string }) {
         />
         {!iAmAdmin && <span className="text-[12px] text-gray-500">View only — admins manage roles.</span>}
       </div>
+      {iAmAdmin && <JoinRequests workspaceId={workspaceId} />}
       {members.isLoading ? (
         <p className="py-6 text-center text-gray-500">Loading members…</p>
       ) : (

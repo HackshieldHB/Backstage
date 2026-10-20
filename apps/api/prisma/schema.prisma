@@ -170,6 +170,8 @@ model User {
   meetingResponses        ScheduledHuddleResponse[]
   feedbackGiven           Feedback[]
   usageEvents             UsageEvent[]
+  joinRequests            WorkspaceJoinRequest[]   @relation("JoinRequester")
+  joinRequestsDecided     WorkspaceJoinRequest[]   @relation("JoinRequestDecider")
   tasksCreated           Task[]                   @relation("TaskCreator")
   tasksAssigned           Task[]                   @relation("TaskAssignee")
   workflowRunsTriggered   WorkflowRun[]            @relation("WorkflowRunTrigger")
@@ -282,6 +284,7 @@ model Workspace {
   meetingRecords         MeetingRecord[]
   feedback               Feedback[]
   usageEvents            UsageEvent[]
+  joinRequests           WorkspaceJoinRequest[]
   tasks                  Task[]
   workflowRuns           WorkflowRun[]
   sidebarSections        SidebarSection[]
@@ -1663,6 +1666,8 @@ model WorkspaceDomain {
   /// Expected TXT value at _backstages-challenge.<domain>.
   token       String
   verifiedAt  DateTime?
+  /// Can people with a verified email on this domain find and join the workspace?
+  joinPolicy  DomainJoinPolicy @default(OFF)
   createdAt   DateTime  @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -1736,4 +1741,37 @@ enum CalendarVisibility {
   PRIVATE
   FREE_BUSY
   DETAILS
+}
+
+/// OFF: domain only verified (SSO/SCIM). REQUEST: people on the domain can ask to
+/// join (an admin approves). AUTO: people on the domain join directly.
+enum DomainJoinPolicy {
+  OFF
+  REQUEST
+  AUTO
+}
+
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+}
+
+/// Someone asking to join a workspace they found through its email domain.
+/// One row per person per workspace; asking again re-opens it.
+model WorkspaceJoinRequest {
+  id          String            @id @default(cuid())
+  workspaceId String
+  userId      String
+  status      JoinRequestStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+  decidedAt   DateTime?
+  decidedById String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation("JoinRequester", fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy User?     @relation("JoinRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId, status])
 }

@@ -18,6 +18,12 @@ export function taskOrReminderText(
 ): string | null {
   if (isMeetingNotice(pl)) return meetingNoticeText(pl as MeetingNoticePayload, actorName);
   if (pl.source === 'reminder') return `⏰ Reminder: ${pl.text ?? ''}`.trim();
+  if (pl.source === 'join_request') {
+    const p = pl as TaskReminderPayload & { workspaceName?: string };
+    if (p.action === 'approved') return `🎉 Your request to join ${p.workspaceName || 'the workspace'} was approved`;
+    if (p.action === 'denied') return `Your request to join ${p.workspaceName || 'the workspace'} was declined`;
+    return `🙋 ${actorName ?? 'Someone'} asked to join this workspace`;
+  }
   if (pl.source === 'feedback') return `💬 ${actorName ?? 'Someone'} sent feedback: ${pl.text ?? ''}`.trim();
   if (pl.source === 'workflow_request') {
     const what = pl.action === 'form' ? 'needs you to fill in a form' : 'needs your approval';

@@ -12,13 +12,18 @@ import {
   UpdateWorkspaceSchema,
 } from '@backstages/shared';
 import { WorkspacesService } from './workspaces.service';
+import { JoinService } from './join.service';
+import { RateLimit } from '../common/rate-limit.guard';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { HumanOnly } from '../common/human-only.decorator';
 
 @Controller()
 export class WorkspacesController {
-  constructor(private readonly workspaces: WorkspacesService) {}
+  constructor(
+    private readonly workspaces: WorkspacesService,
+    private readonly joins: JoinService,
+  ) {}
 
   @Post('workspaces')
   create(
@@ -101,6 +106,38 @@ export class WorkspacesController {
     @Body(new ZodValidationPipe(AcceptInviteSchema)) body: AcceptInviteInput,
   ) {
     return this.workspaces.acceptInvite(user.id, body.token);
+  }
+
+  /** Workspaces open to my verified email domain ("anyone @acme.com can join"). */
+  @HumanOnly()
+  @Get('me/joinable-workspaces')
+  joinable(@CurrentUser() user: AuthUser) {
+    return this.joins.joinable(user.id);
+  }
+
+  @HumanOnly()
+  @RateLimit({ limit: 20, windowSeconds: 60, bucket: 'workspace-join' })
+  @HttpCode(200)
+  @Post('workspaces/:id/join')
+  join(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
+    return this.joins.join(user.id, workspaceId);
+  }
+
+  @Get('workspaces/:id/join-requests')
+  joinRequests(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string) {
+    return this.joins.requests(user.id, workspaceId);
+  }
+
+  @HttpCode(200)
+  @Post('workspaces/:id/join-requests/:requestId/approve')
+  approveJoin(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string, @Param('requestId') requestId: string) {
+    return this.joins.decide(user.id, workspaceId, requestId, true);
+  }
+
+  @HttpCode(200)
+  @Post('workspaces/:id/join-requests/:requestId/deny')
+  denyJoin(@CurrentUser() user: AuthUser, @Param('id') workspaceId: string, @Param('requestId') requestId: string) {
+    return this.joins.decide(user.id, workspaceId, requestId, false);
   }
 
   /** Invitations addressed to my (verified) email — "Join an existing workspace". */

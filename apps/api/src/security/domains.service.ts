@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { promises as dns } from 'dns';
 import { randomBytes } from 'crypto';
 import type { WorkspaceDomain } from '@prisma/client';
-import type { WorkspaceDomainDto } from '@backstages/shared';
+import type { DomainJoinPolicy, WorkspaceDomainDto } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { AuditService } from '../admin/audit.service';
@@ -90,6 +90,21 @@ export class DomainsService {
     }
   }
 
+  /** Who on a verified domain may find and join the workspace (owner only). */
+  async setJoinPolicy(userId: string, id: string, joinPolicy: DomainJoinPolicy): Promise<WorkspaceDomainDto> {
+    const row = await this.requireDomain(userId, id);
+    if (joinPolicy !== 'OFF' && !row.verifiedAt) {
+      throw new BadRequestException('Verify the domain first');
+    }
+    const saved = await this.prisma.workspaceDomain.update({ where: { id: row.id }, data: { joinPolicy } });
+    this.audit.record(row.workspaceId, userId, 'domain.join_policy', {
+      targetType: 'domain',
+      targetId: row.domain,
+      meta: { joinPolicy },
+    });
+    return toDto(saved);
+  }
+
   async remove(userId: string, id: string): Promise<{ ok: boolean }> {
     const row = await this.requireDomain(userId, id);
     await this.prisma.workspaceDomain.delete({ where: { id: row.id } });
@@ -126,5 +141,6 @@ function toDto(d: WorkspaceDomain): WorkspaceDomainDto {
     verifiedAt: d.verifiedAt?.toISOString() ?? null,
     txtRecordName: `${CHALLENGE_LABEL}.${d.domain}`,
     txtRecordValue: TXT_PREFIX + d.token,
+    joinPolicy: d.joinPolicy,
   };
 }

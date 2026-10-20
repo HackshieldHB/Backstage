@@ -14,7 +14,7 @@ import {
   UpdateWorkspaceInput,
   type MyInvitationDto,
 } from '@backstages/shared';
-import type { WorkspaceInvite } from '@prisma/client';
+import type { Prisma, WorkspaceInvite, WorkspaceRole } from '@prisma/client';
 import { RealtimeService, roomForChannel, roomForWorkspace } from '../realtime/realtime.service';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -315,45 +315,52 @@ export class WorkspacesService {
       throw new UnauthorizedException('Invite already used');
     }
 
-    const existing = await this.prisma.workspaceMember.findUnique({
-      where: { workspaceId_userId: { workspaceId: invite.workspaceId, userId } },
-    });
-    if (existing) throw new BadRequestException('Already a member of this workspace');
-
-    const joinedChannelId = await this.prisma.$transaction(async (tx) => {
-      await tx.workspaceMember.create({
-        data: { workspaceId: invite.workspaceId, userId, role: invite.role },
-      });
-      const general = await tx.channel.findFirst({
-        where: { workspaceId: invite.workspaceId, isDefault: true },
-      });
-      // Guests are not auto-added anywhere: they only see explicitly granted channels.
-      if (general && invite.role !== 'GUEST') {
-        await tx.channelMember.create({ data: { channelId: general.id, userId } });
-      }
-      await tx.workspaceInvite.update({
+    return this.addMember(userId, invite.workspaceId, invite.role, (tx) =>
+      tx.workspaceInvite.update({
         where: { id: invite.id },
         data: {
           usedCount: { increment: 1 },
           ...(invite.email ? { usedAt: new Date(), usedById: userId } : {}),
         },
-      });
-      return general && invite.role !== 'GUEST' ? general.id : null;
+      }),
+    );
+  }
+
+  /**
+   * Make someone a member: workspace membership, #general (not for guests),
+   * live socket rooms, "member joined" events. Shared by invites, domain joins
+   * and approved join requests. `within` runs in the same transaction.
+   */
+  async addMember(
+    userId: string,
+    workspaceId: string,
+    role: WorkspaceRole,
+    within?: (tx: Prisma.TransactionClient) => Promise<unknown>,
+  ) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const existing = await this.prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId } },
     });
-    await this.subscribeToWorkspace(userId, invite.workspaceId, joinedChannelId);
+    if (existing) throw new BadRequestException('Already a member of this workspace');
+
+    const joinedChannelId = await this.prisma.$transaction(async (tx) => {
+      await tx.workspaceMember.create({ data: { workspaceId, userId, role } });
+      const general = await tx.channel.findFirst({ where: { workspaceId, isDefault: true } });
+      // Guests are not auto-added anywhere: they only see explicitly granted channels.
+      if (general && role !== 'GUEST') {
+        await tx.channelMember.create({ data: { channelId: general.id, userId } });
+      }
+      if (within) await within(tx);
+      return general && role !== 'GUEST' ? general.id : null;
+    });
+    await this.subscribeToWorkspace(userId, workspaceId, joinedChannelId);
     if (joinedChannelId) {
       this.realtime.emitToChannel(joinedChannelId, SOCKET_EVENTS.MEMBER_JOINED, {
         channelId: joinedChannelId,
         user: toUserDto(user),
       });
-      void this.workflowEvents.emit({
-        type: 'member_joined',
-        workspaceId: invite.workspaceId,
-        channelId: joinedChannelId,
-        userId,
-      });
+      void this.workflowEvents.emit({ type: 'member_joined', workspaceId, channelId: joinedChannelId, userId });
     }
-
-    return this.getById(userId, invite.workspaceId);
+    return this.getById(userId, workspaceId);
   }
 }

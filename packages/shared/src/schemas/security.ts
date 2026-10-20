@@ -182,6 +182,37 @@ export interface WorkspaceDomainDto {
   /** Publish this as a TXT record to prove control of the domain. */
   txtRecordName: string;
   txtRecordValue: string;
+  /** Who on this domain may find the workspace (verified domains only). */
+  joinPolicy: DomainJoinPolicy;
+}
+
+export const DomainJoinPolicySchema = z.enum(['OFF', 'REQUEST', 'AUTO']);
+export type DomainJoinPolicy = z.infer<typeof DomainJoinPolicySchema>;
+
+export const UpdateDomainSchema = z.object({ joinPolicy: DomainJoinPolicySchema });
+export type UpdateDomainInput = z.infer<typeof UpdateDomainSchema>;
+
+/** A workspace someone can join (or ask to join) through their verified email domain. */
+export interface JoinableWorkspaceDto {
+  id: string;
+  name: string;
+  memberCount: number;
+  domain: string;
+  policy: Exclude<DomainJoinPolicy, 'OFF'>;
+  /** Their open/decided request, if any. */
+  requestStatus: 'PENDING' | 'DENIED' | null;
+}
+
+export interface JoinWorkspaceResultDto {
+  status: 'joined' | 'requested';
+  workspaceId: string;
+}
+
+export interface JoinRequestDto {
+  id: string;
+  user: { id: string; displayName: string; email: string; avatarUrl: string | null };
+  status: 'PENDING' | 'APPROVED' | 'DENIED';
+  createdAt: string;
 }
 
 /** Login-page lookup: does this email's domain use SSO? */
