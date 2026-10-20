@@ -16,6 +16,8 @@ import { toUserDto } from './auth.service';
 import { encryptToken } from '../atlassian/crypto';
 import {
   authorizeUrl,
+  googleExchange,
+  type GoogleTokens,
   githubExchange,
   githubProfile,
   githubProfileFromToken,
@@ -41,6 +43,18 @@ interface PendingAuth {
   nonce: string;
   /** Login mode: sha256 of the browser-binding cookie set at start. */
   browserHash?: string;
+}
+
+/** Read/write events on the person's calendars (no access to calendar settings). */
+export const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+
+export interface PendingGoogleCalendar {
+  googleSub: string;
+  email: string;
+  refreshTokenEnc: string;
+  accessTokenEnc: string;
+  accessTokenExpiresAt: string;
+  scopes: string;
 }
 
 /** A sign-in failure; `reason` becomes ?error=oauth-<reason> on the login page. */
@@ -112,6 +126,22 @@ export class SocialLoginService {
     return { url: await this.start({ provider: 'github', mode: 'connect', userId }, undefined, 'repo read:user user:email') };
   }
 
+  /** Connect Google Calendar (calendar.events + offline access) for two-way sync. */
+  async startGoogleCalendarConnect(userId: string): Promise<{ url: string }> {
+    return {
+      url: await this.start({ provider: 'google', mode: 'connect', userId }, undefined, `openid email ${GOOGLE_CALENDAR_SCOPE}`, true),
+    };
+  }
+
+  /** Called by the signed-in app with the code from /app?google-calendar=… */
+  async takeGoogleCalendarConnect(userId: string, code: string): Promise<PendingGoogleCalendar> {
+    const raw = await this.takeOnce(`oauth:gconnect:${sha256(code)}`);
+    if (!raw) throw new BadRequestException('This request expired — try connecting Google Calendar again');
+    const pending = JSON.parse(raw) as PendingGoogleCalendar & { userId: string };
+    if (pending.userId !== userId) throw new BadRequestException('This request belongs to another account');
+    return pending;
+  }
+
   /** Called by the signed-in app with the code from /app?github-connect=… */
   async takeGithubConnect(
     userId: string,
@@ -128,6 +158,7 @@ export class SocialLoginService {
     base: Pick<PendingAuth, 'provider' | 'mode' | 'userId' | 'browserHash'>,
     loginHint?: string,
     scope?: string,
+    offline?: boolean,
   ): Promise<string> {
     const creds = providerCredentials(base.provider);
     if (!creds) throw new SocialLoginError('not-configured', `${label(base.provider)} sign-in is not set up`);
@@ -141,6 +172,7 @@ export class SocialLoginService {
       nonce: pending.nonce,
       loginHint: loginHint && EMAIL_RE.test(loginHint) ? loginHint : undefined,
       scope,
+      offline,
     });
   }
 
@@ -184,7 +216,9 @@ export class SocialLoginService {
     if (pending.mode === 'login' && (!browserSecret || sha256(browserSecret) !== pending.browserHash)) {
       throw new SocialLoginError('browser', 'This sign-in was started in a different browser — start again here');
     }
-    if (pending.mode === 'connect') return this.finishGithubConnect(code, pending);
+    if (pending.mode === 'connect') {
+      return pending.provider === 'github' ? this.finishGithubConnect(code, pending) : this.finishGoogleConnect(code, pending);
+    }
     const profile = await this.fetchProfile(provider, code, pending);
 
 
@@ -259,6 +293,38 @@ export class SocialLoginService {
       });
     }
     return this.connected(userId);
+  }
+
+  private async finishGoogleConnect(code: string, pending: PendingAuth): Promise<{ redirect: string; mode: 'connect' }> {
+    const creds = providerCredentials('google');
+    if (!creds || !pending.userId) throw new SocialLoginError('not-configured', 'Google is not set up');
+    let tokens: GoogleTokens;
+    try {
+      tokens = await googleExchange(creds, code, {
+        redirectUri: oauthRedirectUri('google'),
+        codeVerifier: pending.verifier,
+        nonce: pending.nonce,
+      });
+    } catch (err) {
+      throw new SocialLoginError('provider', `Google Calendar connection failed: ${errText(err)}`);
+    }
+    // Google's consent screen lets people untick individual permissions.
+    if (!tokens.scope.split(/\s+/).includes(GOOGLE_CALENDAR_SCOPE)) {
+      throw new SocialLoginError('scope', 'Calendar access was not granted');
+    }
+    if (!tokens.refreshToken) throw new SocialLoginError('provider', 'Google did not grant offline access');
+    const linkCode = randomUrlToken(32);
+    const payload: PendingGoogleCalendar & { userId: string } = {
+      userId: pending.userId,
+      googleSub: tokens.profile.subject,
+      email: tokens.profile.verifiedEmail ?? tokens.profile.label,
+      refreshTokenEnc: encryptToken(tokens.refreshToken),
+      accessTokenEnc: encryptToken(tokens.accessToken),
+      accessTokenExpiresAt: new Date(Date.now() + tokens.expiresInSeconds * 1000).toISOString(),
+      scopes: tokens.scope,
+    };
+    await this.redis.set(`oauth:gconnect:${sha256(linkCode)}`, JSON.stringify(payload), 'EX', LOGIN_CODE_TTL_S);
+    return { redirect: `${webOrigin()}/app?google-calendar=${encodeURIComponent(linkCode)}`, mode: 'connect' };
   }
 
   private async finishGithubConnect(code: string, pending: PendingAuth): Promise<{ redirect: string; mode: 'connect' }> {

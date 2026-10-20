@@ -58,3 +58,34 @@ export interface PersonCalendarDto {
   /** Their external calendar feed couldn't be read right now (meetings still shown). */
   externalUnavailable: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Google Calendar (two-way)
+// ---------------------------------------------------------------------------
+
+export interface GoogleCalendarStatusDto {
+  /** GOOGLE_CLIENT_ID/SECRET are configured on the server. */
+  available: boolean;
+  connected: boolean;
+  /** The Google account whose calendar is connected. */
+  email: string | null;
+  /** Copy my Backstages meetings into this calendar. */
+  pushMeetings: boolean;
+  /** Google rejected our access (revoked) — reconnect to resume syncing. */
+  broken: boolean;
+  lastSyncedAt: string | null;
+}
+
+export const UpdateGoogleCalendarSchema = z.object({ pushMeetings: z.boolean() });
+export type UpdateGoogleCalendarInput = z.infer<typeof UpdateGoogleCalendarSchema>;
+
+export const GoogleCalendarConfirmSchema = z.object({ code: z.string().min(20).max(200) });
+export type GoogleCalendarConfirmInput = z.infer<typeof GoogleCalendarConfirmSchema>;
+
+/** My own external calendar events (Google or ICS) for the calendar view. */
+export interface MyExternalEventsDto {
+  source: 'google' | 'ics' | 'none';
+  events: { start: string; end: string; title: string; allDay: boolean }[];
+  /** The calendar couldn't be read right now. */
+  unavailable: boolean;
+}

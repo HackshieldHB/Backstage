@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import type { CalendarLinkDto } from '@backstages/shared';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
+import type { CalendarLinkDto, MyExternalEventsDto } from '@backstages/shared';
+import { GoogleCalendarService } from '../google-calendar/google-calendar.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { safeGetText, validatePublicUrl } from '../common/safe-http';
@@ -74,6 +75,7 @@ export class CalendarService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly users: UsersService,
+    @Optional() private readonly google?: GoogleCalendarService,
   ) {}
 
   async get(userId: string): Promise<CalendarLinkDto> {
@@ -114,8 +116,10 @@ export class CalendarService {
   /** Scheduler entrypoint: sync every linked calendar. */
   async runDue(): Promise<number> {
     const links = await this.prisma.calendarLink.findMany({ select: { userId: true, icsUrl: true } });
+    const googleUsers = new Set(this.google ? await this.google.linkedUserIds() : []);
     let synced = 0;
     for (const l of links) {
+      if (googleUsers.has(l.userId)) continue; // Google wins when both are linked
       try {
         await this.syncUser(l.userId, l.icsUrl);
         synced++;
@@ -123,7 +127,41 @@ export class CalendarService {
         this.logger.warn(`calendar sync for ${l.userId} failed: ${String(e)}`);
       }
     }
+    for (const userId of googleUsers) {
+      try {
+        const now = Date.now();
+        const events = (await this.google!.eventsBetween(userId, new Date(now - 12 * 3600_000), new Date(now + 60_000))) ?? [];
+        await this.applyMeetingStatus(userId, events.some((e) => e.busy && !e.allDay && e.start <= now && e.end > now));
+        synced++;
+      } catch (e) {
+        this.logger.warn(`Google calendar status for ${userId} failed: ${String(e)}`);
+      }
+    }
     return synced;
+  }
+
+  /** My own external events for the calendar view (Google if connected, else ICS). */
+  async myEvents(userId: string, from: Date, to: Date): Promise<MyExternalEventsDto> {
+    if (this.google && (await this.google.hasUsableLink(userId))) {
+      try {
+        const events = (await this.google.eventsBetween(userId, from, to)) ?? [];
+        return {
+          source: 'google',
+          unavailable: false,
+          events: events.map((e) => ({ start: new Date(e.start).toISOString(), end: new Date(e.end).toISOString(), title: e.title, allDay: e.allDay })),
+        };
+      } catch (err) {
+        this.logger.warn(`Google events for ${userId}: ${String(err)}`);
+        return { source: 'google', unavailable: true, events: [] };
+      }
+    }
+    const ics = await this.eventsBetween(userId, from, to);
+    if (ics.state === 'none') return { source: 'none', unavailable: false, events: [] };
+    return {
+      source: 'ics',
+      unavailable: ics.state === 'error',
+      events: ics.events.map((e) => ({ start: new Date(e.start).toISOString(), end: new Date(e.end).toISOString(), title: e.title, allDay: false })),
+    };
   }
 
   /**
@@ -136,6 +174,22 @@ export class CalendarService {
     from: Date,
     to: Date,
   ): Promise<{ state: 'ok' | 'none' | 'error'; events: IcsEvent[] }> {
+    if (this.google && (await this.google.hasUsableLink(userId))) {
+      try {
+        const events = (await this.google.eventsBetween(userId, from, to)) ?? [];
+        // Busy time: timed, non-"free" events, plus all-day out-of-office blocks.
+        return {
+          state: 'ok',
+          events: events
+            .filter((e) => (e.busy && !e.allDay) || e.outOfOffice)
+            .map((e) => ({ start: e.start, end: e.end, title: e.title }))
+            .slice(0, 100),
+        };
+      } catch (err) {
+        this.logger.warn(`Google calendar fetch for ${userId} failed: ${err instanceof Error ? err.message : err}`);
+        return { state: 'error', events: [] };
+      }
+    }
     const link = await this.prisma.calendarLink.findUnique({ where: { userId } });
     if (!link) return { state: 'none', events: [] };
     try {
@@ -159,6 +213,13 @@ export class CalendarService {
     const text = await this.fetchIcs(icsUrl);
     const now = Date.now();
     const inMeeting = parseIcs(text).some((e) => e.start <= now && e.end > now);
+    await this.applyMeetingStatus(userId, inMeeting);
+    await this.prisma.calendarLink.update({ where: { userId }, data: { lastSyncAt: new Date() } }).catch(() => undefined);
+  }
+
+  /** Reflect "in a meeting" in the status — only ever touching the calendar-owned (🗓️) status. */
+  private async applyMeetingStatus(userId: string, inMeeting: boolean): Promise<void> {
+    const now = Date.now();
     const me = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { statusEmoji: true, dndUntil: true },
@@ -176,7 +237,6 @@ export class CalendarService {
     } else if (!inMeeting && hasCalendarStatus) {
       await this.users.updateStatus(userId, { statusEmoji: null, statusText: null, statusExpiresAt: null });
     }
-    await this.prisma.calendarLink.update({ where: { userId }, data: { lastSyncAt: new Date() } }).catch(() => undefined);
   }
 
   /** Fetch the ICS with a timeout + size cap. */

@@ -13,6 +13,7 @@ import type {
 import {
   useCalendarMeetings,
   useCalendarSharing,
+  useMyExternalEvents,
   usePeopleCalendars,
   useSetCalendarSharing,
   useSharedCalendarPeople,
@@ -42,6 +43,7 @@ export const VISIBILITY_COPY: Record<CalendarVisibility, { label: string; hint: 
 
 type Item =
   | { kind: 'mine'; key: string; s: number; e: number; m: ScheduledHuddleDto }
+  | { kind: 'external'; key: string; s: number; e: number; title: string }
   | { kind: 'person'; key: string; s: number; e: number; ev: SharedCalendarEventDto; person: OverlayPerson };
 
 interface OverlayPerson {
@@ -181,6 +183,38 @@ export function CalendarPane({ workspaceId }: { workspaceId: string }) {
     from,
     to,
   );
+  // My own Google Calendar / ICS events, shown greyed (toggle remembered per browser).
+  const [showMine, setShowMine] = useState(true);
+  useEffect(() => {
+    try {
+      setShowMine(window.localStorage.getItem('bs.calendar.showMine') !== '0');
+    } catch {
+      /* default on */
+    }
+  }, []);
+  const toggleMine = (v: boolean) => {
+    setShowMine(v);
+    try {
+      window.localStorage.setItem('bs.calendar.showMine', v ? '1' : '0');
+    } catch {
+      /* per-browser convenience only */
+    }
+  };
+  const external = useMyExternalEvents(from, to);
+  const externalSource = external.data?.source ?? 'none';
+  const allDayByDay = useMemo(() => {
+    const map = new Map<string, string[]>();
+    if (!showMine) return map;
+    for (const e of external.data?.events ?? []) {
+      if (!e.allDay) continue;
+      // All-day dates are calendar dates; walk them day by day (end is exclusive).
+      for (let t = Date.parse(e.start); t < Date.parse(e.end); t += 24 * 3600_000) {
+        const key = new Date(t).toISOString().slice(0, 10);
+        map.set(key, [...(map.get(key) ?? []), e.title || 'Busy']);
+      }
+    }
+    return map;
+  }, [external.data, showMine]);
 
   // Start the grid scrolled to the working day (or just before now).
   useEffect(() => {
@@ -212,8 +246,13 @@ export function CalendarPane({ workspaceId }: { workspaceId: string }) {
         });
       }
     }
-    return [...mine, ...theirs];
-  }, [meetings.data, calendars.data, people]);
+    const ext: Item[] = showMine
+      ? (external.data?.events ?? [])
+          .filter((e) => !e.allDay)
+          .map((e, i) => ({ kind: 'external' as const, key: `ext:${i}:${e.start}`, s: Date.parse(e.start), e: Date.parse(e.end), title: e.title }))
+      : [];
+    return [...mine, ...theirs, ...ext];
+  }, [meetings.data, calendars.data, people, external.data, showMine]);
 
   const step = narrow ? 1 : 7;
   const title = narrow
@@ -293,6 +332,17 @@ export function CalendarPane({ workspaceId }: { workspaceId: string }) {
         </div>
       )}
 
+      {externalSource !== 'none' && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-line px-4 py-1 text-[12px] text-ink-2">
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={showMine} onChange={(e) => toggleMine(e.target.checked)} data-testid="toggle-my-events" />
+            <span className="h-2 w-2 rounded-full bg-ink-3" />
+            My {externalSource === 'google' ? 'Google Calendar' : 'calendar feed'} events
+          </label>
+          {external.data?.unavailable && <span className="text-amber-600">· couldn&apos;t be read right now</span>}
+        </div>
+      )}
+
       {people.length > 0 && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-4 py-1.5 text-[12px]" data-testid="calendar-legend">
           <span className="text-ink-3">Showing:</span>
@@ -342,6 +392,11 @@ export function CalendarPane({ workspaceId }: { workspaceId: string }) {
               >
                 {format(d, 'd')}
               </span>
+              {(allDayByDay.get(format(d, 'yyyy-MM-dd')) ?? []).slice(0, 2).map((t, i) => (
+                <span key={i} className="mt-0.5 max-w-full truncate rounded bg-hovered px-1 text-[10px] text-ink-2" title={t}>
+                  {t}
+                </span>
+              ))}
             </button>
           );
         })}
@@ -388,6 +443,24 @@ export function CalendarPane({ workspaceId }: { workspaceId: string }) {
                   };
                   const start = new Date(item.s);
                   const past = item.e < now.getTime();
+
+                  if (item.kind === 'external') {
+                    return (
+                      <div
+                        key={item.key}
+                        className={clsx(
+                          'pointer-events-none absolute overflow-hidden rounded-md border border-dashed border-line-strong bg-hovered px-1.5 py-0.5 text-[11px] leading-tight text-ink-2',
+                          past && 'opacity-50',
+                        )}
+                        style={pos}
+                        title={`${item.title} · ${format(start, 'HH:mm')}`}
+                        data-testid="calendar-external-event"
+                      >
+                        <span className="block truncate font-medium">{item.title || 'Busy'}</span>
+                        {height > 30 && <span className="block truncate opacity-80">{format(start, 'HH:mm')}</span>}
+                      </div>
+                    );
+                  }
 
                   if (item.kind === 'person') {
                     const { ev, person } = item;

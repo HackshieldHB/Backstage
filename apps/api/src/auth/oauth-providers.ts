@@ -72,6 +72,8 @@ export function authorizeUrl(
     loginHint?: string;
     /** Override the default scopes (GitHub "connect to create issues" needs repo). */
     scope?: string;
+    /** Google: ask for a refresh token (calendar sync runs while you're away). */
+    offline?: boolean;
   },
 ): string {
   const url = new URL(p === 'google' ? GOOGLE.authorizeUrl : GITHUB.authorizeUrl);
@@ -82,9 +84,16 @@ export function authorizeUrl(
   url.searchParams.set('code_challenge_method', 'S256');
   if (p === 'google') {
     url.searchParams.set('response_type', 'code');
-    url.searchParams.set('scope', 'openid email profile');
+    url.searchParams.set('scope', opts.scope ?? 'openid email profile');
     url.searchParams.set('nonce', opts.nonce);
-    url.searchParams.set('prompt', 'select_account');
+    if (opts.offline) {
+      url.searchParams.set('access_type', 'offline');
+      // Google only returns a refresh token on a fresh consent.
+      url.searchParams.set('prompt', 'consent');
+      url.searchParams.set('include_granted_scopes', 'true');
+    } else {
+      url.searchParams.set('prompt', 'select_account');
+    }
     if (opts.loginHint) url.searchParams.set('login_hint', opts.loginHint);
   } else {
     // user:email is required to read the (verified) email list.
@@ -137,11 +146,28 @@ export function resetGoogleKeyCache(): void {
   googleKeys = null;
 }
 
+export interface GoogleTokens {
+  accessToken: string;
+  refreshToken: string | null;
+  expiresInSeconds: number;
+  scope: string;
+  profile: ProviderProfile;
+}
+
 export async function googleProfile(
   creds: ProviderCredentials,
   code: string,
   opts: { redirectUri: string; codeVerifier: string; nonce: string },
 ): Promise<ProviderProfile> {
+  return (await googleExchange(creds, code, opts)).profile;
+}
+
+/** Code → tokens (+ the verified ID token's profile). */
+export async function googleExchange(
+  creds: ProviderCredentials,
+  code: string,
+  opts: { redirectUri: string; codeVerifier: string; nonce: string },
+): Promise<GoogleTokens> {
   const tokens = await postForm(GOOGLE.tokenUrl, {
     grant_type: 'authorization_code',
     code,
@@ -167,14 +193,47 @@ export async function googleProfile(
   // Google: trust the email only when email_verified is true.
   const verified = claims.email_verified === true || claims.email_verified === 'true';
   const picture = (claims as unknown as { picture?: unknown }).picture;
-  return {
+  const profile: ProviderProfile = {
     subject: claims.sub,
     verifiedEmail: email && verified ? email : null,
     displayName: typeof claims.name === 'string' && claims.name.trim() ? claims.name.trim().slice(0, 80) : null,
     avatarUrl: typeof picture === 'string' && picture.startsWith('https://') ? picture : null,
     label: email ?? 'Google account',
   };
+  if (typeof tokens.access_token !== 'string') throw new Error('Google did not return an access token');
+  return {
+    accessToken: tokens.access_token,
+    refreshToken: typeof tokens.refresh_token === 'string' ? tokens.refresh_token : null,
+    expiresInSeconds: typeof tokens.expires_in === 'number' ? tokens.expires_in : 3600,
+    scope: typeof tokens.scope === 'string' ? tokens.scope : '',
+    profile,
+  };
 }
+
+/** Exchange a refresh token for a fresh access token. Throws GoogleGrantError when revoked. */
+export async function googleRefresh(
+  creds: ProviderCredentials,
+  refreshToken: string,
+): Promise<{ accessToken: string; expiresInSeconds: number }> {
+  const res = await fetch(GOOGLE.tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', 'User-Agent': UA },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
+    }).toString(),
+    signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+  });
+  const json = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error?: string };
+  if (json.error === 'invalid_grant') throw new GoogleGrantError('Google access was revoked');
+  if (!res.ok || typeof json.access_token !== 'string') throw new Error(`Google token refresh failed: ${json.error ?? res.status}`);
+  return { accessToken: json.access_token, expiresInSeconds: json.expires_in ?? 3600 };
+}
+
+/** The refresh token no longer works (revoked or expired): reconnect needed. */
+export class GoogleGrantError extends Error {}
 
 // ---------------------------------------------------------------------------
 // GitHub

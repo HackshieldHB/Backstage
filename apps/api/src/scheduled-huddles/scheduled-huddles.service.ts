@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import type { MeetingResponse as DbMeetingResponse, Prisma, ScheduledHuddle } from '@prisma/client';
 import {
@@ -18,6 +19,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MeetingHooks } from './meeting-hooks';
 import { nextOccurrence, nextOccurrenceAfter, projectOccurrences, validTimeZone } from './recurrence';
 
 /** How long a scheduled huddle keeps showing in a channel's "upcoming" banner
@@ -66,7 +68,13 @@ export class ScheduledHuddlesService {
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
     private readonly notifications: NotificationsService,
+    @Optional() private readonly hooks?: MeetingHooks,
   ) {}
+
+  /** Let listeners (e.g. Google Calendar sync) know meetings here changed. */
+  private changed(row: Pick<ScheduledHuddle, 'channelId' | 'conversationId'>, userIds?: string[]) {
+    this.hooks?.emit({ channelId: row.channelId, conversationId: row.conversationId, userIds });
+  }
 
   // ---------- scheduling ----------
 
@@ -118,6 +126,7 @@ export class ScheduledHuddlesService {
         : await this.prisma.scheduledHuddle.update({ where: { id: created.id }, data: { seriesId: created.id } });
 
     await this.noticeGuests(row, 'invite', { exclude: [userId] });
+    this.changed(row);
     return this.dtoById(row.id, userId);
   }
 
@@ -158,6 +167,7 @@ export class ScheduledHuddlesService {
 
     const worthTelling = timeChanged || input.title !== undefined || input.recurrence !== undefined;
     if (worthTelling) await this.noticeGuests(row, 'updated', { exclude: [userId], extra: { timeChanged } });
+    this.changed(row);
     return this.dtoById(row.id, userId);
   }
 
@@ -187,6 +197,7 @@ export class ScheduledHuddlesService {
       });
       if (!moved) return { ok: false };
       await this.noticeGuests(row, 'cancelled', { exclude: [userId], extra: { scope: 'occurrence' } });
+      this.changed(row);
       return { ok: true };
     }
 
@@ -203,6 +214,7 @@ export class ScheduledHuddlesService {
         ],
       },
     });
+    if (count > 0) this.changed(row);
     return { ok: count > 0 };
   }
 
@@ -221,6 +233,7 @@ export class ScheduledHuddlesService {
     if (row.createdById !== userId && previous?.response !== response) {
       await this.notice(row, row.createdById, 'response', { actorId: userId, extra: { response } });
     }
+    if (previous?.response !== response) this.changed(row, [userId]);
     return this.dtoById(id, userId);
   }
 
@@ -428,6 +441,7 @@ export class ScheduledHuddlesService {
         seriesId: h.seriesId ?? h.id,
       },
     });
+    this.changed(h);
   }
 
   private async safely(id: string, fn: () => Promise<unknown>): Promise<boolean> {

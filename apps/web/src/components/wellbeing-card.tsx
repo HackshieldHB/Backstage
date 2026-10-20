@@ -200,6 +200,89 @@ export function MissedEmailToggle() {
   );
 }
 
+/** Two-way Google Calendar: meetings copied in, Google events used as busy time. */
+export function GoogleCalendarCard() {
+  const qc = useQueryClient();
+  const status = useQuery({
+    queryKey: ['google-calendar'],
+    queryFn: () => api<import('@backstages/shared').GoogleCalendarStatusDto>('GET', '/me/google-calendar'),
+  });
+  const [busy, setBusy] = useState(false);
+  const s = status.data;
+  if (!s || (!s.available && !s.connected)) return null;
+
+  const connect = async () => {
+    setBusy(true);
+    try {
+      const { url } = await api<{ url: string }>('POST', '/me/google-calendar/connect');
+      window.location.href = url; // back to /app?google-calendar=…
+    } catch {
+      setBusy(false);
+    }
+  };
+  const update = async (body: { pushMeetings: boolean } | null) => {
+    setBusy(true);
+    try {
+      const next = body
+        ? await api<import('@backstages/shared').GoogleCalendarStatusDto>('PUT', '/me/google-calendar', body)
+        : await api<import('@backstages/shared').GoogleCalendarStatusDto>('DELETE', '/me/google-calendar');
+      qc.setQueryData(['google-calendar'], next);
+      await qc.invalidateQueries({ queryKey: ['meetings'] });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-4 rounded-md border border-line p-2.5 dark:border-line" data-testid="google-calendar-card">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Google Calendar</span>
+        {s.connected ? (
+          <button onClick={() => void update(null)} disabled={busy} className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50">
+            Disconnect
+          </button>
+        ) : (
+          <button
+            onClick={() => void connect()}
+            disabled={busy}
+            className="rounded border border-accent px-2 py-0.5 text-xs font-medium text-accent hover:bg-accent/10 disabled:opacity-50"
+            data-testid="google-calendar-connect"
+          >
+            Connect
+          </button>
+        )}
+      </div>
+      {s.connected ? (
+        <>
+          {s.broken ? (
+            <p className="mt-1 text-[11px] text-red-600">
+              Google stopped accepting our access.{' '}
+              <button className="underline" onClick={() => void connect()}>
+                Reconnect
+              </button>{' '}
+              to resume syncing.
+            </p>
+          ) : (
+            <p className="mt-1 truncate text-[11px] text-gray-400">
+              {s.email}
+              {s.lastSyncedAt ? ` · synced ${new Date(s.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+              . Your Google events count as busy time.
+            </p>
+          )}
+          <label className="mt-1.5 flex items-center gap-2 text-[11.5px] text-gray-600 dark:text-gray-300">
+            <input type="checkbox" checked={s.pushMeetings} disabled={busy} onChange={(e) => void update({ pushMeetings: e.target.checked })} />
+            Add my Backstages meetings to this calendar
+          </label>
+        </>
+      ) : (
+        <p className="mt-1 text-[11px] text-gray-400">
+          Meetings you&apos;re invited to appear in Google Calendar, and your Google events show as busy to teammates.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Link a calendar .ics feed so presence auto-flips to "In a meeting". */
 export function CalendarLink() {
   const qc = useQueryClient();

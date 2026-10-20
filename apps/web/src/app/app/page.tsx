@@ -121,7 +121,9 @@ function AppShell() {
           ? 'Connecting was cancelled.'
           : linkError === 'expired'
             ? 'That took too long — try connecting again.'
-            : 'Could not connect that account. Please try again.',
+            : linkError === 'scope'
+              ? 'Calendar access wasn’t granted. Try again and leave “See and edit events” ticked on Google’s screen.'
+              : 'Could not connect that account. Please try again.',
         'error',
       );
       clean();
@@ -139,6 +141,26 @@ function AppShell() {
     // Run once per code.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, linkCode, linkError]);
+
+  // Back from "Connect Google Calendar": finish it with this session.
+  const gcalCode = params.get('google-calendar');
+  useEffect(() => {
+    if (!user || !gcalCode || handledLinkCodes.has(gcalCode)) return;
+    handledLinkCodes.add(gcalCode);
+    const toast = useUiStore.getState().pushToast;
+    api<import('@backstages/shared').GoogleCalendarStatusDto>('POST', '/me/google-calendar/connect/confirm', { code: gcalCode })
+      .then((res) => {
+        qc.setQueryData(['google-calendar'], res);
+        toast(`Google Calendar connected (${res.email}) — your meetings will appear there.`, 'success');
+      })
+      .catch((e) => toast(e instanceof Error ? e.message : 'Could not connect Google Calendar.', 'error'))
+      .finally(() => {
+        const next = new URLSearchParams(window.location.search);
+        next.delete('google-calendar');
+        router.replace(`/app${next.toString() ? `?${next}` : ''}`);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, gcalCode]);
 
   // Back from "Connect GitHub" (to create issues): finish it with this session.
   const githubCode = params.get('github-connect');

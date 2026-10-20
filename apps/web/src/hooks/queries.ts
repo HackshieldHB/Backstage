@@ -668,6 +668,23 @@ export function usePeopleCalendars(workspaceId: string, userIds: string[], from:
   });
 }
 
+/** My own Google Calendar / ICS events in [from, to) for the calendar view. */
+export function useMyExternalEvents(from: Date, to: Date, enabled = true) {
+  const fromIso = from.toISOString();
+  const toIso = to.toISOString();
+  return useQuery({
+    queryKey: ['meetings', 'external', fromIso, toIso],
+    queryFn: () =>
+      api<import('@backstages/shared').MyExternalEventsDto>(
+        'GET',
+        `/me/calendar/events?from=${encodeURIComponent(fromIso)}&to=${encodeURIComponent(toIso)}`,
+      ),
+    enabled,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
 export function useMeetingDetail(id: string | null) {
   return useQuery({
     queryKey: ['meetings', 'detail', id ?? 'none'],

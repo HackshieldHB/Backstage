@@ -172,6 +172,7 @@ model User {
   usageEvents             UsageEvent[]
   joinRequests            WorkspaceJoinRequest[]   @relation("JoinRequester")
   githubLink              GithubUserLink?
+  googleCalendar          GoogleCalendarLink?
   githubSubscriptions     GithubSubscription[]
   joinRequestsDecided     WorkspaceJoinRequest[]   @relation("JoinRequestDecider")
   tasksCreated           Task[]                   @relation("TaskCreator")
@@ -1836,4 +1837,44 @@ model GithubUserLink {
   updatedAt      DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// A person's Google Calendar, connected with the calendar.events scope.
+/// Backstages meetings they're invited to are copied into it (pushMeetings), and
+/// its events count as busy time / show in their Backstages calendar.
+model GoogleCalendarLink {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  /// Google account id (sub) and email the calendar belongs to.
+  googleSub            String
+  email                String
+  refreshTokenEnc      String
+  accessTokenEnc       String?
+  accessTokenExpiresAt DateTime?
+  scopes               String
+  calendarId           String    @default("primary")
+  pushMeetings         Boolean   @default(true)
+  /// Set when Google rejected our token (revoked access) — the person reconnects.
+  brokenAt             DateTime?
+  lastSyncedAt         DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Which Google event mirrors which Backstages meeting in whose calendar. No FK
+/// to the meeting on purpose: after a meeting is deleted we still need this row
+/// to remove the copy from Google.
+model GoogleCalendarEvent {
+  id                String   @id @default(cuid())
+  userId            String
+  scheduledHuddleId String
+  googleEventId     String
+  /// Hash of what we last wrote, to skip no-op updates.
+  contentHash       String
+  updatedAt         DateTime @updatedAt
+
+  @@unique([userId, scheduledHuddleId])
+  @@index([scheduledHuddleId])
 }
