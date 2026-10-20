@@ -171,6 +171,8 @@ model User {
   feedbackGiven           Feedback[]
   usageEvents             UsageEvent[]
   joinRequests            WorkspaceJoinRequest[]   @relation("JoinRequester")
+  githubLink              GithubUserLink?
+  githubSubscriptions     GithubSubscription[]
   joinRequestsDecided     WorkspaceJoinRequest[]   @relation("JoinRequestDecider")
   tasksCreated           Task[]                   @relation("TaskCreator")
   tasksAssigned           Task[]                   @relation("TaskAssignee")
@@ -285,6 +287,7 @@ model Workspace {
   feedback               Feedback[]
   usageEvents            UsageEvent[]
   joinRequests           WorkspaceJoinRequest[]
+  githubSubscriptions    GithubSubscription[]
   tasks                  Task[]
   workflowRuns           WorkflowRun[]
   sidebarSections        SidebarSection[]
@@ -391,6 +394,8 @@ model Channel {
 
   bitbucketSubscriptions BitbucketSubscription[]
   bitbucketPrCards       BitbucketPrCard[]
+  githubSubscriptions    GithubSubscription[]
+  githubCards            GithubCard[]
   scheduledMessages      ScheduledMessage[]
   shareLinks             ShareLink[]
   canvas                 Canvas?
@@ -514,6 +519,7 @@ model Message {
   conversationLastReadMarkers ConversationMember[] @relation("ConversationLastRead")
   jiraIssueCard               JiraIssueCard?
   bitbucketPrCard             BitbucketPrCard?
+  githubCard                  GithubCard?
   shareLinks                  ShareLink[]
   poll                        Poll?
   tasks                       Task[]
@@ -1774,4 +1780,60 @@ model WorkspaceJoinRequest {
 
   @@unique([workspaceId, userId])
   @@index([workspaceId, status])
+}
+
+/// A channel following a GitHub repository through a repo webhook. GitHub signs
+/// each delivery with `webhookSecret` (X-Hub-Signature-256).
+model GithubSubscription {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  channelId     String
+  /// "owner/repo", lower-cased.
+  repoFullName  String
+  webhookSecret String
+  /// Subset of GITHUB_EVENTS (see the shared package).
+  events        String[]
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel   Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdBy User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  cards     GithubCard[]
+
+  @@unique([channelId, repoFullName])
+  @@index([workspaceId, repoFullName])
+}
+
+/// The channel message for one PR or issue; later events thread under it.
+model GithubCard {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  channelId      String
+  /// "pr" or "issue".
+  kind           String
+  number         Int
+  messageId      String   @unique
+  createdAt      DateTime @default(now())
+
+  subscription GithubSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  channel      Channel            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message      Message            @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, kind, number])
+}
+
+/// A person's own GitHub account, connected to create issues as themselves.
+model GithubUserLink {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  githubUserId   String
+  login          String
+  /// AES-GCM encrypted OAuth token (TOKEN_ENCRYPTION_KEY).
+  accessTokenEnc String
+  scopes         String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

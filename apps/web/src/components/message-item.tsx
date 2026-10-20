@@ -36,6 +36,8 @@ import { AttachmentView } from './attachment-view';
 import { EmojiPickerPopover } from './emoji-picker';
 import { EditMessageEditor } from './composer';
 import { CreateJiraIssueDialog } from './create-jira-issue-dialog';
+import { CreateGithubIssueDialog, useGithubConnection } from './github';
+import { GithubIcon } from './auth/social-buttons';
 import { LogTimeDialog } from './log-time-dialog';
 import { useAtlassianStatus } from './atlassian-dialog';
 import { Tooltip } from './tooltip';
@@ -69,6 +71,7 @@ export function MessageItem({
   const [hovered, setHovered] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [jiraOpen, setJiraOpen] = useState(false);
+  const [githubOpen, setGithubOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [localEditing, setLocalEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -112,6 +115,7 @@ export function MessageItem({
   };
 
   const atlassian = useAtlassianStatus(message.workspaceId);
+  const github = useGithubConnection();
 
   if (message.isDeleted) {
     return (
@@ -333,6 +337,11 @@ export function MessageItem({
               <SquareKanban size={15} className="text-[#2684FF]" />
             </ToolbarButton>
           )}
+          {message.channelId && github.data?.available && (
+            <ToolbarButton title="Create GitHub issue from message" onClick={() => setGithubOpen(true)} testId="create-github-issue">
+              <GithubIcon className="h-[15px] w-[15px]" />
+            </ToolbarButton>
+          )}
           {mine && (
             <>
               <ToolbarButton title={tr('edit_message')} onClick={() => setEditing(true)} testId="edit-message">
@@ -362,6 +371,15 @@ export function MessageItem({
             api<{ key: string; url: string }>('POST', `/messages/${message.id}/create-jira-issue`, input)
           }
           onClose={() => setJiraOpen(false)}
+        />
+      )}
+
+      {githubOpen && (
+        <CreateGithubIssueDialog
+          workspaceId={message.workspaceId}
+          messageId={message.id}
+          defaultTitle={message.contentText}
+          onClose={() => setGithubOpen(false)}
         />
       )}
 
@@ -521,7 +539,12 @@ function UnfurlCards({ message }: { message: MessageDto }) {
         <div
           key={card.url}
           data-testid="unfurl-card"
-          className="max-w-md overflow-hidden rounded-lg border-l-4 border border-line border-l-[#2684FF] bg-gray-50 dark:border-line dark:border-l-[#2684FF] dark:bg-gray-800"
+          className={clsx(
+            'max-w-md overflow-hidden rounded-lg border-l-4 border border-line bg-gray-50 dark:border-line dark:bg-gray-800',
+            card.type === 'github'
+              ? 'border-l-[#24292f] dark:border-l-[#8b949e]'
+              : 'border-l-[#2684FF] dark:border-l-[#2684FF]',
+          )}
         >
           <a
             href={card.url}
@@ -539,11 +562,22 @@ function UnfurlCards({ message }: { message: MessageDto }) {
                   ? [card.status, card.issueType, card.priority].filter(Boolean).join(' · ')
                   : card.type === 'bitbucket'
                     ? ['Bitbucket', card.status].filter(Boolean).join(' · ')
-                    : 'Confluence'}
+                    : card.type === 'github'
+                      ? ['GitHub', card.status].filter(Boolean).join(' · ')
+                      : 'Confluence'}
               </span>
             </span>
             {card.status && (
-              <span className="ml-auto shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+              <span
+                className={clsx(
+                  'ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase',
+                  card.type !== 'github' && 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200',
+                  card.type === 'github' && card.status === 'open' && 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300',
+                  card.type === 'github' && card.status === 'merged' && 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300',
+                  card.type === 'github' && card.status === 'closed' && 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300',
+                  card.type === 'github' && card.status === 'draft' && 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+                )}
+              >
                 {card.status}
               </span>
             )}

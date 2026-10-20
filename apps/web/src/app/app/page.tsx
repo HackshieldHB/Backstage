@@ -140,6 +140,26 @@ function AppShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, linkCode, linkError]);
 
+  // Back from "Connect GitHub" (to create issues): finish it with this session.
+  const githubCode = params.get('github-connect');
+  useEffect(() => {
+    if (!user || !githubCode || handledLinkCodes.has(githubCode)) return;
+    handledLinkCodes.add(githubCode);
+    const toast = useUiStore.getState().pushToast;
+    api<import('@backstages/shared').GithubConnectionDto>('POST', '/me/github/connect/confirm', { code: githubCode })
+      .then((res) => {
+        qc.setQueryData(['github-connection'], res);
+        toast(`GitHub connected as @${res.login} — you can now create issues from messages.`, 'success');
+      })
+      .catch((e) => toast(e instanceof Error ? e.message : 'Could not connect GitHub.', 'error'))
+      .finally(() => {
+        const next = new URLSearchParams(window.location.search);
+        next.delete('github-connect');
+        router.replace(`/app${next.toString() ? `?${next}` : ''}`);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, githubCode]);
+
   // The huddle lives at the shell (not inside MainPane) so it keeps running when
   // you navigate to another channel or DM.
   const huddle = useHuddle();

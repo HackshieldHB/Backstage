@@ -128,7 +128,7 @@ export type MessageDto = z.infer<typeof MessageDtoSchema>;
 
 /** Shape of a single unfurl entry produced by the Atlassian integration. */
 export interface JiraUnfurl {
-  type: 'jira' | 'confluence' | 'bitbucket';
+  type: 'jira' | 'confluence' | 'bitbucket' | 'github';
   url: string;
   key?: string;
   title: string;

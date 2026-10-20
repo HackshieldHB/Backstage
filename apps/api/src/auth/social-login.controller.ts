@@ -81,14 +81,15 @@ export class SocialLoginController {
     res.clearCookie(COOKIE, { path: COOKIE_PATH });
     if (providerError || !code) {
       const mode = (await this.social.abandon(state).catch(() => null)) ?? 'login';
-      return this.fail(res, new SocialLoginError('denied', `provider returned ${providerError ?? 'no code'}`), mode);
+      return this.fail(res, new SocialLoginError('denied', `provider returned ${providerError ?? 'no code'}`), mode === 'login' ? 'login' : 'link');
     }
     try {
       const out = await this.social.handleCallback(parseProvider(raw), code, String(state ?? ''), browserSecret);
       res.redirect(out.redirect);
     } catch (err) {
       // Unknown state (expired/forged) → the login page.
-      this.fail(res, err, err instanceof SocialLoginError && err.mode ? err.mode : 'login');
+      // Link/connect failures are reported inside the app; anything else on the login page.
+      this.fail(res, err, err instanceof SocialLoginError && err.mode && err.mode !== 'login' ? 'link' : 'login');
     }
   }
 

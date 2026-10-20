@@ -7,6 +7,8 @@ import type { ChannelDto, ChannelEmailDto } from '@backstages/shared';
 import { api } from '@/lib/api';
 import { keys, useCustomCommands, useWebhooks } from '@/hooks/queries';
 import { Dialog } from './dialog';
+import { GithubSettings } from './github';
+import { GithubIcon } from './auth/social-buttons';
 
 const input =
   'w-full rounded-md border border-line-strong px-2.5 py-1.5 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800';
@@ -20,9 +22,10 @@ export function IntegrationsDialog({
   channels: ChannelDto[];
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<'webhooks' | 'commands' | 'email'>('webhooks');
+  const [tab, setTab] = useState<'webhooks' | 'github' | 'commands' | 'email'>('webhooks');
   const tabs: { id: typeof tab; label: string; icon: React.ReactNode }[] = [
     { id: 'webhooks', label: 'Webhooks', icon: <Webhook size={14} /> },
+    { id: 'github', label: 'GitHub', icon: <GithubIcon className="h-3.5 w-3.5" /> },
     { id: 'commands', label: 'Commands', icon: <Terminal size={14} /> },
     { id: 'email', label: 'Email', icon: <Mail size={14} /> },
   ];
@@ -46,6 +49,7 @@ export function IntegrationsDialog({
       </div>
 
       {tab === 'webhooks' && <WebhooksTab workspaceId={workspaceId} channels={channels} />}
+      {tab === 'github' && <GithubSettings workspaceId={workspaceId} channels={channels} />}
       {tab === 'commands' && <CommandsTab workspaceId={workspaceId} />}
       {tab === 'email' && <EmailTab channels={channels} />}
     </Dialog>

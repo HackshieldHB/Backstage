@@ -13,9 +13,12 @@ import { pkceChallenge, randomUrlToken, trimSlash } from '../security/oidc';
 import { ssoEnforcedFor } from '../security/sso-policy';
 import { sha256, TokenService } from './token.service';
 import { toUserDto } from './auth.service';
+import { encryptToken } from '../atlassian/crypto';
 import {
   authorizeUrl,
+  githubExchange,
   githubProfile,
+  githubProfileFromToken,
   googleProfile,
   issuerFor,
   providerCredentials,
@@ -29,8 +32,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface PendingAuth {
   provider: OAuthProvider;
-  mode: 'login' | 'link';
-  /** Link mode: who started it. The browser must confirm with this session. */
+  /** login: sign in/up. link: add this provider to the signed-in account.
+   *  connect: GitHub only — keep a token so the person can create issues. */
+  mode: 'login' | 'link' | 'connect';
+  /** Link/connect mode: who started it. The browser must confirm with this session. */
   userId?: string;
   verifier: string;
   nonce: string;
@@ -41,7 +46,7 @@ interface PendingAuth {
 /** A sign-in failure; `reason` becomes ?error=oauth-<reason> on the login page. */
 export class SocialLoginError extends Error {
   /** Which flow failed, once known from the stored state (decides where to report it). */
-  mode?: 'login' | 'link';
+  mode?: 'login' | 'link' | 'connect';
   constructor(
     readonly reason: string,
     message: string,
@@ -99,9 +104,30 @@ export class SocialLoginService {
     return { url: await this.start({ provider, mode: 'link', userId }) };
   }
 
+  /**
+   * Connect a GitHub account with repo access so the person can create issues as
+   * themselves. Confirmed by the signed-in session, like linking.
+   */
+  async startGithubConnect(userId: string): Promise<{ url: string }> {
+    return { url: await this.start({ provider: 'github', mode: 'connect', userId }, undefined, 'repo read:user user:email') };
+  }
+
+  /** Called by the signed-in app with the code from /app?github-connect=… */
+  async takeGithubConnect(
+    userId: string,
+    code: string,
+  ): Promise<{ githubUserId: string; login: string; accessTokenEnc: string; scopes: string }> {
+    const raw = await this.takeOnce(`oauth:connect:${sha256(code)}`);
+    if (!raw) throw new BadRequestException('This request expired — try connecting GitHub again');
+    const pending = JSON.parse(raw) as { userId: string; githubUserId: string; login: string; accessTokenEnc: string; scopes: string };
+    if (pending.userId !== userId) throw new BadRequestException('This request belongs to another account');
+    return pending;
+  }
+
   private async start(
     base: Pick<PendingAuth, 'provider' | 'mode' | 'userId' | 'browserHash'>,
     loginHint?: string,
+    scope?: string,
   ): Promise<string> {
     const creds = providerCredentials(base.provider);
     if (!creds) throw new SocialLoginError('not-configured', `${label(base.provider)} sign-in is not set up`);
@@ -114,6 +140,7 @@ export class SocialLoginService {
       codeChallenge: pkceChallenge(pending.verifier),
       nonce: pending.nonce,
       loginHint: loginHint && EMAIL_RE.test(loginHint) ? loginHint : undefined,
+      scope,
     });
   }
 
@@ -129,7 +156,7 @@ export class SocialLoginService {
     code: string,
     state: string,
     browserSecret: string | undefined,
-  ): Promise<{ redirect: string; mode: 'login' | 'link' }> {
+  ): Promise<{ redirect: string; mode: 'login' | 'link' | 'connect' }> {
     const pending = await this.takeState(state);
     try {
       return await this.finishCallback(provider, code, pending, browserSecret);
@@ -141,7 +168,7 @@ export class SocialLoginService {
 
   /** The provider sent the person back without a code (cancelled): spend the state
    *  and say which flow it was, so the error is shown in the right place. */
-  async abandon(state: string | undefined): Promise<'login' | 'link' | null> {
+  async abandon(state: string | undefined): Promise<PendingAuth['mode'] | null> {
     if (!state || state.length > 100) return null;
     const raw = await this.takeOnce(`oauth:state:${state}`);
     return raw ? (JSON.parse(raw) as PendingAuth).mode : null;
@@ -152,12 +179,14 @@ export class SocialLoginService {
     code: string,
     pending: PendingAuth,
     browserSecret: string | undefined,
-  ): Promise<{ redirect: string; mode: 'login' | 'link' }> {
+  ): Promise<{ redirect: string; mode: 'login' | 'link' | 'connect' }> {
     if (pending.provider !== provider) throw new SocialLoginError('state', 'Sign-in state does not match');
     if (pending.mode === 'login' && (!browserSecret || sha256(browserSecret) !== pending.browserHash)) {
       throw new SocialLoginError('browser', 'This sign-in was started in a different browser — start again here');
     }
+    if (pending.mode === 'connect') return this.finishGithubConnect(code, pending);
     const profile = await this.fetchProfile(provider, code, pending);
+
 
     if (pending.mode === 'link') {
       const linkCode = randomUrlToken(32);
@@ -230,6 +259,36 @@ export class SocialLoginService {
       });
     }
     return this.connected(userId);
+  }
+
+  private async finishGithubConnect(code: string, pending: PendingAuth): Promise<{ redirect: string; mode: 'connect' }> {
+    const creds = providerCredentials('github');
+    if (pending.provider !== 'github' || !creds || !pending.userId) {
+      throw new SocialLoginError('not-configured', 'GitHub is not set up');
+    }
+    let token: { accessToken: string; scope: string };
+    let profile: ProviderProfile;
+    try {
+      token = await githubExchange(creds, code, { redirectUri: oauthRedirectUri('github'), codeVerifier: pending.verifier });
+      profile = await githubProfileFromToken(token.accessToken);
+    } catch (err) {
+      throw new SocialLoginError('provider', `GitHub connection failed: ${errText(err)}`);
+    }
+    const linkCode = randomUrlToken(32);
+    await this.redis.set(
+      `oauth:connect:${sha256(linkCode)}`,
+      JSON.stringify({
+        userId: pending.userId,
+        githubUserId: profile.subject,
+        login: profile.label.replace(/^@/, ''),
+        // Never keep a plaintext token, even for two minutes.
+        accessTokenEnc: encryptToken(token.accessToken),
+        scopes: token.scope,
+      }),
+      'EX',
+      LOGIN_CODE_TTL_S,
+    );
+    return { redirect: `${webOrigin()}/app?github-connect=${encodeURIComponent(linkCode)}`, mode: 'connect' };
   }
 
   // ---------- connected accounts ----------

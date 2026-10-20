@@ -20,6 +20,7 @@ import { WorkflowsModule } from './workflows/workflows.module';
 import { SfuModule } from './sfu/sfu.module';
 import { IceModule } from './ice/ice.module';
 import { CalendarSharingModule } from './calendar-sharing/calendar-sharing.module';
+import { GithubModule } from './github/github.module';
 import { AuditModule } from './admin/audit.service';
 import { AdminModule } from './admin/admin.module';
 import { UserGroupsModule } from './user-groups/user-groups.module';
@@ -84,6 +85,7 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     SfuModule,
     IceModule,
     CalendarSharingModule,
+    GithubModule,
     AuditModule,
     AdminModule,
     UserGroupsModule,

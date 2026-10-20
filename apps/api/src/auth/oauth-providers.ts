@@ -64,7 +64,15 @@ export function providerCredentials(p: OAuthProviderId): ProviderCredentials | n
 export function authorizeUrl(
   p: OAuthProviderId,
   creds: ProviderCredentials,
-  opts: { redirectUri: string; state: string; codeChallenge: string; nonce: string; loginHint?: string },
+  opts: {
+    redirectUri: string;
+    state: string;
+    codeChallenge: string;
+    nonce: string;
+    loginHint?: string;
+    /** Override the default scopes (GitHub "connect to create issues" needs repo). */
+    scope?: string;
+  },
 ): string {
   const url = new URL(p === 'google' ? GOOGLE.authorizeUrl : GITHUB.authorizeUrl);
   url.searchParams.set('client_id', creds.clientId);
@@ -80,7 +88,7 @@ export function authorizeUrl(
     if (opts.loginHint) url.searchParams.set('login_hint', opts.loginHint);
   } else {
     // user:email is required to read the (verified) email list.
-    url.searchParams.set('scope', 'read:user user:email');
+    url.searchParams.set('scope', opts.scope ?? 'read:user user:email');
     url.searchParams.set('allow_signup', 'true');
     if (opts.loginHint) url.searchParams.set('login', opts.loginHint);
   }
@@ -198,11 +206,12 @@ interface GithubEmail {
   verified: boolean;
 }
 
-export async function githubProfile(
+/** Trade a GitHub authorization code for an access token (+ the scopes granted). */
+export async function githubExchange(
   creds: ProviderCredentials,
   code: string,
   opts: { redirectUri: string; codeVerifier: string },
-): Promise<ProviderProfile> {
+): Promise<{ accessToken: string; scope: string }> {
   const tokens = await postForm(GITHUB.tokenUrl, {
     code,
     client_id: creds.clientId,
@@ -212,7 +221,20 @@ export async function githubProfile(
   });
   const accessToken = tokens.access_token;
   if (typeof accessToken !== 'string') throw new Error('GitHub did not return an access token');
+  return { accessToken, scope: typeof tokens.scope === 'string' ? tokens.scope : '' };
+}
 
+export async function githubProfile(
+  creds: ProviderCredentials,
+  code: string,
+  opts: { redirectUri: string; codeVerifier: string },
+): Promise<ProviderProfile> {
+  const { accessToken } = await githubExchange(creds, code, opts);
+  return githubProfileFromToken(accessToken);
+}
+
+/** Profile + verified email for a GitHub access token. */
+export async function githubProfileFromToken(accessToken: string): Promise<ProviderProfile> {
   const [user, emails] = await Promise.all([
     githubGet<GithubUser>('/user', accessToken),
     githubGet<GithubEmail[]>('/user/emails?per_page=100', accessToken),

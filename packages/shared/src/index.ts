@@ -35,3 +35,4 @@ export * from './schemas/security';
 export * from './schemas/feedback';
 export * from './socket';
 export * from './meeting-notice';
+export * from './schemas/github';

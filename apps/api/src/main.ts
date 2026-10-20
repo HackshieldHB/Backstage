@@ -9,6 +9,9 @@ import { ErrorReporter } from './observability/error-reporter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
+    // Keep the raw request bytes next to the parsed body: webhook signatures
+    // (GitHub X-Hub-Signature-256) are computed over the exact payload.
+    rawBody: true,
     // JSON lines in production, human-readable locally — either way every line
     // carries the request id.
     logger: new ContextLogger(),
