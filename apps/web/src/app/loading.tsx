@@ -1,7 +1,7 @@
 export default function Loading() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-elevated">
-      <div className="animate-pulse text-lg font-semibold text-sidebar dark:text-white">
+      <div className="animate-pulse text-lg font-semibold text-ink">
         Backstages
       </div>
     </main>

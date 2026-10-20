@@ -1,14 +1,14 @@
+import { BrandLockup } from '../brand-mark';
+
 export function AuthCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-950">
+    <main className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
       <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <span className="text-2xl font-bold tracking-tight text-sidebar dark:text-white">
-            Backstages
-          </span>
+        <div className="mb-7 flex justify-center">
+          <BrandLockup />
         </div>
-        <div className="rounded-xl border border-line bg-white p-6 shadow-sm dark:border-line dark:bg-gray-900">
-          <h1 className="mb-4 text-lg font-semibold">{title}</h1>
+        <div className="rounded-xl border border-line bg-surface p-6 shadow-card">
+          <h1 className="mb-5 text-[17px] font-semibold tracking-tight text-ink">{title}</h1>
           {children}
         </div>
       </div>
@@ -21,11 +21,11 @@ export function Field({
   ...props
 }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
-    <label className="mb-3 block">
-      <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
+    <label className="mb-3.5 block">
+      <span className="mb-1.5 block text-[13px] font-medium text-ink-2">{label}</span>
       <input
         {...props}
-        className="w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-line dark:bg-gray-800"
+        className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink outline-none"
       />
     </label>
   );
@@ -33,11 +33,7 @@ export function Field({
 
 export function SubmitButton({ children, disabled }: { children: React.ReactNode; disabled?: boolean }) {
   return (
-    <button
-      type="submit"
-      disabled={disabled}
-      className="brand-gradient brand-gradient-hover mt-1 w-full rounded-md px-3 py-2 text-sm font-semibold text-white shadow-md shadow-violet-500/25 disabled:opacity-50"
-    >
+    <button type="submit" disabled={disabled} className="btn-primary mt-1 w-full py-2 text-sm">
       {children}
     </button>
   );

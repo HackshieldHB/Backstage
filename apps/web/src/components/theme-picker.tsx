@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { Check, Palette } from 'lucide-react';
 import {
@@ -19,13 +19,22 @@ import {
 export function ThemePicker() {
   const { accent, setAccent } = useUiStore();
   const [open, setOpen] = useState(false);
+  // Escape closes the popover, like every other menu.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
 
   return (
     <div className="relative">
       <button
         aria-label="Appearance"
         onClick={() => setOpen((v) => !v)}
-        className="rounded p-1.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white"
+        className="icon-btn"
         data-testid="theme-toggle"
       >
         <Palette size={15} />
@@ -34,10 +43,10 @@ export function ThemePicker() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="animate-fade-in absolute bottom-full right-0 z-50 mb-2 w-72 rounded-xl border border-line bg-white p-3 text-gray-800 shadow-2xl dark:border-line dark:bg-gray-900 dark:text-gray-100">
+          <div role="dialog" aria-label="Theme" className="animate-fade-in absolute bottom-full left-0 z-50 mb-2 w-72 max-w-[calc(100vw-1rem)] rounded-xl border border-line bg-elevated p-3 text-ink shadow-pop">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Theme</span>
-              <span className="text-[10px] text-gray-400">whole-app palette</span>
+              <span className="text-[12px] font-semibold text-ink">Theme</span>
+              <span className="text-[11px] text-ink-3">whole-app palette</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {ACCENTS.map((a: AccentId) => (
@@ -68,7 +77,7 @@ export function ThemePicker() {
                     </div>
                   </div>
                   <div className="mt-1 flex items-center justify-between px-0.5">
-                    <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">{ACCENT_LABEL[a]}</span>
+                    <span className="text-[11px] font-medium text-ink-2">{ACCENT_LABEL[a]}</span>
                     {accent === a ? (
                       <Check size={12} className="text-accent" strokeWidth={3} />
                     ) : (

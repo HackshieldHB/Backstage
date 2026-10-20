@@ -68,13 +68,13 @@ export function RightPanelView({
   const fromThreads = panel.kind === 'thread' && panel.from === 'threads';
 
   return (
-    <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-md shrink-0 flex-col border-l border-line bg-surface md:static md:w-96">
+    <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-md shrink-0 flex-col border-l border-line bg-surface md:static md:my-1.5 md:mr-1.5 md:w-96 md:overflow-hidden md:rounded-lg md:border md:shadow-soft">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4 dark:border-line">
-        <h2 className="flex items-center gap-1.5 text-[15px] font-bold">
+        <h2 className="flex items-center gap-1.5 text-[14px] font-semibold tracking-tight text-ink">
           {fromThreads && (
             <button
               onClick={() => setRightPanel({ kind: 'threads' })}
-              className="-ml-1 rounded p-1 text-gray-500 hover:bg-hovered"
+              className="icon-btn -ml-1 p-1"
               aria-label="Back to threads"
               data-testid="thread-back"
             >
@@ -88,7 +88,7 @@ export function RightPanelView({
           {panel.kind === 'activity' && 'Activity'}
           {panel.kind === 'saved' && 'Later'}
         </h2>
-        <button onClick={() => setRightPanel({ kind: 'none' })} className="rounded p-1 text-gray-500 hover:bg-hovered" aria-label="Close panel">
+        <button onClick={() => setRightPanel({ kind: 'none' })} className="icon-btn -mr-1 p-1" aria-label="Close panel">
           <X size={16} />
         </button>
       </header>

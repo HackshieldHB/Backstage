@@ -522,7 +522,7 @@ export function Composer({
   const uploadsInFlight = uploads.some((u) => !u.attachment && !u.error);
 
   return (
-    <div className="relative rounded-xl border border-line bg-elevated shadow-soft transition-shadow focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/25">
+    <div className="relative rounded-lg border border-line-strong bg-elevated shadow-soft transition-shadow focus-within:border-accent/70 focus-within:ring-[3px] focus-within:ring-accent/15">
       {/* R5: best-time hint for an unreachable DM recipient */}
       {!cmdOpen && bt && !bt.reachableNow && (
         <div className="absolute bottom-full left-0 mb-2 flex items-center gap-1.5 rounded-lg border border-line bg-overlay px-3 py-1.5 text-[12px] text-ink-2 shadow-pop">
@@ -654,12 +654,13 @@ export function Composer({
             </FormatButton>
           )}
           {parentId && (
-            <label className="ml-2 flex items-center gap-1.5 text-xs text-gray-500">
+            <label className="ml-2 flex items-center gap-1.5 text-xs text-ink-2">
               <input type="checkbox" checked={alsoSend} onChange={(e) => setAlsoSend(e.target.checked)} data-testid="also-send" />
               Also send to channel
             </label>
           )}
         </div>
+        <div className="flex items-center gap-0.5">
         <VoiceRecorderButton onClip={(file) => void startUpload(file)} />
         <ClipRecorderButton onClip={(file) => void startUpload(file)} />
         {!parentId && (
@@ -674,13 +675,13 @@ export function Composer({
             </button>
             {scheduleOpen && (
               <div className="absolute bottom-full right-0 mb-2 w-64 rounded-lg border border-line bg-overlay p-3 shadow-pop">
-                <p className="mb-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300">Send later</p>
+                <p className="mb-1.5 text-xs font-semibold text-ink-2">Send later</p>
                 <input
                   type="datetime-local"
                   value={scheduleAt}
                   onChange={(e) => setScheduleAt(e.target.value)}
                   data-testid="schedule-at"
-                  className="mb-2 w-full rounded-md border border-line-strong bg-white px-2 py-1 text-sm dark:border-line-strong dark:bg-gray-800"
+                  className="mb-2 w-full rounded-md border border-line-strong bg-surface px-2 py-1 text-sm"
                 />
                 <button
                   onClick={() => void scheduleSend()}
@@ -699,10 +700,11 @@ export function Composer({
           disabled={uploadsInFlight}
           title="Send (Enter)"
           data-testid="send-button"
-          className="rounded-md bg-accent p-1.5 text-white hover:bg-accent-hover disabled:opacity-40"
+          className="ml-1 rounded-md bg-accent p-1.5 text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)] hover:bg-accent-hover disabled:opacity-40"
         >
           <SendHorizonal size={15} />
         </button>
+        </div>
       </div>
 
       {emojiOpen && (

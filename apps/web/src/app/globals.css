@@ -20,32 +20,34 @@
 /* ---------- Daylight (default, light) ---------- */
 :root {
   color-scheme: light;
-  --gray-50: 248 250 252;
-  --gray-100: 241 245 249;
-  --gray-200: 226 232 240;
-  --gray-300: 203 213 225;
-  --gray-400: 148 163 184;
-  --gray-500: 100 116 139;
-  --gray-600: 71 85 105;
-  --gray-700: 51 65 85;
-  --gray-800: 30 41 59;
-  --gray-900: 15 23 42;
-  --gray-950: 2 6 23;
-  --canvas: 238 240 244;
-  --nav: 239 241 245;
+  /* Backstage "Daylight": cool graphite neutrals, hairline borders, one restrained accent. */
+  --gray-50: 250 250 251;
+  --gray-100: 244 244 246;
+  --gray-200: 230 230 234;
+  --gray-300: 210 211 217;
+  --gray-400: 160 162 172;
+  --gray-500: 112 114 126;
+  --gray-600: 82 84 96;
+  --gray-700: 61 63 74;
+  --gray-800: 38 39 47;
+  --gray-900: 23 24 30;
+  --gray-950: 10 10 14;
+  --canvas: 246 246 248;
+  --nav: 246 246 248;
   --surface: 255 255 255;
   --elevated: 255 255 255;
-  --hover: 237 239 243;
+  --hover: 239 239 242;
   --overlay: 255 255 255;
-  --line: 228 231 236;
-  --line-strong: 208 213 221;
-  --ink: 22 25 31;
-  --ink-2: 92 99 110;
-  --ink-3: 140 148 161;
-  --accent: 99 91 244;
-  --accent-hover: 79 70 229;
-  --accent-grad-from: 99 91 244;
-  --accent-grad-to: 168 85 247;
+  --line: 232 232 236;
+  --line-strong: 214 215 221;
+  --ink: 24 24 30;
+  --ink-2: 92 94 106;
+  --ink-3: 136 138 150;
+  --accent: 104 88 224;
+  --accent-hover: 88 70 208;
+  /* The "spotlight": violet stage light fading to a warm footlight. Brand mark only. */
+  --accent-grad-from: 104 88 224;
+  --accent-grad-to: 236 116 96;
 }
 
 /* ---------- Linen (light, warm) ---------- */
@@ -121,21 +123,21 @@
   --gray-800: 39 39 42;
   --gray-900: 24 24 27;
   --gray-950: 9 9 11;
-  --canvas: 9 9 11;
-  --nav: 10 10 12;
-  --surface: 28 28 33;
-  --elevated: 38 38 45;
-  --hover: 47 47 55;
-  --overlay: 38 38 45;
-  --line: 46 46 54;
-  --line-strong: 64 64 74;
-  --ink: 240 240 243;
-  --ink-2: 161 161 170;
-  --ink-3: 106 106 116;
-  --accent: 167 139 250;
-  --accent-hover: 139 92 246;
-  --accent-grad-from: 168 85 247;
-  --accent-grad-to: 217 70 239;
+  --canvas: 13 13 16;
+  --nav: 13 13 16;
+  --surface: 21 21 25;
+  --elevated: 30 30 36;
+  --hover: 37 37 44;
+  --overlay: 30 30 36;
+  --line: 40 40 47;
+  --line-strong: 58 58 68;
+  --ink: 237 237 241;
+  --ink-2: 158 158 170;
+  --ink-3: 108 108 120;
+  --accent: 148 130 250;
+  --accent-hover: 128 108 240;
+  --accent-grad-from: 148 130 250;
+  --accent-grad-to: 240 128 110;
 }
 
 /* ---------- Forest (dark, green) ---------- */
@@ -202,6 +204,66 @@
   color-scheme: dark;
 }
 
+html {
+  font-family:
+    'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ---- Form controls: one calm default everywhere (utilities still override). ---- */
+@layer base {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']),
+  select,
+  textarea {
+    background-color: rgb(var(--surface));
+    color: rgb(var(--ink));
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: rgb(var(--ink-3));
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: rgb(var(--accent));
+  }
+}
+
+/* ---- Backstage component vocabulary ---- */
+@layer components {
+  /* The brand mark's "spotlight" gradient. */
+  .brand-spotlight {
+    background-image:
+      radial-gradient(120% 90% at 20% 0%, rgb(255 255 255 / 0.28), transparent 55%),
+      linear-gradient(140deg, rgb(var(--accent-grad-from)) 0%, rgb(var(--accent-grad-from)) 45%, rgb(var(--accent-grad-to)) 100%);
+  }
+  .kbd {
+    @apply inline-flex min-w-[1.25rem] items-center justify-center rounded border border-line bg-surface px-1 font-sans text-[10px] font-medium leading-4 text-ink-3;
+  }
+  .icon-btn {
+    @apply inline-flex items-center justify-center rounded-md p-1.5 text-ink-3 transition-colors hover:bg-hovered hover:text-ink;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.15)] hover:bg-accent-hover;
+  }
+  .btn-secondary {
+    @apply btn border border-line-strong bg-surface text-ink hover:bg-hovered;
+  }
+  .btn-ghost {
+    @apply btn text-ink-2 hover:bg-hovered hover:text-ink;
+  }
+  .menu-panel {
+    @apply rounded-lg border border-line bg-elevated p-1 text-ink shadow-pop;
+  }
+  .menu-item {
+    @apply flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink-2 hover:bg-hovered hover:text-ink;
+  }
+}
+
 /* The nav surface: flat, part of the system, with a whisper of accent at the top. */
 .sidebar-surface {
   background-color: rgb(var(--nav));
@@ -221,16 +283,30 @@ textarea {
     box-shadow 0.15s ease,
     transform 0.12s ease;
 }
-/* A gentle press on any tappable control. */
-button:not(:disabled):active,
-[role='button']:active {
-  transform: scale(0.97);
+/* A gentle press on real buttons only (list rows stay still). */
+.btn:not(:disabled):active,
+.btn-primary:not(:disabled):active,
+.btn-secondary:not(:disabled):active {
+  transform: scale(0.98);
 }
-/* One consistent, on-brand focus ring everywhere. */
+/* One consistent, on-brand focus ring everywhere — it follows each control's own shape. */
 :focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.6);
+  outline-offset: 1px;
+}
+/* Text fields show focus with their border + a soft halo instead of an outline. */
+input:not([type='checkbox']):not([type='radio']):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgb(var(--accent) / 0.55);
-  border-radius: 6px;
+  border-color: rgb(var(--accent));
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.16);
+}
+/* Fields that sit inside a container which shows focus itself (palette, composer). */
+.focus-ring-none:focus-visible,
+[contenteditable='true']:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }
 ::selection {
   background: rgb(var(--accent) / 0.25);
@@ -238,10 +314,10 @@ button:not(:disabled):active,
 
 /* Reusable vibrant brand gradient for hero surfaces / CTAs — follows the accent. */
 .brand-gradient {
-  background-image: linear-gradient(135deg, rgb(var(--accent-grad-from)) 0%, rgb(var(--accent-grad-to)) 100%);
+  background-color: rgb(var(--accent));
 }
 .brand-gradient-hover:hover {
-  background-image: linear-gradient(135deg, rgb(var(--accent-hover)) 0%, rgb(var(--accent-grad-to)) 100%);
+  background-color: rgb(var(--accent-hover));
 }
 
 /* Soft entrance for lists/cards. */
@@ -358,4 +434,12 @@ button:not(:disabled):active,
 }
 .thin-scrollbar::-webkit-scrollbar-thumb {
   @apply rounded bg-gray-300 dark:bg-gray-600;
+}
+
+/* Horizontal strips that scroll on small screens without a visible bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

@@ -254,7 +254,7 @@ function AppShell() {
   if (loading || !user || needsWelcome) {
     return (
       <main className="flex min-h-screen items-center justify-center">
-        <div className="animate-pulse text-lg font-semibold text-sidebar dark:text-white">Backstages</div>
+        <div className="animate-pulse text-lg font-semibold text-ink">Backstages</div>
       </main>
     );
   }
@@ -271,7 +271,7 @@ function AppShell() {
         onSelect={(id) => router.push(`/app?ws=${id}`)}
       />
       <div
-        className={`${sidebarOpen ? 'flex' : 'hidden'} absolute inset-y-0 left-14 z-40 md:static md:flex`}
+        className={`${sidebarOpen ? 'flex' : 'hidden'} absolute inset-y-0 left-[52px] z-40 shadow-pop md:static md:flex md:shadow-none`}
       >
         <Sidebar
           workspaceId={workspaceId}
@@ -285,7 +285,7 @@ function AppShell() {
         <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => toggleSidebar(false)} />
       )}
       {huddle.joined && <MeetingRoom huddle={huddle} label={huddleLabel} workspaceId={workspaceId} recording={huddleRecording} />}
-      <main className="flex min-w-0 flex-1 flex-col bg-surface">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface md:my-1.5 md:mr-1.5 md:rounded-lg md:border md:border-line md:shadow-soft">
         <VerifyEmailBanner />
         <ErrorBoundary key={`${mainView}:${container?.id ?? 'none'}`}>
           {mainView === 'timeline' ? (

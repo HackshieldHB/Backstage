@@ -10,6 +10,7 @@ import { keys, useWorkspaces } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
 import { Avatar } from '@/components/avatar';
 import { JoinWorkspaceSection } from '@/components/join-workspace-section';
+import { BrandLockup } from '@/components/brand-mark';
 
 const PENDING_INVITE = 'bs.pendingInvite';
 
@@ -83,7 +84,7 @@ export default function WelcomePage() {
   if (loading || !user || step === 'done' || (step === 'workspace' && workspaces.isLoading)) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-canvas">
-        <div className="animate-pulse text-lg font-semibold text-sidebar dark:text-white">Backstages</div>
+        <div className="animate-pulse text-lg font-semibold text-ink">Backstages</div>
       </main>
     );
   }
@@ -92,7 +93,7 @@ export default function WelcomePage() {
     <main className="flex min-h-screen items-start justify-center bg-canvas px-4 py-10 sm:items-center">
       <div className="w-full max-w-3xl">
         <div className="mb-6 text-center">
-          <div className="text-lg font-bold text-sidebar dark:text-white">Backstages</div>
+          <BrandLockup />
           <p className="mt-1 text-xs text-ink-3">
             Step {step === 'profile' ? 1 : 2} of 2 · {step === 'profile' ? 'Your profile' : 'Your workspace'}
           </p>

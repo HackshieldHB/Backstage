@@ -72,14 +72,14 @@ export function SearchDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-gray-950/40 px-4 pt-[12vh] backdrop-blur-[2px]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-2xl animate-fade-in rounded-xl border border-line bg-white shadow-xl dark:border-line dark:bg-gray-900">
+      <div className="w-full max-w-2xl animate-pop-in rounded-xl border border-line bg-elevated shadow-pop">
         <div className="flex items-center gap-2 border-b border-line px-4 py-3 dark:border-line">
-          <Search size={16} className="text-gray-500 dark:text-gray-400" />
+          <Search size={16} className="text-ink-3" />
           <input
             ref={inputRef}
             value={q}
@@ -100,10 +100,10 @@ export function SearchDialog({
               }
             }}
             placeholder="Jump to or search — try: report from:alice in:general has:file"
-            className="flex-1 bg-transparent text-sm outline-none"
+            className="focus-ring-none flex-1 bg-transparent text-[14px] text-ink outline-none"
             data-testid="search-input"
           />
-          <kbd className="text-[10px] text-gray-500 dark:text-gray-400">Esc</kbd>
+          <kbd className="kbd">Esc</kbd>
         </div>
 
         {/* quick filters */}

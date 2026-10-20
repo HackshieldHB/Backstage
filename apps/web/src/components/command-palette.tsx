@@ -149,14 +149,14 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 pt-[14vh]"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-gray-950/40 px-4 pt-[14vh] backdrop-blur-[2px]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) setCommandOpen(false);
       }}
     >
-      <div className="animate-fade-in w-full max-w-lg overflow-hidden rounded-xl border border-line bg-white shadow-2xl dark:border-line dark:bg-gray-900">
-        <div className="flex items-center gap-2 border-b border-line px-4 py-3 dark:border-line">
-          <Search size={16} className="text-gray-400" />
+      <div className="animate-pop-in w-full max-w-xl overflow-hidden rounded-xl border border-line bg-elevated shadow-pop">
+        <div className="flex items-center gap-2.5 border-b border-line px-4 py-3">
+          <Search size={16} className="text-ink-3" />
           <input
             ref={inputRef}
             value={query}
@@ -168,16 +168,16 @@ export function CommandPalette() {
               else if (e.key === 'Escape') setCommandOpen(false);
             }}
             placeholder="Type a command or search…"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-gray-400"
+            className="focus-ring-none flex-1 bg-transparent text-[14px] text-ink outline-none"
             data-testid="command-input"
           />
-          <kbd className="rounded border border-line px-1.5 py-0.5 text-[10px] text-gray-400 dark:border-line">Esc</kbd>
+          <kbd className="kbd">Esc</kbd>
         </div>
 
         <div className="thin-scrollbar max-h-[52vh] overflow-y-auto p-1.5">
           {groups.map((g) => (
             <div key={g}>
-              <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">{g}</div>
+              <div className="px-2.5 pb-1 pt-2 text-[11px] font-medium text-ink-3">{g}</div>
               {filtered
                 .filter((c) => c.group === g)
                 .map((c) => {
@@ -190,15 +190,15 @@ export function CommandPalette() {
                       onMouseEnter={() => setActive(idx)}
                       onClick={() => run(idx)}
                       className={clsx(
-                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px]',
-                        active === idx ? 'bg-accent/10 text-accent' : 'text-gray-700 dark:text-gray-200',
+                        'flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[13px]',
+                        active === idx ? 'bg-hovered text-ink' : 'text-ink-2',
                       )}
                       data-testid="command-item"
                     >
                       {c.swatch ? (
                         <span className="h-4 w-4 shrink-0 rounded-full" style={{ backgroundColor: c.swatch }} />
                       ) : (
-                        <Icon size={15} className="shrink-0 text-gray-400" />
+                        <Icon size={15} className="shrink-0 text-ink-3" />
                       )}
                       <span className="flex-1 truncate">{c.label}</span>
                     </button>
@@ -208,10 +208,10 @@ export function CommandPalette() {
           ))}
           {filtered.length === 0 && <p className="px-3 py-6 text-center text-sm text-gray-400">No matching commands.</p>}
         </div>
-        <div className="flex items-center gap-3 border-t border-line px-4 py-2 text-[11px] text-gray-400 dark:border-line">
-          <span><kbd className="font-sans">↑↓</kbd> navigate</span>
-          <span><kbd className="font-sans">↵</kbd> select</span>
-          <span className="ml-auto"><kbd className="font-sans">⌘/Ctrl K</kbd> toggle</span>
+        <div className="flex items-center gap-3 border-t border-line bg-surface/60 px-4 py-2 text-[11px] text-ink-3">
+          <span><kbd className="kbd mr-1">↑↓</kbd> navigate</span>
+          <span><kbd className="kbd mr-1">↵</kbd> select</span>
+          <span className="ml-auto"><kbd className="kbd mr-1">⌘/Ctrl K</kbd> toggle</span>
         </div>
       </div>
     </div>

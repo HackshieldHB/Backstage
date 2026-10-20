@@ -129,7 +129,7 @@ export function MessageItem({
   return (
     <div
       className={clsx(
-        'group relative flex gap-2.5 px-5 py-0.5 hover:bg-hovered',
+        'group relative flex gap-2.5 px-5 py-0.5 hover:bg-hovered/60',
         !grouped && 'mt-4',
         message.failed && 'opacity-70',
       )}
@@ -165,7 +165,7 @@ export function MessageItem({
       <div className="min-w-0 flex-1">
         {!grouped && (
           <div className="flex items-baseline gap-2">
-            <span className="text-[15px] font-semibold text-ink">
+            <span className="text-[14px] font-semibold text-ink">
               {message.kind === 'INTEGRATION'
                 ? (message.appName ?? 'Jira')
                 : (message.user?.displayName ?? (message.pending ? me?.displayName : 'Unknown user'))}
@@ -236,7 +236,7 @@ export function MessageItem({
                   'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[12px]',
                   me && r.userIds.includes(me.id)
                     ? 'border-accent bg-accent/10 text-accent'
-                    : 'border-line bg-gray-50 hover:border-line-strong dark:bg-gray-800',
+                    : 'border-line bg-surface text-ink-2 hover:border-line-strong',
                 )}
               >
                 <Emoji code={r.emoji} workspaceId={message.workspaceId} />
@@ -258,7 +258,7 @@ export function MessageItem({
           <button
             onClick={() => onOpenThread?.(message.id)}
             data-testid="thread-summary"
-            className="mt-1 flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[12px] font-medium text-accent hover:border-line hover:bg-white dark:hover:border-line dark:hover:bg-gray-800"
+            className="mt-1 flex items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-[12px] font-medium text-accent hover:border-line hover:bg-surface"
           >
             <span className="flex -space-x-1">
               {message.threadParticipants.slice(0, 3).map((p) => (
@@ -277,7 +277,7 @@ export function MessageItem({
 
       {/* Hover toolbar */}
       {hovered && !editing && !message.pending && !message.failed && (
-        <div className="absolute -top-3 right-4 flex items-center rounded-md border border-line bg-white shadow-sm dark:border-line dark:bg-gray-800">
+        <div className="absolute -top-3.5 right-4 z-10 flex items-center gap-px rounded-lg border border-line bg-elevated p-0.5 shadow-card">
           {QUICK_EMOJI.slice(0, 3).map((e) => (
             <ToolbarButton key={e} title={`:${e}:`} onClick={() => void toggleReaction(e)}>
               <span className="text-[14px] leading-none">{emojiChar(e)}</span>
@@ -763,7 +763,7 @@ function ToolbarButton({
         aria-label={title}
         data-testid={testId}
         onClick={onClick}
-        className="p-1.5 text-ink-3 first:rounded-l-md last:rounded-r-md hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+        className="rounded-md p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
       >
         {children}
       </button>

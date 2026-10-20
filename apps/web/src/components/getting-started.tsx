@@ -92,7 +92,7 @@ export function GettingStarted({ workspaceId }: { workspaceId: string }) {
   if (doneCount === items.length) return null;
 
   return (
-    <div className="mx-auto mt-3 w-full max-w-[1000px] rounded-xl border border-line bg-hovered/50 px-3.5 py-2.5">
+    <div className="mx-auto mt-2 w-[calc(100%-1.5rem)] max-w-[1000px] rounded-lg border border-line bg-surface px-3 py-2 shadow-soft">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Rocket size={14} className="shrink-0 text-accent" />
@@ -109,7 +109,7 @@ export function GettingStarted({ workspaceId }: { workspaceId: string }) {
         </div>
         <button
           onClick={dismiss}
-          className="rounded-lg p-1 text-ink-3 hover:bg-hovered hover:text-ink"
+          className="icon-btn p-1"
           aria-label={id ? 'Tutup' : 'Dismiss'}
           data-testid="getting-started-dismiss"
         >
@@ -117,26 +117,26 @@ export function GettingStarted({ workspaceId }: { workspaceId: string }) {
         </button>
       </div>
 
-      <ul className="mt-2 space-y-0.5">
+      <ul className="no-scrollbar mt-2 flex gap-1.5 overflow-x-auto sm:flex-wrap">
         {items.map((item) => (
           <li
             key={item.label}
-            className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-hovered"
+            className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-line bg-canvas/60 py-1 pl-2 pr-1"
           >
             <span
               className={
                 item.done
-                  ? 'flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-white'
-                  : 'h-5 w-5 shrink-0 rounded-full border-2 border-line-strong'
+                  ? 'flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-accent text-white'
+                  : 'h-4 w-4 shrink-0 rounded-full border-[1.5px] border-line-strong'
               }
             >
-              {item.done && <Check size={12} strokeWidth={3} />}
+              {item.done && <Check size={10} strokeWidth={3} />}
             </span>
             <span
               className={
                 item.done
-                  ? 'flex-1 text-[13px] text-ink-3 line-through'
-                  : 'flex-1 text-[13px] text-ink-2'
+                  ? 'pr-1 text-[12.5px] text-ink-3 line-through'
+                  : 'text-[12.5px] text-ink-2'
               }
             >
               {item.label}
@@ -144,7 +144,7 @@ export function GettingStarted({ workspaceId }: { workspaceId: string }) {
             {!item.done && (
               <button
                 onClick={item.action}
-                className="rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-white hover:bg-accent-hover"
+                className="rounded px-1.5 py-0.5 text-[12px] font-medium text-accent hover:bg-accent/10"
               >
                 {item.cta}
               </button>

@@ -59,7 +59,7 @@ export default function SsoPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center">
-      <div className="animate-pulse text-lg font-semibold text-sidebar dark:text-white">Signing you in…</div>
+      <div className="animate-pulse text-lg font-semibold text-ink">Signing you in…</div>
     </main>
   );
 }

@@ -54,19 +54,19 @@ export const THEME_MODE: Record<AccentId, 'light' | 'dark'> = {
 };
 /** Accent color per theme (the pop color) — for picker swatches. */
 export const ACCENT_SWATCH: Record<AccentId, string> = {
-  daylight: '#6d5cf5',
+  daylight: '#6858e0',
   linen: '#d97706',
   midnight: '#38bdf8',
-  obsidian: '#a855f7',
+  obsidian: '#9482fa',
   forest: '#10b981',
   dusk: '#f43f5e',
 };
 /** Canvas/base color per theme — for the picker preview cards. */
 export const ACCENT_SIDEBAR: Record<AccentId, string> = {
-  daylight: '#f8fafc',
+  daylight: '#f6f6f8',
   linen: '#fafaf9',
   midnight: '#080e1c',
-  obsidian: '#09090b',
+  obsidian: '#0d0d10',
   forest: '#07140f',
   dusk: '#1a0d13',
 };
@@ -75,7 +75,7 @@ export const ACCENT_SURFACE: Record<AccentId, string> = {
   daylight: '#ffffff',
   linen: '#ffffff',
   midnight: '#0f182c',
-  obsidian: '#18181b',
+  obsidian: '#151519',
   forest: '#0d221c',
   dusk: '#2a161e',
 };

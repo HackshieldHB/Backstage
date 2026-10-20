@@ -15,7 +15,7 @@ export default function HomePage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center">
-      <div className="animate-pulse text-lg font-semibold text-sidebar">Backstages</div>
+      <div className="animate-pulse text-lg font-semibold text-ink">Backstages</div>
     </main>
   );
 }

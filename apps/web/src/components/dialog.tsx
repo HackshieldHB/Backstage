@@ -66,29 +66,29 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[8vh] backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-gray-950/40 px-4 pt-[8vh] backdrop-blur-[2px]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
         ref={panelRef}
-        className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md'} animate-fade-in overflow-hidden rounded-2xl border border-line bg-overlay text-ink shadow-pop outline-none`}
+        className={`w-full ${wide ? 'max-w-2xl' : 'max-w-md'} animate-pop-in overflow-hidden rounded-xl border border-line bg-overlay text-ink shadow-pop outline-none`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
       >
-        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-          <h2 id={titleId} className="text-[15px] font-semibold tracking-tight text-ink">
+        <div className="flex items-center justify-between border-b border-line px-5 py-3">
+          <h2 id={titleId} className="text-[14px] font-semibold tracking-tight text-ink">
             {title}
           </h2>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-ink-3 transition-colors hover:bg-hovered hover:text-ink"
+            className="icon-btn -mr-1.5"
             aria-label="Close"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
         <div className="thin-scrollbar max-h-[74vh] overflow-y-auto p-5">{children}</div>

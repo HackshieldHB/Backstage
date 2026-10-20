@@ -200,7 +200,7 @@ export function MessageList({
             {showDateDivider && (
               <div className="relative my-5 flex items-center px-5" data-testid="date-divider">
                 <span className="h-px flex-1 bg-line" />
-                <span className="mx-3 rounded-full bg-hovered px-3 py-0.5 text-[11px] font-medium text-ink-3">
+                <span className="mx-3 rounded-full border border-line bg-surface px-2.5 py-0.5 text-[11px] font-medium text-ink-2">
                   {format(new Date(message.createdAt), 'EEEE, MMMM d')}
                 </span>
                 <span className="h-px flex-1 bg-line" />

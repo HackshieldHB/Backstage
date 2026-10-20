@@ -191,7 +191,7 @@ export function CustomSections({
             <div className="group/sec mt-4 flex items-center px-2 pb-1">
               <button
                 onClick={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))}
-                className="flex min-w-0 flex-1 items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-ink-3 hover:text-ink"
+                className="flex min-w-0 flex-1 items-center gap-1 text-[11.5px] font-medium text-ink-3 hover:text-ink-2"
                 aria-expanded={!isCollapsed}
               >
                 <ChevronDown size={12} className={clsx('shrink-0 transition-transform', isCollapsed && '-rotate-90')} />

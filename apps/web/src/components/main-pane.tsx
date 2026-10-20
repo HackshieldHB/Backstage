@@ -71,11 +71,11 @@ export function MainPane({
     <>
       {/* header */}
       <header className="shrink-0 border-b border-line bg-surface">
-        <div className="mx-auto flex h-14 w-full max-w-[1000px] items-center gap-2.5 px-5">
-        <button className="mr-1 rounded-lg p-1.5 text-ink-3 hover:bg-hovered hover:text-ink md:hidden" onClick={() => toggleSidebar()}>
+        <div className="no-scrollbar mx-auto flex h-12 w-full max-w-[1000px] items-center gap-1 overflow-x-auto px-3 sm:px-5">
+        <button className="icon-btn mr-1 md:hidden" aria-label="Open sidebar" onClick={() => toggleSidebar()}>
           <Menu size={18} />
         </button>
-        <h1 className="flex items-center gap-1.5 text-[15px] font-semibold tracking-tight text-ink" data-testid="channel-title">
+        <h1 className="flex min-w-0 max-w-[55vw] shrink-0 items-center gap-1.5 truncate text-[14px] font-semibold tracking-tight text-ink sm:max-w-none sm:shrink" data-testid="channel-title">
           {container.kind === 'channel' ? (
             channel.data?.isPrivate ? <Lock size={15} className="text-ink-3" /> : <Hash size={15} className="text-ink-3" />
           ) : null}
@@ -91,7 +91,7 @@ export function MainPane({
           </span>
         )}
         {channel.data?.topic && (
-          <span className="hidden truncate text-[13px] text-ink-3 md:inline">· {channel.data.topic}</span>
+          <span className="ml-1.5 hidden min-w-0 truncate border-l border-line pl-2.5 text-[13px] text-ink-3 md:inline">{channel.data.topic}</span>
         )}
         <span className="flex-1" />
         {/* When a huddle is already running here, the persistent huddle bar shows
@@ -100,7 +100,7 @@ export function MainPane({
           (ongoingHere ? (
             <button
               onClick={() => void huddle.join(container)}
-              className="flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-accent-hover"
+              className="btn-primary mr-1 px-2.5 py-1 text-[12px]"
               data-testid="join-huddle"
             >
               <Headphones size={14} /> Join huddle
@@ -109,7 +109,7 @@ export function MainPane({
             <Tooltip label="Start a huddle">
               <button
                 onClick={() => void huddle.join(container)}
-                className="flex items-center gap-1 rounded p-1.5 text-[12px] text-ink-3 hover:bg-hovered hover:text-ink"
+                className="icon-btn gap-1 text-[12px]"
                 data-testid="start-huddle"
                 aria-label="Start a huddle"
               >
@@ -120,7 +120,7 @@ export function MainPane({
         <Tooltip label="Schedule a huddle for later">
           <button
             onClick={() => setScheduleOpen(true)}
-            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            className="icon-btn"
             data-testid="schedule-huddle"
             aria-label="Schedule a huddle"
           >
@@ -130,7 +130,7 @@ export function MainPane({
         <Tooltip label="Meeting history & minutes">
           <button
             onClick={() => setHistoryOpen(true)}
-            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            className="icon-btn"
             data-testid="meeting-history"
             aria-label="Meeting history & minutes"
           >
@@ -143,7 +143,7 @@ export function MainPane({
               <Tooltip label="Pinned messages">
                 <button
                   onClick={() => setRightPanel({ kind: 'details' })}
-                  className="flex items-center gap-1 rounded p-1.5 text-[12px] text-ink-3 hover:bg-hovered hover:text-ink"
+                  className="icon-btn gap-1 text-[12px]"
                   aria-label="Pinned messages"
                 >
                   <Pin size={14} /> {pins.data?.length}
@@ -153,7 +153,7 @@ export function MainPane({
             <Tooltip label="Members">
               <button
                 onClick={() => setRightPanel({ kind: 'details' })}
-                className="flex items-center gap-1 rounded p-1.5 text-[12px] text-ink-3 hover:bg-hovered hover:text-ink"
+                className="icon-btn gap-1 text-[12px]"
                 data-testid="member-count"
                 aria-label="Members"
               >
@@ -166,7 +166,7 @@ export function MainPane({
           <Tooltip label="Channel canvas (shared notes)">
             <button
               onClick={() => setRightPanel({ kind: 'canvas' })}
-              className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+              className="icon-btn"
               data-testid="canvas-button"
               aria-label="Channel canvas"
             >
@@ -192,7 +192,7 @@ export function MainPane({
                   setSummarizing(false);
                 }
               }}
-              className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+              className="icon-btn"
               data-testid="ai-summarize"
               aria-label="Summarize channel"
             >
@@ -203,7 +203,7 @@ export function MainPane({
         <Tooltip label="Tips & shortcuts">
           <button
             onClick={() => setTipsOpen(true)}
-            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            className="icon-btn"
             data-testid="tips-button"
             aria-label="Tips & shortcuts"
           >
@@ -213,7 +213,7 @@ export function MainPane({
         <Tooltip label="Details">
           <button
             onClick={() => setRightPanel({ kind: 'details' })}
-            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            className="icon-btn"
             data-testid="details-button"
             aria-label="Details"
           >
@@ -265,8 +265,7 @@ export function MainPane({
           <TypingIndicator containerId={container.id} />
           <Composer workspaceId={workspaceId} container={container} placeholder={placeholder} />
           <p className="mt-1.5 hidden px-1 text-[11px] text-ink-3 md:block">
-            <strong className="font-semibold text-ink-2">Enter</strong> to send ·{' '}
-            <strong className="font-semibold text-ink-2">Shift+Enter</strong> for a new line
+            <kbd className="kbd">Enter</kbd> to send · <kbd className="kbd">Shift</kbd> + <kbd className="kbd">Enter</kbd> for a new line
           </p>
         </div>
       </div>

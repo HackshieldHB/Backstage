@@ -257,9 +257,9 @@ export function Sidebar({
         <button
           onClick={() => onNavigate({ kind: 'conversation', id: dm.id })}
           className={clsx(
-            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px]',
+            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-[5px] text-[13px]',
             active
-              ? 'bg-accent/10 font-medium text-accent'
+              ? 'bg-hovered font-medium text-ink shadow-[inset_2px_0_0_rgb(var(--accent))]'
               : u.unread > 0
                 ? 'font-semibold text-ink hover:bg-hovered'
                 : 'text-ink-2 hover:bg-hovered hover:text-ink',
@@ -272,7 +272,7 @@ export function Sidebar({
           />
           <span className="truncate">{label}</span>
           {u.unread > 0 && (
-            <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+            <span className="ml-auto min-w-[18px] rounded-full bg-red-500 px-1.5 text-center text-[10.5px] font-semibold leading-[18px] text-white">
               {u.unread}
             </span>
           )}
@@ -283,22 +283,22 @@ export function Sidebar({
   };
 
   return (
-    <aside className="sidebar-surface flex h-full w-64 shrink-0 flex-col border-r border-line text-ink">
+    <aside className="sidebar-surface flex h-full w-64 shrink-0 flex-col border-r border-line text-ink md:border-r-0">
       {/* Workspace header */}
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className="flex h-12 items-center justify-between px-3">
         <button
-          className="flex items-center gap-1 text-[15px] font-bold text-ink"
+          className="-ml-1 flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-[14px] font-semibold tracking-tight text-ink hover:bg-hovered"
           onClick={() => setDialog('settings')}
           title="Workspace settings"
           data-testid="workspace-menu"
         >
-          {workspace?.name ?? 'Workspace'} <ChevronDown size={14} className="opacity-70" />
+          <span className="truncate">{workspace?.name ?? 'Workspace'}</span> <ChevronDown size={14} className="shrink-0 text-ink-3" />
         </button>
         {(workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN') && (
           <button
             title="Invite people"
             onClick={() => setDialog('invite')}
-            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            className="icon-btn"
             data-testid="invite-button"
           >
             <UserPlus size={16} />
@@ -310,11 +310,11 @@ export function Sidebar({
       <button
         ref={searchRef}
         onClick={() => setCommandOpen(true)}
-        className="mx-3 mb-3 flex items-center gap-2 rounded-lg border border-line bg-hovered px-2.5 py-2 text-[13px] text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+        className="mx-2.5 mb-2 flex items-center gap-2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink-3 shadow-soft transition-colors hover:border-line-strong hover:text-ink-2"
         data-testid="search-trigger"
       >
         <Search size={14} className="text-ink-3" /> Search or jump to…
-        <kbd className="ml-auto rounded border border-line px-1 py-0.5 text-[10px] text-ink-3">{modKey}</kbd>
+        <kbd className="kbd ml-auto">{modKey}</kbd>
       </button>
 
       <div className="thin-scrollbar flex-1 overflow-y-auto px-2 pb-2">
@@ -530,7 +530,7 @@ export function Sidebar({
             <div key={gk}>
               <button
                 onClick={() => setCollapsedGroups((s) => ({ ...s, [gk]: !s[gk] }))}
-                className="mt-4 flex w-full items-center gap-1 px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-3 hover:text-ink"
+                className="mt-4 flex w-full items-center gap-1 px-2 pb-1 text-[11.5px] font-medium text-ink-3 hover:text-ink-2"
               >
                 <ChevronDown
                   size={12}
@@ -573,7 +573,7 @@ export function Sidebar({
           <button
             aria-label="Availability & focus hours"
             onClick={() => setDialog('availability')}
-            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            className="icon-btn"
           >
             <Clock size={15} />
           </button>
@@ -582,7 +582,7 @@ export function Sidebar({
           <button
             aria-label="Send feedback"
             onClick={() => useUiStore.getState().setFeedbackOpen(true)}
-            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            className="icon-btn"
             data-testid="feedback-button"
           >
             <MessageSquareHeart size={15} />
@@ -593,7 +593,7 @@ export function Sidebar({
           <button
             aria-label="Sign out"
             onClick={() => void logout()}
-            className="rounded p-1.5 text-ink-3 hover:bg-hovered hover:text-ink"
+            className="icon-btn"
           >
             <LogOut size={15} />
           </button>
@@ -708,15 +708,15 @@ function ChannelRow({
         onClick={onClick}
         data-testid={`channel-${ch.name}`}
         className={clsx(
-          'group flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-[13px]',
+          'group flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-[5px] text-[13px]',
           active
-            ? 'bg-accent/10 font-medium text-accent'
+            ? 'bg-hovered font-medium text-ink shadow-[inset_2px_0_0_rgb(var(--accent))]'
             : unread.unread > 0
               ? 'font-semibold text-ink hover:bg-hovered'
               : 'text-ink-2 hover:bg-hovered hover:text-ink',
         )}
       >
-        {ch.isPrivate ? <Lock size={13} className="shrink-0" /> : <Hash size={13} className="shrink-0" />}
+        {ch.isPrivate ? <Lock size={13} className={clsx('shrink-0', active ? 'text-accent' : 'text-ink-3')} /> : <Hash size={13} className={clsx('shrink-0', active ? 'text-accent' : 'text-ink-3')} />}
         <span className="truncate">{ch.name}</span>
         {(ch.sharedFrom || ch.isShared) && (
           <span
@@ -729,13 +729,13 @@ function ChannelRow({
           </span>
         )}
         {unread.mentions > 0 && (
-          <span className="ml-auto rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+          <span className="ml-auto min-w-[18px] rounded-full bg-red-500 px-1.5 text-center text-[10.5px] font-semibold leading-[18px] text-white">
             {unread.mentions}
           </span>
         )}
         {unread.mentions === 0 && unread.unread > 0 && (
           <span
-            className="ml-auto rounded-full bg-accent/15 px-1.5 text-[11px] font-semibold text-accent"
+            className="ml-auto min-w-[18px] rounded-full bg-accent/15 px-1.5 text-center text-[10.5px] font-semibold leading-[18px] text-accent"
             data-testid={`unread-${ch.name}`}
           >
             {unread.unread}
@@ -772,16 +772,16 @@ function SectionButton({
       aria-label={badge != null && badge > 0 ? `${label} (${badge})` : label}
       aria-current={active ? 'page' : undefined}
       className={clsx(
-        'relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] transition-colors',
+        'relative flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors',
         active
-          ? 'bg-accent/10 font-medium text-accent before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-accent'
+          ? 'bg-hovered font-medium text-ink shadow-[inset_2px_0_0_rgb(var(--accent))]'
           : 'text-ink-2 hover:bg-hovered hover:text-ink',
       )}
     >
       <span className={clsx('shrink-0', active ? 'text-accent' : 'text-ink-3')}>{icon}</span>
       <span className="truncate">{label}</span>
       {badge != null && badge > 0 && (
-        <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-semibold text-white">{badge}</span>
+        <span className="ml-auto min-w-[18px] rounded-full bg-accent px-1.5 text-center text-[10.5px] font-semibold leading-[18px] text-white">{badge}</span>
       )}
     </button>
   );
@@ -814,7 +814,7 @@ function NavGroup({
     <>
       <button
         onClick={toggle}
-        className="mt-5 flex w-full items-center gap-1 px-2.5 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-3 transition-colors hover:text-ink-2"
+        className="mt-4 flex w-full items-center gap-1 px-2 pb-1 text-[11.5px] font-medium text-ink-3 transition-colors hover:text-ink-2"
         data-testid={`navgroup-${id}`}
       >
         <ChevronDown size={11} className={clsx('transition-transform', !open && '-rotate-90')} />
@@ -846,7 +846,7 @@ function SectionHeader({
   const key = testIdKey ?? label.toLowerCase().replace(/\s/g, '-');
   return (
     <div ref={headerRef} className="mt-4 flex items-center justify-between px-2 pb-1">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-2">{label}</span>
+      <span className="text-[11.5px] font-medium text-ink-3">{label}</span>
       <span className="flex gap-1">
         {onBrowse && (
           <button onClick={onBrowse} title={browseTitle} className="rounded p-0.5 text-ink-3 hover:bg-hovered hover:text-ink">

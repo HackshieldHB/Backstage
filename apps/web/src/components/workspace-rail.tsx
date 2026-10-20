@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import { keys, type WorkspaceWithRole } from '@/hooks/queries';
 import { Dialog } from './dialog';
 import { JoinWorkspaceSection } from './join-workspace-section';
+import { BrandMark } from './brand-mark';
 
 export function WorkspaceRail({
   workspaces,
@@ -24,29 +25,36 @@ export function WorkspaceRail({
   const qc = useQueryClient();
 
   return (
-    <nav className="flex w-14 shrink-0 flex-col items-center gap-2 bg-gradient-to-b from-[#2a1a5e] to-[#111027] py-3">
+    <nav className="flex w-[52px] shrink-0 flex-col items-center gap-1.5 border-r border-line bg-nav py-3" aria-label="Workspaces">
+      <BrandMark size={26} className="mb-2" />
       {workspaces.map((ws) => (
-        <button
-          key={ws.id}
-          title={ws.name}
-          onClick={() => onSelect(ws.id)}
-          className={clsx(
-            'flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold text-white transition-all hover:scale-105',
-            ws.id === activeId
-              ? 'brand-gradient scale-105 shadow-lg shadow-violet-500/30'
-              : 'bg-white/10 hover:bg-white/20',
+        <div key={ws.id} className="relative flex w-full justify-center">
+          {ws.id === activeId && (
+            <span aria-hidden className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />
           )}
-        >
-          {ws.name.slice(0, 1).toUpperCase()}
-        </button>
+          <button
+            title={ws.name}
+            aria-label={ws.name}
+            aria-current={ws.id === activeId ? 'true' : undefined}
+            onClick={() => onSelect(ws.id)}
+            className={clsx(
+              'flex h-8 w-8 items-center justify-center rounded-lg text-[13px] font-semibold transition-colors',
+              ws.id === activeId
+                ? 'bg-accent text-white shadow-sm'
+                : 'border border-line bg-surface text-ink-2 hover:border-line-strong hover:text-ink',
+            )}
+          >
+            {ws.name.slice(0, 1).toUpperCase()}
+          </button>
+        </div>
       ))}
       <button
         title="Add a workspace"
         aria-label="Add a workspace"
         onClick={() => setCreating(true)}
-        className="mt-1 flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+        className="mt-1 flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-line-strong text-ink-3 hover:border-accent hover:text-accent"
       >
-        <Plus size={18} />
+        <Plus size={16} />
       </button>
 
       {creating && (
