@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { WellbeingLevel } from '@backstages/shared';
 import { api } from '@/lib/api';
 import { keys, useWellbeing, useDigestPref, useCalendar, useFocusReport } from '@/hooks/queries';
@@ -156,6 +156,45 @@ export function DigestToggle({ workspaceId }: { workspaceId: string }) {
       </div>
       <p className="mt-1 text-[11px] text-gray-400">
         A once-a-day email summarising your unread mentions and notifications.
+      </p>
+    </div>
+  );
+}
+
+/** Email about mentions / DMs / invites missed while away (account-wide, on by default). */
+export function MissedEmailToggle() {
+  const qc = useQueryClient();
+  const pref = useQuery({
+    queryKey: ['email-preferences'],
+    queryFn: () => api<import('@backstages/shared').EmailPreferencesDto>('GET', '/me/email-preferences'),
+  });
+  const on = pref.data?.missedActivity ?? true;
+  const toggle = async (value: boolean) => {
+    const next = await api<import('@backstages/shared').EmailPreferencesDto>('PUT', '/me/email-preferences', {
+      missedActivity: value,
+    });
+    qc.setQueryData(['email-preferences'], next);
+  };
+  return (
+    <div className="mb-4 rounded-md border border-line p-2.5 dark:border-line">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Emails when I&apos;m away</span>
+        {pref.isLoading ? null : on ? (
+          <button onClick={() => void toggle(false)} className="text-xs text-gray-400 hover:text-gray-600" data-testid="missed-email-off">
+            Turn off
+          </button>
+        ) : (
+          <button
+            onClick={() => void toggle(true)}
+            className="rounded border border-accent px-2 py-0.5 text-xs font-medium text-accent hover:bg-accent/10"
+            data-testid="missed-email-on"
+          >
+            Enable
+          </button>
+        )}
+      </div>
+      <p className="mt-1 text-[11px] text-gray-400">
+        If mentions, DMs or meeting invites sit unread while you&apos;re offline, we email you — at most once an hour.
       </p>
     </div>
   );

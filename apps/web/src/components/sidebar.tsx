@@ -68,7 +68,7 @@ import { StandupsDialog } from './standups-dialog';
 import { IntegrationsDialog } from './integrations-dialog';
 import { WeeklyReportsDialog } from './weekly-reports-dialog';
 import { ThemePicker } from './theme-picker';
-import { WellbeingCard, FocusCard, DigestToggle, CalendarLink } from './wellbeing-card';
+import { WellbeingCard, FocusCard, DigestToggle, CalendarLink, MissedEmailToggle } from './wellbeing-card';
 import { WorkflowsDialog } from './workflows-dialog';
 import { UserGroupsDialog, AnalyticsDialog, AuditDialog } from './workspace-admin';
 import { Tooltip } from './tooltip';
@@ -1398,6 +1398,7 @@ function ProfileDialog({
       <WellbeingCard workspaceId={workspaceId} />
       <FocusCard workspaceId={workspaceId} />
       <DigestToggle workspaceId={workspaceId} />
+      <MissedEmailToggle />
       <CalendarLink />
 
       <div className="mb-4 rounded-md border border-line p-2.5 dark:border-line">

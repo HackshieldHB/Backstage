@@ -105,6 +105,10 @@ model User {
   /// Set once the person confirmed their profile (name). Null for accounts just
   /// created by Google/GitHub/Atlassian/SSO sign-in → the web app shows /welcome.
   onboardedAt     DateTime?
+  /// Email me about mentions/DMs/invites I missed while away (on by default).
+  missedActivityEmails Boolean   @default(true)
+  /// When the last missed-activity email went out (rate limit + "since" window).
+  lastMissedEmailAt    DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
