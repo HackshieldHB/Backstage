@@ -132,6 +132,61 @@ describe('useHuddleRecording', () => {
     expect(busy.result.current.recordingBy).toBe('bob');
   });
 
+  it('records on the media server in SFU huddles, with no browser recorder or upload', async () => {
+    const { useHuddleRecording } = await import('./use-huddle-recording');
+    const base = { waitingRoomEnabled: false, locked: false, whiteboardOn: false, recordingBy: null };
+    let huddle = fakeHuddle({ serverRecordingAvailable: true });
+    const { result, rerender } = renderHook(({ h }) => useHuddleRecording(h, 'w1'), { initialProps: { h: huddle } });
+    expect(result.current).toMatchObject({ serverMode: true, canStart: true, onServer: false });
+
+    act(() => result.current.start());
+    expect(huddle.updateSettings).toHaveBeenCalledWith({ recording: true, onServer: true });
+    expect(rec.started).toEqual([]);
+
+    // Server confirms: it's mine, on the server, with a running timer.
+    huddle = fakeHuddle({
+      serverRecordingAvailable: true,
+      settings: { ...base, recordingBy: 'me', recordingOnServer: true },
+      updateSettings: huddle.updateSettings,
+    });
+    rerender({ h: huddle });
+    expect(result.current).toMatchObject({ onServer: true, isMine: true, canStop: true, canStart: false });
+
+    act(() => result.current.stop());
+    expect(huddle.updateSettings).toHaveBeenCalledWith({ recording: false });
+    expect(pushToast).toHaveBeenCalledWith(expect.stringContaining('once the server has processed it'), 'success');
+    rerender({ h: fakeHuddle({ serverRecordingAvailable: true, settings: base }) });
+    expect(rec.stopped).toBe(0);
+    expect(apiMock).not.toHaveBeenCalled(); // the server posts the file itself
+    expect(pushToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('tells the starter when the server recording ends without them stopping it', async () => {
+    const { useHuddleRecording } = await import('./use-huddle-recording');
+    const base = { waitingRoomEnabled: false, locked: false, whiteboardOn: false, recordingBy: null };
+    const { result, rerender } = renderHook(({ h }) => useHuddleRecording(h, 'w1'), {
+      initialProps: { h: fakeHuddle({ serverRecordingAvailable: true }) },
+    });
+    act(() => result.current.start());
+    rerender({ h: fakeHuddle({ serverRecordingAvailable: true, settings: { ...base, recordingBy: 'me', recordingOnServer: true } }) });
+    rerender({ h: fakeHuddle({ serverRecordingAvailable: true, settings: base }) });
+    expect(pushToast).toHaveBeenCalledWith('The server recording has ended.', 'info');
+  });
+
+  it('shows someone else’s server recording without a timer of mine', async () => {
+    const { useHuddleRecording } = await import('./use-huddle-recording');
+    const { result } = renderHook(() =>
+      useHuddleRecording(
+        fakeHuddle({
+          myRole: 'participant',
+          settings: { waitingRoomEnabled: false, locked: false, whiteboardOn: false, recordingBy: 'bob', recordingOnServer: true },
+        }),
+        'w1',
+      ),
+    );
+    expect(result.current).toMatchObject({ recordingBy: 'bob', onServer: true, isMine: false, canStop: false, elapsedMs: 0 });
+  });
+
   it('downloads the file if posting fails, so the recording is never lost', async () => {
     apiMock.mockRejectedValue(new Error('Channel is archived'));
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);

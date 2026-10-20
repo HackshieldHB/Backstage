@@ -17,9 +17,13 @@ import {
 
 export interface HuddleRecordingController {
   supported: boolean;
+  /** Recordings started here run on the media server (video + audio), not in this browser. */
+  serverMode: boolean;
   /** Who is recording this huddle right now (shown to everyone), or null. */
   recordingBy: string | null;
-  /** True when this browser is the one recording. */
+  /** The current recording runs on the media server. */
+  onServer: boolean;
+  /** True when this browser is the one recording (or I started the server recording). */
   isMine: boolean;
   /** I'm a moderator, nobody is recording yet, and the browser can record. */
   canStart: boolean;
@@ -54,7 +58,15 @@ export function useHuddleRecording(huddle: HuddleController, workspaceId: string
 
   const recordingBy = huddle.joined ? huddle.settings.recordingBy : null;
   const isModerator = huddle.myRole === 'host' || huddle.myRole === 'cohost';
-  const supported = recordingSupported();
+  // SFU huddles with an Egress worker record on the server; otherwise in this browser.
+  const serverMode = huddle.serverRecordingAvailable === true;
+  const supported = serverMode || recordingSupported();
+  const onServer = recordingBy !== null && huddle.settings.recordingOnServer === true;
+  const serverIsMine = onServer && recordingBy === me?.id;
+  // When the server recording I'm looking at started (for the elapsed timer).
+  const [serverStartedAt, setServerStartedAt] = useState<number | null>(null);
+  const serverRequestedRef = useRef(false);
+  const serverStoppedByMeRef = useRef(false);
 
   const streams = useCallback((): MediaStream[] => {
     const local = huddle.getLocalStream();
@@ -124,6 +136,13 @@ export function useHuddleRecording(huddle: HuddleController, workspaceId: string
   const start = useCallback(() => {
     const container = huddle.activeTarget;
     if (!container || !workspaceId || !huddle.joined || !isModerator || recordingBy || recorderRef.current || !supported) return;
+    if (serverMode) {
+      // The media server records; the file is posted to the conversation when it's ready.
+      serverRequestedRef.current = true;
+      serverStoppedByMeRef.current = false;
+      huddle.updateSettings({ recording: true, onServer: true });
+      return;
+    }
     try {
       const rec = new HuddleRecorder({
         maxBytes: MAX_UPLOAD_BYTES,
@@ -143,13 +162,32 @@ export function useHuddleRecording(huddle: HuddleController, workspaceId: string
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Could not start recording', 'error');
     }
-  }, [huddle, isModerator, recordingBy, supported, streams, workspaceId, pushToast, finish]);
+  }, [huddle, isModerator, recordingBy, supported, serverMode, streams, workspaceId, pushToast, finish]);
 
   const stop = useCallback(() => {
     if (!isModerator && !recorderRef.current) return;
     huddle.updateSettings({ recording: false });
+    if (onServer) {
+      serverStoppedByMeRef.current = true;
+      pushToast('Recording stopped — it will be posted to the conversation once the server has processed it.', 'success');
+    }
     if (recorderRef.current) void finish();
-  }, [huddle, isModerator, finish]);
+  }, [huddle, isModerator, onServer, finish, pushToast]);
+
+  // Server recordings: run the timer while one is on, and tell whoever asked for
+  // it when it ends without them stopping it (e.g. the media server gave up).
+  useEffect(() => {
+    if (onServer) {
+      setServerStartedAt((t) => t ?? Date.now());
+      return;
+    }
+    setServerStartedAt(null);
+    if (serverRequestedRef.current && recordingBy === null) {
+      if (!serverStoppedByMeRef.current) pushToast('The server recording has ended.', 'info');
+      serverRequestedRef.current = false;
+      serverStoppedByMeRef.current = false;
+    }
+  }, [onServer, recordingBy, pushToast]);
 
   // Keep the mix in step with who's in the huddle.
   useEffect(() => {
@@ -178,13 +216,23 @@ export function useHuddleRecording(huddle: HuddleController, workspaceId: string
     return () => clearInterval(t);
   }, [startedAt]);
 
+  // Tick while a server recording is on, too.
+  useEffect(() => {
+    if (serverStartedAt === null) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [serverStartedAt]);
+
+  const shownStart = isMine ? startedAt : serverIsMine ? serverStartedAt : null;
   return {
     supported,
+    serverMode,
     recordingBy,
-    isMine,
+    onServer,
+    isMine: isMine || serverIsMine,
     canStart: supported && isModerator && huddle.joined && !recordingBy && !isMine && !saving,
     canStop: (isModerator && !!recordingBy) || isMine,
-    elapsedMs: startedAt === null ? 0 : Math.max(0, now - startedAt),
+    elapsedMs: shownStart === null ? 0 : Math.max(0, now - shownStart),
     saving,
     start,
     stop,

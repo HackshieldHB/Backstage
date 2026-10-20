@@ -1,4 +1,4 @@
-# LiveKit server config for local self-hosting.
+# LiveKit server config for self-hosting Backstages huddles.
 # Generate a strong pair for production: `docker run --rm livekit/livekit-server generate-keys`
 port: 7880
 rtc:
@@ -7,10 +7,25 @@ rtc:
   port_range_end: 50100
   use_external_ip: false # set true (and open UDP) when running on a public host
 
+# Shared with the Egress worker (server recording). Not the API's Redis.
+redis:
+  address: 127.0.0.1:6380
+
 # apiKey: apiSecret — MUST match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in apps/api/.env.
 # Replace the dev values below before exposing this anywhere.
 keys:
   devkey: devsecret_change_me_to_a_long_random_string
+
+# Backstages re-checks every connection and finishes server recordings from
+# these events. Point it at the API's public (or internal) URL.
+webhook:
+  api_key: devkey
+  urls:
+    - http://127.0.0.1:3001/webhooks/livekit
+
+room:
+  # Close a room soon after the last person leaves (also ends any recording).
+  empty_timeout: 60
 
 logging:
   level: info

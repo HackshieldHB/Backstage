@@ -1,20 +1,48 @@
-# Self-hosted LiveKit SFU for Backstages huddles.
+# Self-hosted LiveKit SFU for Backstages huddles (large meetings), plus an
+# optional Egress worker for server-side recording.
 #
 # Usage:
-#   1. Edit livekit.yaml: set a real api key/secret pair under `keys:`.
+#   1. Generate a key pair: docker run --rm livekit/livekit-server generate-keys
+#      Put it in livekit.yaml (`keys:`) and egress.yaml (`api_key`/`api_secret`).
 #   2. docker compose -f infra/livekit/docker-compose.yml up -d
+#      (add `--profile recording` to also run the Egress worker)
 #   3. In apps/api/.env set:
-#        LIVEKIT_URL=ws://localhost:7880          # wss://… behind TLS in prod
-#        LIVEKIT_API_KEY=<same key as livekit.yaml>
-#        LIVEKIT_API_SECRET=<same secret as livekit.yaml>
-#   4. Restart the API. GET /huddles/sfu/status should return { enabled: true }.
+#        LIVEKIT_URL=wss://sfu.example.com      # what browsers connect to
+#        LIVEKIT_API_KEY=<key>
+#        LIVEKIT_API_SECRET=<secret>
+#        # LIVEKIT_API_URL=http://127.0.0.1:7880  # only if the API reaches LiveKit differently
+#        # LIVEKIT_EGRESS=1                        # with the recording profile running
+#   4. Restart the API. GET /huddles/sfu/status → { enabled: true, recording: <bool> }.
 #
 # Ports: 7880 (signaling/HTTP), 7881 (TCP fallback), 50000-50100/udp (media).
+# See docs/sfu-huddles.md.
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    network_mode: host
+    command: redis-server --port 6380 --save "" --appendonly no
+
   livekit:
-    image: livekit/livekit-server:v1.7
+    image: livekit/livekit-server:v1.13.10
     command: --config /etc/livekit.yaml
     restart: unless-stopped
     network_mode: host
+    depends_on: [redis]
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
+
+  egress:
+    profiles: [recording]
+    image: livekit/egress:v1.14.1
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [redis, livekit]
+    cap_add: [SYS_ADMIN] # Chrome sandbox for room-composite recording
+    environment:
+      EGRESS_CONFIG_FILE: /etc/egress.yaml
+    volumes:
+      - ./egress.yaml:/etc/egress.yaml:ro
+      # STORAGE_DRIVER=disk only: mount the API's uploads folder here and set
+      # LIVEKIT_EGRESS_FILE_DIR=/out in apps/api/.env. (With S3, egress uploads directly.)
+      - ../../apps/api/uploads:/out

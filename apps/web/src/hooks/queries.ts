@@ -495,7 +495,7 @@ export function useAiStatus() {
 export function useSfuStatus() {
   return useQuery({
     queryKey: ['sfu-status'],
-    queryFn: () => api<{ enabled: boolean }>('GET', '/huddles/sfu/status'),
+    queryFn: () => api<{ enabled: boolean; recording?: boolean }>('GET', '/huddles/sfu/status'),
     staleTime: 600000,
   });
 }

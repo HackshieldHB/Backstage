@@ -35,6 +35,7 @@ import { track } from '@/lib/usage';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
 import { BackgroundBlurProcessor, backgroundBlurSupported } from '@/lib/background-blur';
+import { SfuTransport } from '@/lib/sfu-transport';
 import type { Container } from '@/hooks/queries';
 
 export type ConnectionState = 'connected' | 'reconnecting' | 'unstable';
@@ -188,6 +189,21 @@ async function refreshIceServers(): Promise<void> {
   }
 }
 
+/** Whether huddles should use the LiveKit SFU (asked fresh on every join so a
+ *  server switching it on/off takes effect without a reload). Never throws,
+ *  never blocks for more than ~3 s; any doubt means the peer-to-peer mesh. */
+async function sfuAvailable(): Promise<{ enabled: boolean; recording: boolean }> {
+  try {
+    const res = await Promise.race([
+      api<{ enabled: boolean; recording?: boolean }>('GET', '/huddles/sfu/status'),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+    ]);
+    return { enabled: res.enabled === true, recording: res.enabled === true && res.recording === true };
+  } catch {
+    return { enabled: false, recording: false };
+  }
+}
+
 /** Best-effort: raise the screen-share encoding ceiling so a large, high-motion
  *  screen stays sharp and fluid instead of being throttled to a low bitrate.
  *  Not every browser allows setParameters at this point — hence best-effort. */
@@ -248,6 +264,10 @@ export interface HuddleController {
   speaking: Record<string, boolean>;
   /** Aggregate connection health across peers. */
   connectionState: ConnectionState;
+  /** Media runs through the LiveKit SFU (large meetings) instead of the peer-to-peer mesh. */
+  sfuActive: boolean;
+  /** This huddle can be recorded on the media server (SFU + Egress). */
+  serverRecordingAvailable: boolean;
   /** My own role in the active huddle. */
   myRole: HuddleRole;
   /** Am I allowed to annotate the shared screen right now? */
@@ -439,6 +459,13 @@ export function useHuddle(): HuddleController {
   // without a definition-order dependency.
   const renegotiateRef = useRef<((peerId: string) => Promise<void>) | null>(null);
   const joinedRef = useRef(false);
+  // SFU mode (LiveKit): media goes through the server instead of the mesh. Decided
+  // per join; `sfuEpoch` bumps to rebuild the SFU connection after it drops.
+  const [sfuMode, setSfuMode] = useState(false);
+  const sfuModeRef = useRef(false);
+  const sfuRef = useRef<SfuTransport | null>(null);
+  const [sfuEpoch, setSfuEpoch] = useState(0);
+  const [sfuRecording, setSfuRecording] = useState(false);
 
   const bodyFor = useCallback(
     (target: Container) =>
@@ -744,7 +771,7 @@ export function useHuddle(): HuddleController {
   // Peers are only connected within the SAME breakout group, so each breakout is
   // an isolated audio/video space. While waiting to be admitted we build nothing.
   useEffect(() => {
-    if (!joinedRef.current || admitStatus !== 'admitted') return;
+    if (!joinedRef.current || admitStatus !== 'admitted' || sfuMode) return;
     const sameGroup = (p: HuddleParticipant) => (p.breakoutId ?? null) === myBreakoutId;
     for (const p of participants) {
       if (p.userId === myId) continue;
@@ -758,7 +785,67 @@ export function useHuddle(): HuddleController {
       const stillHere = participants.some((p) => p.userId === peerId && sameGroup(p));
       if (!stillHere) closePeer(peerId);
     }
-  }, [participants, myId, myBreakoutId, admitStatus, createPeer, closePeer]);
+  }, [participants, myId, myBreakoutId, admitStatus, sfuMode, createPeer, closePeer]);
+
+  // SFU mode: hold one LiveKit connection while admitted. The server picks the
+  // room (main or my breakout), so moving between breakouts reconnects; a drop
+  // (network, or the server removing us) retries with a fresh token.
+  useEffect(() => {
+    if (!sfuMode || !joined || admitStatus !== 'admitted' || !activeTarget) return;
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRetry = (ms: number) => {
+      if (cancelled) return;
+      retry = setTimeout(() => setSfuEpoch((e) => e + 1), ms);
+    };
+    const drop = (userId: string) => (s: Record<string, MediaStream>) => {
+      if (!(userId in s)) return s;
+      const next = { ...s };
+      delete next[userId];
+      return next;
+    };
+    const transport = new SfuTransport(myId, {
+      onAv: (userId, stream) => setRemoteStreams(stream ? (s) => ({ ...s, [userId]: stream }) : drop(userId)),
+      onScreen: (userId, stream) => setRemoteScreens(stream ? (s) => ({ ...s, [userId]: stream }) : drop(userId)),
+      onState: (state) => {
+        if (!cancelled) setConnectionState((prev) => (prev === state ? prev : state));
+      },
+      onDropped: () => {
+        if (sfuRef.current === transport) sfuRef.current = null;
+        scheduleRetry(1500);
+      },
+    });
+    sfuRef.current = transport;
+    void (async () => {
+      try {
+        const { url, token } = await api<{ url: string; token: string; room: string }>(
+          'POST',
+          '/huddles/sfu/token',
+          bodyFor(activeTarget),
+        );
+        if (cancelled) return;
+        await transport.connect(url, token, localStream.current?.getAudioTracks()[0] ?? null);
+        if (cancelled) return;
+        // Re-publish whatever is already on (after a reconnect or a breakout move).
+        if (cameraTrack.current) await transport.publishCamera(cameraTrack.current);
+        if (screenStream.current) await transport.publishScreen(screenStream.current);
+      } catch {
+        if (cancelled) return;
+        setConnectionState('unstable');
+        if (sfuRef.current === transport) sfuRef.current = null;
+        void transport.disconnect();
+        scheduleRetry(4000);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+      if (sfuRef.current === transport) sfuRef.current = null;
+      void transport.disconnect();
+      setRemoteStreams({});
+      setRemoteScreens({});
+    };
+  }, [sfuMode, joined, admitStatus, activeTarget, myBreakoutId, sfuEpoch, myId, bodyFor]);
 
   // Screen/camera renegotiation is always driven by the sharer, so peers only
   // ever answer (the existing offer→answer path). Guard against a negotiation
@@ -807,6 +894,7 @@ export function useHuddle(): HuddleController {
     }
     screenSenders.current.clear();
     screenReoffered.current.clear();
+    void sfuRef.current?.unpublishScreen();
     stream.getTracks().forEach((t) => t.stop());
     screenStream.current = null;
     setLocalScreen(null);
@@ -848,6 +936,7 @@ export function useHuddle(): HuddleController {
       void tuneScreenSender(sender);
       await renegotiate(peerId);
     }
+    await sfuRef.current?.publishScreen(stream).catch(() => undefined);
     const target = activeTargetRef.current;
     if (target)
       getSocket().emit(CLIENT_EVENTS.HUDDLE_STATE, {
@@ -866,6 +955,10 @@ export function useHuddle(): HuddleController {
     cameraTrack.current?.stop();
     cameraTrack.current = null;
     for (const peerId of [...peers.current.keys()]) closePeer(peerId);
+    void sfuRef.current?.disconnect();
+    sfuRef.current = null;
+    sfuModeRef.current = false;
+    setSfuMode(false);
     pendingIce.current.clear();
     pendingVideo.current.clear();
     mediaMapRef.current = {};
@@ -919,11 +1012,15 @@ export function useHuddle(): HuddleController {
       }
       try {
         // Fetch relay credentials while the mic prompt is up, before any peer exists.
-        const [stream] = await Promise.all([
+        const [stream, sfu] = await Promise.all([
           navigator.mediaDevices.getUserMedia({ audio: true }),
+          sfuAvailable(),
           refreshIceServers(),
         ]);
         localStream.current = stream;
+        sfuModeRef.current = sfu.enabled;
+        setSfuMode(sfu.enabled);
+        setSfuRecording(sfu.recording);
         joinedRef.current = true;
         activeTargetRef.current = target;
         setActiveTarget(target);
@@ -987,6 +1084,7 @@ export function useHuddle(): HuddleController {
           void renegotiate(peerId);
         }
       }
+      void sfuRef.current?.unpublishCamera();
       existing.stop();
       // Also tear down the blur pipeline and the underlying raw device track.
       rawCamTrack.current?.stop();
@@ -1034,6 +1132,7 @@ export function useHuddle(): HuddleController {
     setCameraOn(true);
     // The raw device track is the one that 'ends' on unplug/revoke.
     rawTrack.addEventListener('ended', () => {
+      void sfuRef.current?.unpublishCamera();
       cameraTrack.current = null;
       rawCamTrack.current = null;
       blurProcessor.current?.stop();
@@ -1046,6 +1145,7 @@ export function useHuddle(): HuddleController {
       pc.addTrack(sentTrack, localStream.current!);
       await renegotiate(peerId);
     }
+    await sfuRef.current?.publishCamera(sentTrack).catch(() => undefined);
     emit(CLIENT_EVENTS.HUDDLE_STATE, { videoEnabled: true, cameraStreamId: localStream.current?.id ?? null });
   }, [renegotiate, emit]);
 
@@ -1058,6 +1158,7 @@ export function useHuddle(): HuddleController {
       const sender = pc.getSenders().find((s) => s.track === old);
       if (sender) await sender.replaceTrack(newTrack);
     }
+    await sfuRef.current?.replaceCamera(newTrack).catch(() => undefined);
     // Stop the previous *processed* track (a canvas capture), never the raw device.
     if (old && old !== rawCamTrack.current) {
       localStream.current?.removeTrack(old);
@@ -1431,6 +1532,7 @@ export function useHuddle(): HuddleController {
         locked: p.locked,
         whiteboardOn: p.whiteboardOn,
         recordingBy: p.recordingBy ?? null,
+        ...(p.recordingOnServer ? { recordingOnServer: true } : {}),
       });
     };
     const onWaiting = (p: HuddleWaitingPayload) => {
@@ -1601,6 +1703,7 @@ export function useHuddle(): HuddleController {
   useEffect(() => {
     if (!joined) return;
     const id = setInterval(() => {
+      if (sfuModeRef.current) return; // the SFU transport reports its own state
       const states = [...peers.current.values()].map((pc) => pc.connectionState);
       let next: ConnectionState = 'connected';
       if (states.some((s) => s === 'failed')) next = 'unstable';
@@ -1713,6 +1816,8 @@ export function useHuddle(): HuddleController {
     localVideo,
     speaking,
     connectionState,
+    sfuActive: sfuMode,
+    serverRecordingAvailable: sfuMode && sfuRecording,
     myRole,
     canAnnotate,
     handRaised,

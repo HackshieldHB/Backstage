@@ -66,9 +66,23 @@ export class RealtimeService {
     }
   }
 
+  private readonly subscribedListeners: ((userId: string, room: string) => Promise<void> | void)[] = [];
+
+  /** Run after a user is subscribed to a room (the gateway sends ongoing huddles there). */
+  onUserSubscribed(listener: (userId: string, room: string) => Promise<void> | void) {
+    this.subscribedListeners.push(listener);
+  }
+
   /** Subscribes every open socket of a user to a room (e.g. after joining a channel). */
   async subscribeUserToRoom(userId: string, room: string) {
     await this.io().in(roomForUser(userId)).socketsJoin(room);
+    for (const listener of this.subscribedListeners) {
+      try {
+        await listener(userId, room);
+      } catch (err) {
+        this.logger.warn(`Room subscription follow-up failed: ${String(err)}`);
+      }
+    }
   }
 
   /** Removes every open socket of a user from a room (e.g. after leaving a channel). */

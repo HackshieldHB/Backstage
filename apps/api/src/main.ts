@@ -3,12 +3,14 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
 import compression from 'compression';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { configureBodyParsers } from './common/body-parsers';
 import { ContextLogger } from './observability/request-context';
 import { ErrorReporter } from './observability/error-reporter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // Keep the raw request bytes next to the parsed body: webhook signatures
     // (GitHub X-Hub-Signature-256) are computed over the exact payload.
     rawBody: true,
@@ -28,6 +30,7 @@ async function bootstrap() {
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
+  configureBodyParsers(app);
   app.use(compression());
 
   app.enableCors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000', credentials: true });

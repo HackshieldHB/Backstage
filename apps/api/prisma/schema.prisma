@@ -1878,3 +1878,29 @@ model GoogleCalendarEvent {
   @@unique([userId, scheduledHuddleId])
   @@index([scheduledHuddleId])
 }
+
+enum HuddleRecordingStatus {
+  ACTIVE
+  STOPPING
+  COMPLETE
+  FAILED
+}
+
+/// A server-side huddle recording (LiveKit Egress). Created when it starts;
+/// finished by the egress_ended webhook, which posts the file to the huddle's
+/// channel/DM as the person who started it.
+model HuddleRecording {
+  id          String                @id @default(cuid())
+  egressId    String                @unique
+  /// Huddle key: "channel:<id>" or "conversation:<id>".
+  huddleKey   String
+  startedById String
+  storageKey  String                @unique
+  status      HuddleRecordingStatus @default(ACTIVE)
+  error       String?
+  messageId   String?
+  startedAt   DateTime              @default(now())
+  endedAt     DateTime?
+
+  @@index([huddleKey, status])
+}

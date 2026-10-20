@@ -354,6 +354,26 @@ describe('HuddleService', () => {
       expect(svc.setRecording(A, null)).toBe(true);
       expect(svc.getSettings(B).recordingBy).toBeNull();
     });
+
+    it('keeps a server recording going after its starter leaves, until the huddle empties', () => {
+      svc.join(A, 'u1', 's1');
+      svc.join(A, 'u2', 's2');
+      expect(svc.setRecording(A, 'u1', true)).toBe(true);
+      expect(svc.getSettings(A)).toMatchObject({ recordingBy: 'u1', recordingOnServer: true });
+      svc.leave(A, 'u1', 's1');
+      expect(svc.clearRecordingIfAbsent(A)).toBe(false);
+      expect(svc.getSettings(A).recordingBy).toBe('u1');
+      // Stopping clears the server flag with it.
+      expect(svc.setRecording(A, null)).toBe(true);
+      expect(svc.getSettings(A)).not.toHaveProperty('recordingOnServer');
+      // A browser recording never carries the flag.
+      expect(svc.setRecording(A, 'u2')).toBe(true);
+      expect(svc.getSettings(A)).not.toHaveProperty('recordingOnServer');
+      svc.setRecording(A, null);
+      svc.setRecording(A, 'u2', true);
+      svc.leave(A, 'u2', 's2');
+      expect(svc.getSettings(A).recordingBy).toBeNull(); // room emptied → state gone
+    });
   });
 
   describe('restart survival (snapshot / restore)', () => {

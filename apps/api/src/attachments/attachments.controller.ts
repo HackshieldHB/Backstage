@@ -20,6 +20,9 @@ import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { Public } from '../common/public.decorator';
 import type { AccessTokenPayload } from '../auth/jwt-auth.guard';
 
+/** Largest value the Attachment.sizeBytes Int column holds. */
+export const MAX_INT_SIZE = 2_147_483_647;
+
 @Controller()
 export class AttachmentsController {
   constructor(
@@ -68,7 +71,9 @@ export class AttachmentsController {
     }
 
     res.setHeader('Content-Type', attachment.mimeType);
-    res.setHeader('Content-Length', attachment.sizeBytes);
+    // sizeBytes is an Int column: files of 2 GiB or more (long server recordings)
+    // are stored at the cap, so stream those without a length rather than truncate.
+    if (attachment.sizeBytes < MAX_INT_SIZE) res.setHeader('Content-Length', attachment.sizeBytes);
     const disposition = download === '1' ? 'attachment' : 'inline';
     res.setHeader(
       'Content-Disposition',

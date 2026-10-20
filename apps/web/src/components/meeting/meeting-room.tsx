@@ -384,7 +384,9 @@ export function MeetingRoom({
             data-testid="meeting-recording"
           >
             <Circle size={8} fill="currentColor" className="animate-pulse" />
-            {recording.isMine ? `Recording · ${formatDuration(recording.elapsedMs)}` : 'This huddle is being recorded'}
+            {recording.isMine
+              ? `${recording.onServer ? 'Recording on server' : 'Recording'} · ${formatDuration(recording.elapsedMs)}`
+              : 'This huddle is being recorded'}
           </span>
         )}
         {recording?.saving && <span className="text-[12px] text-white/60">Saving recording…</span>}
@@ -781,7 +783,7 @@ export function MeetingRoom({
               )}
               {recording?.canStart && (
                 <MoreItem icon={<Circle size={14} />} onClick={() => { recording.start(); setMoreMenu(false); }}>
-                  Record audio
+                  {recording.serverMode ? 'Record meeting' : 'Record audio'}
                 </MoreItem>
               )}
               {recording?.canStop && (

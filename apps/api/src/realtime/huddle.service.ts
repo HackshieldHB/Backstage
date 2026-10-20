@@ -388,11 +388,14 @@ export class HuddleService {
   }
   setSettings(key: string, patch: Partial<HuddleSettings>): HuddleSettings {
     const current = this.settings.get(key) ?? defaultSettings();
+    const recordingBy = patch.recordingBy !== undefined ? patch.recordingBy : current.recordingBy;
+    const onServer = recordingBy !== null && (patch.recordingOnServer ?? current.recordingOnServer ?? false);
     const next: HuddleSettings = {
       waitingRoomEnabled: patch.waitingRoomEnabled ?? current.waitingRoomEnabled,
       locked: patch.locked ?? current.locked,
       whiteboardOn: patch.whiteboardOn ?? current.whiteboardOn,
-      recordingBy: patch.recordingBy !== undefined ? patch.recordingBy : current.recordingBy,
+      recordingBy,
+      ...(onServer ? { recordingOnServer: true } : {}),
     };
     this.settings.set(key, next);
     return next;
@@ -403,18 +406,23 @@ export class HuddleService {
    * one recording at a time: starting while someone else records is refused.
    * Returns whether anything changed.
    */
-  setRecording(key: string, recorder: string | null): boolean {
+  setRecording(key: string, recorder: string | null, onServer = false): boolean {
     const current = this.getSettings(key);
     if (recorder !== null && current.recordingBy !== null) return false;
     if (recorder === null && current.recordingBy === null) return false;
-    this.setSettings(key, { recordingBy: recorder });
+    this.setSettings(key, { recordingBy: recorder, recordingOnServer: recorder !== null && onServer });
     return true;
   }
 
-  /** A recording ends when its recorder is no longer in the huddle. Returns true if it was cleared. */
+  /**
+   * A browser recording ends when its recorder is no longer in the huddle; a
+   * server recording doesn't need the starter's browser, so it runs until
+   * stopped or until the huddle empties. Returns true if it was cleared.
+   */
   clearRecordingIfAbsent(key: string): boolean {
-    const by = this.getSettings(key).recordingBy;
-    if (by === null || this.isPresent(key, by)) return false;
+    const { recordingBy: by, recordingOnServer } = this.getSettings(key);
+    if (by === null) return false;
+    if (recordingOnServer ? this.userIds(key).length > 0 : this.isPresent(key, by)) return false;
     this.setSettings(key, { recordingBy: null });
     return true;
   }

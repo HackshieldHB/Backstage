@@ -13,6 +13,8 @@ export abstract class StorageService {
   abstract createReadStream(key: string): Readable;
   abstract delete(key: string): Promise<void>;
   abstract exists(key: string): Promise<boolean>;
+  /** Size in bytes, or null when there is no such object. */
+  abstract size(key: string): Promise<number | null>;
 }
 
 @Injectable()
@@ -44,5 +46,13 @@ export class DiskStorageService extends StorageService {
       .access(this.resolve(key))
       .then(() => true)
       .catch(() => false);
+  }
+
+  async size(key: string): Promise<number | null> {
+    try {
+      return (await fs.promises.stat(this.resolve(key))).size;
+    } catch {
+      return null;
+    }
   }
 }

@@ -46,6 +46,8 @@ import {
 } from './realtime.service';
 import { HuddleService } from './huddle.service';
 import { HuddlePersistenceService } from './huddle-persistence.service';
+import { HuddleMediaHooks } from './huddle-media-hooks';
+import { egressEnabled } from '../sfu/livekit-api';
 import { HuddleSessionService } from '../timesheet/huddle-session.service';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { PresenceService } from '../presence/presence.service';
@@ -76,6 +78,7 @@ export class RealtimeGateway
     private readonly huddleSession: HuddleSessionService,
     private readonly meetingMinutes: MeetingMinutesService,
     private readonly persistence: HuddlePersistenceService,
+    private readonly mediaHooks: HuddleMediaHooks,
   ) {}
 
   afterInit(server: Server) {
@@ -106,6 +109,9 @@ export class RealtimeGateway
 
     // Only now is it safe for feature services to emit.
     this.realtime.bindServer(server);
+    this.realtime.onUserSubscribed((userId, room) =>
+      this.sendActiveHuddles([room], (p) => this.realtime.emitToUser(userId, SOCKET_EVENTS.HUDDLE_PARTICIPANTS, p)),
+    );
     this.logger.log('Gateway initialized (redis adapter attached)');
 
     // Meetings interrupted by a crash/restart that nobody re-joins within two
@@ -142,6 +148,7 @@ export class RealtimeGateway
 
     // Room setup is complete — only now may the client trust broadcasts.
     socket.emit(SOCKET_EVENTS.READY);
+    await this.sendActiveHuddles(socket.rooms, (p) => socket.emit(SOCKET_EVENTS.HUDDLE_PARTICIPANTS, p));
   }
 
   async handleDisconnect(socket: AuthedSocket) {
@@ -149,6 +156,7 @@ export class RealtimeGateway
     if (socket.data.userId) {
       // Drop the socket from any huddles and refresh those rooms.
       for (const key of this.huddle.removeSocket(socket.data.userId, socket.id)) {
+        this.mediaHooks.memberLeft(key, socket.data.userId);
         await this.huddleSession.leave(key, socket.data.userId);
         await this.broadcastHuddle(key);
         await this.endMeetingIfEmpty(key);
@@ -293,7 +301,10 @@ export class RealtimeGateway
     if (!key) return;
     // Only persist the "left" when the user has no other socket still in the huddle.
     const fullyLeft = this.huddle.leave(key, socket.data.userId, socket.id);
-    if (fullyLeft) await this.huddleSession.leave(key, socket.data.userId);
+    if (fullyLeft) {
+      this.mediaHooks.memberLeft(key, socket.data.userId);
+      await this.huddleSession.leave(key, socket.data.userId);
+    }
     await this.broadcastHuddle(key);
     await this.endMeetingIfEmpty(key);
   }
@@ -302,6 +313,7 @@ export class RealtimeGateway
    *  MeetingRecord so the meeting leaves a durable, searchable artifact. */
   private async endMeetingIfEmpty(key: string) {
     if (this.huddle.userIds(key).length > 0) return;
+    this.mediaHooks.huddleEnded(key);
     await this.persistence.remove(key);
     const lines = this.huddle.takeTranscript(key);
     const notes = this.huddle.takeNotes(key);
@@ -341,8 +353,30 @@ export class RealtimeGateway
   private async broadcastHuddle(key: string) {
     // The recording indicator must never outlive its recorder's presence.
     if (this.huddle.clearRecordingIfAbsent(key)) {
-      this.emitToKey(key, SOCKET_EVENTS.HUDDLE_SETTINGS, (idField) => ({ ...idField, ...this.huddle.getSettings(key) }));
+      const settings = this.huddle.getSettings(key);
+      this.emitToKey(key, SOCKET_EVENTS.HUDDLE_SETTINGS, (idField) => ({ ...idField, ...settings }));
+      this.mediaHooks.recordingChanged(key, settings);
     }
+    const participants = await this.participantsOf(key);
+    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_PARTICIPANTS, (idField) => ({ ...idField, participants }));
+  }
+
+  /**
+   * Who's in each ongoing huddle the user can see, for sockets that weren't
+   * around for the last change broadcast (a fresh load, a reconnect, or someone
+   * who just joined the channel) — otherwise they'd see no "Join" until the
+   * next person came or went.
+   */
+  private async sendActiveHuddles(rooms: Iterable<string>, emit: (payload: Record<string, unknown>) => void) {
+    const wanted = new Set(rooms);
+    for (const key of this.huddle.activeKeys()) {
+      if (!wanted.has(key)) continue;
+      const participants = await this.participantsOf(key);
+      emit({ ...this.idFieldForKey(key), participants });
+    }
+  }
+
+  private async participantsOf(key: string) {
     const userIds = this.huddle.userIds(key);
     const users = userIds.length
       ? await this.prisma.user.findMany({
@@ -350,7 +384,7 @@ export class RealtimeGateway
           select: { id: true, displayName: true, avatarUrl: true },
         })
       : [];
-    const participants = users.map((u) => {
+    return users.map((u) => {
       const st = this.huddle.stateOf(key, u.id);
       return {
         userId: u.id,
@@ -367,7 +401,6 @@ export class RealtimeGateway
         breakoutId: this.huddle.breakoutOf(key, u.id),
       };
     });
-    this.emitToKey(key, SOCKET_EVENTS.HUDDLE_PARTICIPANTS, (idField) => ({ ...idField, participants }));
   }
 
   /** Route a huddle event to every socket in the huddle's channel/DM room,
@@ -640,6 +673,9 @@ export class RealtimeGateway
       if (this.huddle.roleOf(key, me) !== 'host') return;
       this.huddle.setRole(key, body.targetUserId, body.role);
       await this.broadcastHuddle(key);
+    } else if (body.action === 'remove') {
+      // SFU media flows through the server, so cut it off there as well.
+      this.mediaHooks.memberLeft(key, body.targetUserId, true);
     }
     // 'mute-request' and 'remove' are directives the target's client acts on
     // (a browser can't force-stop someone's mic, and removal is cooperative);
@@ -663,15 +699,21 @@ export class RealtimeGateway
     if (!key || !this.huddle.isModerator(key, socket.data.userId)) return;
     const before = this.huddle.getSettings(key);
     // Recording: a moderator starts it as themselves (one at a time); any moderator may stop it.
-    if (body.recording !== undefined) {
-      this.huddle.setRecording(key, body.recording ? socket.data.userId : null);
-    }
+    // A server recording (LiveKit Egress) only when this deployment has one.
+    const recordingChanged =
+      body.recording !== undefined &&
+      this.huddle.setRecording(
+        key,
+        body.recording ? socket.data.userId : null,
+        body.recording === true && body.onServer === true && egressEnabled(),
+      );
     const next = this.huddle.setSettings(key, {
       waitingRoomEnabled: body.waitingRoomEnabled,
       locked: body.locked,
       whiteboardOn: body.whiteboardOn,
     });
     this.emitToKey(key, SOCKET_EVENTS.HUDDLE_SETTINGS, (idField) => ({ ...idField, ...next }));
+    if (recordingChanged) this.mediaHooks.recordingChanged(key, next);
     // Turning the waiting room off admits everyone currently held.
     if (before.waitingRoomEnabled && !next.waitingRoomEnabled) {
       for (const uid of this.huddle.waitingUserIds(key)) {
@@ -776,6 +818,7 @@ export class RealtimeGateway
     }
     await this.broadcastHuddle(key);
     this.broadcastBreakouts(key);
+    this.mediaHooks.breakoutsChanged(key);
   }
 
   @SubscribeMessage('presence:heartbeat')

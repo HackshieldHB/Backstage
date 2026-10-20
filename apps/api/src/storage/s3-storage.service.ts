@@ -92,4 +92,13 @@ export class S3StorageService extends StorageService {
       return false;
     }
   }
+
+  async size(key: string): Promise<number | null> {
+    try {
+      const head = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+      return head.ContentLength ?? 0;
+    } catch {
+      return null;
+    }
+  }
 }

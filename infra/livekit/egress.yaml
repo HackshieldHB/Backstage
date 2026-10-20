@@ -1,0 +1,8 @@
+# LiveKit Egress worker (server-side huddle recording). Only needed with
+# LIVEKIT_EGRESS=1 in apps/api/.env. Keys MUST match livekit.yaml.
+api_key: devkey
+api_secret: devsecret_change_me_to_a_long_random_string
+ws_url: ws://127.0.0.1:7880
+redis:
+  address: 127.0.0.1:6380
+log_level: info

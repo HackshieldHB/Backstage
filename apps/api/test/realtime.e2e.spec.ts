@@ -348,6 +348,18 @@ describe('realtime (two-socket e2e)', () => {
     expect((await left).participants.map((p) => p.userId)).toEqual([bob.id]);
   });
 
+  it('huddle: a socket that connects mid-huddle is told who is in it', async () => {
+    // e.g. a page reload — without this, no "Join" shows until someone comes or goes.
+    const late = io(baseUrl, { auth: { token: alice.token }, transports: ['websocket'] });
+    try {
+      const parts = await once<HuddleParticipantsPayload>(late, SOCKET_EVENTS.HUDDLE_PARTICIPANTS);
+      expect(parts.channelId).toBe(channelId);
+      expect(parts.participants.map((p) => p.userId)).toEqual([bob.id]);
+    } finally {
+      late.disconnect();
+    }
+  });
+
   it('huddle: disconnecting removes the peer from the huddle', async () => {
     const gone = until<HuddleParticipantsPayload>(
       alice.socket!,

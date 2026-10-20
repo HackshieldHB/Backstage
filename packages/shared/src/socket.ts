@@ -438,6 +438,8 @@ export interface HuddleSettings {
    * every participant sees that they are being recorded.
    */
   recordingBy: string | null;
+  /** True when that recording runs on the media server (LiveKit Egress), not in the recorder's browser. */
+  recordingOnServer?: boolean;
 }
 
 export interface HuddleSettingsPayload extends HuddleSettings {
@@ -454,6 +456,8 @@ export interface ClientHuddleSettingsPayload {
   whiteboardOn?: boolean;
   /** true = I start recording (if nobody is); false = stop the current recording. */
   recording?: boolean;
+  /** With `recording: true`: record on the media server instead of in my browser (SFU huddles only). */
+  onServer?: boolean;
 }
 
 /** One participant waiting to be admitted. */
