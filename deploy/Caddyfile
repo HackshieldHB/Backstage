@@ -1,0 +1,22 @@
+# HTTPS in front of Backstages (docker compose --profile https).
+# Certificates come from Let's Encrypt automatically once DNS points here and
+# ports 80/443 reach this machine; until then Caddy keeps retrying on its own.
+# (No account email is needed: Caddy renews certificates by itself.)
+{$WEB_HOST} {
+	encode zstd gzip
+	reverse_proxy web:3000
+}
+
+{$API_HOST} {
+	encode zstd gzip
+	# Uploads can be large; WebSockets (Socket.IO) are proxied transparently.
+	request_body {
+		max_size 60MB
+	}
+	reverse_proxy api:3001
+}
+
+# LiveKit signaling (wss). Media itself goes straight to the server over UDP.
+{$SFU_HOST:sfu.invalid} {
+	reverse_proxy host.docker.internal:7880
+}

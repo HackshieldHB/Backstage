@@ -40,6 +40,11 @@ COPY --from=build /repo/apps/api/package.json /repo/apps/api/package.json
 # deploy` from the same artifact that will serve traffic.
 COPY --from=build /repo/apps/api/prisma /repo/apps/api/prisma
 
+# Uploads land in a volume mounted here; create it owned by `node` so a fresh
+# named volume inherits that ownership (otherwise it is root-owned and every
+# upload fails with EACCES).
+RUN mkdir -p /data/uploads && chown -R node:node /data
+
 WORKDIR /repo/apps/api
 USER node
 EXPOSE 3001

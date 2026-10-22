@@ -6,8 +6,13 @@
 # Optional extras (enable with --profile):
 #   --profile tunnel   Cloudflare named tunnel: stable public URLs, no open ports
 #   --profile turn     coturn relay for huddles behind strict NAT/firewalls
+#   --profile https    Caddy: automatic Let's Encrypt HTTPS for WEB_HOST / API_HOST / SFU_HOST
+#   --profile livekit  LiveKit SFU for large meetings (also set LIVEKIT_* in deploy/.env)
 #
 # Run from the repository root (the build context is the whole workspace).
+# Variables used only by an optional profile are not "required" here on purpose:
+# compose interpolates every service, enabled or not, so a required variable of an
+# unused profile would block the whole stack. Each profile lists what it needs.
 # See docs/deploy.md for the walkthrough.
 
 name: backstages
@@ -69,11 +74,15 @@ services:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/backstages
       REDIS_URL: redis://redis:6379
       WEB_ORIGIN: ${WEB_URL:?set WEB_URL in deploy/.env}
+      PUBLIC_WEB_URL: ${WEB_URL}
       PUBLIC_API_URL: ${API_URL:?set API_URL in deploy/.env}
       ATLASSIAN_REDIRECT_URI: ${API_URL}/atlassian/callback
       UPLOAD_DIR: /data/uploads
     volumes:
       - uploads:/data/uploads
+    # Reaches LiveKit (host network) for its server API: LIVEKIT_API_URL=http://host.docker.internal:7880
+    extra_hosts:
+      - host.docker.internal:host-gateway
     ports:
       - '${API_PORT:-3001}:3001'
     depends_on:
@@ -107,7 +116,7 @@ services:
     restart: unless-stopped
     command: ['tunnel', '--no-autoupdate', '--protocol', 'http2', 'run']
     environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN for --profile tunnel}
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
       - web
       - api
@@ -123,7 +132,7 @@ services:
       - -n
       - --log-file=stdout
       - --use-auth-secret
-      - --static-auth-secret=${TURN_SECRET:?set TURN_SECRET for --profile turn}
+      - --static-auth-secret=${TURN_SECRET:-}
       - --realm=${TURN_REALM:-backstages}
       - --listening-port=3478
       - --min-port=49160
@@ -137,7 +146,66 @@ services:
       - --denied-peer-ip=192.168.0.0-192.168.255.255
       - --denied-peer-ip=127.0.0.0-127.255.255.255
 
+  # Automatic HTTPS (Let's Encrypt) in front of web/api/LiveKit. Needs DNS for
+  # WEB_HOST / API_HOST / SFU_HOST pointing here and TCP 80 + 443 reaching this
+  # machine. Set WEB_PORT / API_PORT to 127.0.0.1:3000 / 127.0.0.1:3001 then.
+  caddy:
+    profiles: ['https']
+    image: caddy:2.10
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      WEB_HOST: ${WEB_HOST:-}
+      API_HOST: ${API_HOST:-}
+      SFU_HOST: ${SFU_HOST:-}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - web
+      - api
+
+  # LiveKit SFU (large meetings). Host networking: media uses UDP 50000-50100
+  # and TCP 7881, which must reach this machine 1:1. LIVEKIT_NODE_IP is the
+  # public IP clients send media to (needed behind NAT). Only set LIVEKIT_URL
+  # etc. for the API once those ports are open — the API advertises the SFU to
+  # every client as soon as LIVEKIT_URL is set.
+  livekit:
+    profiles: ['livekit']
+    image: livekit/livekit-server:v1.13.10
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # Read by livekit-server as its --config-body.
+      LIVEKIT_CONFIG: |
+        port: 7880
+        bind_addresses: ["0.0.0.0"]
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: false
+          node_ip: ${LIVEKIT_NODE_IP:-}
+        keys:
+          ${LIVEKIT_API_KEY:-unset}: ${LIVEKIT_API_SECRET:-unset}
+        webhook:
+          api_key: ${LIVEKIT_API_KEY}
+          urls:
+            - http://127.0.0.1:${LIVEKIT_WEBHOOK_PORT:-3001}/webhooks/livekit
+        room:
+          empty_timeout: 60
+        logging:
+          level: info
+
 volumes:
   pgdata:
   redisdata:
   uploads:
+  caddydata:
+  caddyconfig:

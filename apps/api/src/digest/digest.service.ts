@@ -9,7 +9,7 @@ import { localTime } from '../standups/due';
 const SEND_AFTER_HOUR = 8;
 
 function webBase(): string {
-  return process.env.PUBLIC_WEB_URL ?? 'http://localhost:3000';
+  return process.env.PUBLIC_WEB_URL ?? process.env.WEB_ORIGIN ?? 'http://localhost:3000';
 }
 
 interface DigestDueRow {

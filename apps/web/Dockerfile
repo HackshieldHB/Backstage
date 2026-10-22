@@ -42,6 +42,8 @@ COPY --from=build /repo/apps/web/node_modules /repo/apps/web/node_modules
 COPY --from=build /repo/apps/web/.next /repo/apps/web/.next
 COPY --from=build /repo/apps/web/package.json /repo/apps/web/package.json
 COPY --from=build /repo/apps/web/next.config.mjs /repo/apps/web/next.config.mjs
+# Icons, the PWA manifest and the push service worker (sw.js) are served from here.
+COPY --from=build /repo/apps/web/public /repo/apps/web/public
 
 WORKDIR /repo/apps/web
 USER node

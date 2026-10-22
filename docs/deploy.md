@@ -63,8 +63,25 @@ This runs Postgres, Redis, a one-shot `migrate` job, the API and the web app. Ad
   hostnames to `http://web:3000` and `http://api:3001`). No ports need to be opened.
 - `--profile turn` — a coturn relay for huddles (see below). Needs UDP 3478 and 49160–49200 open.
 
-Without the tunnel profile, put a reverse proxy with HTTPS (Caddy, nginx) in front of ports 3000/3001.
+- `--profile https` — **Caddy** with automatic Let's Encrypt certificates for `WEB_HOST`, `API_HOST`
+  and `SFU_HOST` (`deploy/Caddyfile`). Needs DNS A records for those hosts pointing at the server and
+  TCP 80 + 443 reaching it. Set `WEB_PORT=127.0.0.1:3000` and `API_PORT=127.0.0.1:3001` so the apps
+  are only reachable through Caddy. Until DNS/ports are ready Caddy simply keeps retrying.
+- `--profile livekit` — the LiveKit SFU for large meetings (see [sfu-huddles.md](sfu-huddles.md)).
+  Needs TCP 7881 and UDP 50000–50100 reaching the server 1:1 and `LIVEKIT_NODE_IP` = the public IP
+  (required behind NAT). Fill `LIVEKIT_API_KEY/SECRET`, start the profile, and **only then** set
+  `LIVEKIT_URL=wss://<SFU_HOST>` and restart the API: from that moment every huddle uses the SFU.
+
 Browsers only allow microphone/camera access on HTTPS (or localhost).
+
+Typical single-server start (HTTPS on the box, LiveKit later):
+
+```bash
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env --profile https up -d --build
+```
+
+Behind a provider NAT (one public IP shared by several machines), ask the provider to forward
+TCP 80/443 (and, for LiveKit, TCP 7881 + UDP 50000–50100) to the server's private IP.
 
 Upgrading: `git pull` then the same `up -d --build` — migrations run automatically before the API starts.
 
