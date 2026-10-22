@@ -110,6 +110,8 @@ services:
 
   # Cloudflare named tunnel (dashboard-managed). In the Zero Trust dashboard,
   # route  WEB_URL's host → http://web:3000  and  API_URL's host → http://api:3001.
+  # With --profile livekit also route SFU_HOST → http://host.docker.internal:7880
+  # (signaling only; media still needs TCP 7881 + UDP 50000-50100 open).
   tunnel:
     profiles: ['tunnel']
     image: cloudflare/cloudflared:latest
@@ -117,6 +119,9 @@ services:
     command: ['tunnel', '--no-autoupdate', '--protocol', 'http2', 'run']
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    # LiveKit runs on the host network: route the SFU hostname to http://host.docker.internal:7880
+    extra_hosts:
+      - host.docker.internal:host-gateway
     depends_on:
       - web
       - api
