@@ -2,6 +2,16 @@
 # Certificates come from Let's Encrypt automatically once DNS points here and
 # ports 80/443 reach this machine; until then Caddy keeps retrying on its own.
 # (No account email is needed: Caddy renews certificates by itself.)
+{
+	# HTTPS_PORT in deploy/.env; WEB_URL / API_URL must then carry that port.
+	https_port {$HTTPS_PORT:443}
+}
+
+# Caddy's own http→https redirect drops a non-standard HTTPS port; keep it.
+http://{$WEB_HOST}, http://{$API_HOST}, http://{$SFU_HOST:sfu.invalid} {
+	redir https://{host}:{$HTTPS_PORT:443}{uri} permanent
+}
+
 {$WEB_HOST} {
 	encode zstd gzip
 	reverse_proxy web:3000

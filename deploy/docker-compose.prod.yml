@@ -154,15 +154,18 @@ services:
   # Automatic HTTPS (Let's Encrypt) in front of web/api/LiveKit. Needs DNS for
   # WEB_HOST / API_HOST / SFU_HOST pointing here and TCP 80 + 443 reaching this
   # machine. Set WEB_PORT / API_PORT to 127.0.0.1:3000 / 127.0.0.1:3001 then.
+  # HTTPS_PORT moves HTTPS off 443 (e.g. 445 when the provider can't forward 443);
+  # port 80 is still needed for certificates.
   caddy:
     profiles: ['https']
     image: caddy:2.10
     restart: unless-stopped
     ports:
       - '80:80'
-      - '443:443'
-      - '443:443/udp'
+      - '${HTTPS_PORT:-443}:${HTTPS_PORT:-443}'
+      - '${HTTPS_PORT:-443}:${HTTPS_PORT:-443}/udp'
     environment:
+      HTTPS_PORT: ${HTTPS_PORT:-443}
       WEB_HOST: ${WEB_HOST:-}
       API_HOST: ${API_HOST:-}
       SFU_HOST: ${SFU_HOST:-}
