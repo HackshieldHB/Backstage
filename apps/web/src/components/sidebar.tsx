@@ -3,44 +3,33 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import clsx from 'clsx';
 import {
-  BarChart3,
-  Bell,
-  Bookmark,
-  Briefcase,
-  CalendarClock,
-  CalendarDays,
-  CheckSquare,
-  ChevronDown,
-  LayoutGrid,
-  Clock,
-  Webhook,
-  FileText,
-  Inbox,
-  Compass,
-  ScrollText,
-  Siren,
-  SquareKanban,
-  UsersRound,
   ArrowLeftRight,
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Compass,
   Hash,
+  Inbox,
+  LayoutGrid,
   Lock,
   LogOut,
-  MessageSquare,
   MessageSquareHeart,
   Plus,
   Search,
+  Siren,
   Smile,
   Sparkles,
-  Timer,
+  SquareKanban,
   Sun,
-  UserPlus,
+  UserRound,
   Zap,
 } from 'lucide-react';
 import type { ChannelDto, ConversationDto } from '@backstages/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
-import { useUiStore } from '@/stores/ui-store';
+import { useUiStore, type MainView } from '@/stores/ui-store';
 import {
   keys,
   useBrowseChannels,
@@ -55,23 +44,20 @@ import {
   type Container,
 } from '@/hooks/queries';
 import { emojiChar } from '@/lib/emoji';
+import { STAGE_PRESENCE, presenceLabel } from '@/lib/presence';
 import { useT } from '@/lib/i18n';
 import { Avatar } from './avatar';
 import { Dialog } from './dialog';
 import { EmojiPickerPopover } from './emoji-picker';
 import { useAtlassianStatus } from './atlassian-dialog';
 import { AvailabilityDialog } from './availability-dialog';
-import { WorkspaceSettingsDialog } from './workspace-settings-dialog';
+import { WorkspaceSettingsDialog, type SettingsSection } from './workspace-settings-dialog';
+import { hubOf, useHubTabs, type HubKey } from './view-hubs';
 import { CatchUpDialog } from './catch-up-dialog';
-import { ScheduledDialog } from './scheduled-dialog';
-import { StandupsDialog } from './standups-dialog';
-import { IntegrationsDialog } from './integrations-dialog';
-import { WeeklyReportsDialog } from './weekly-reports-dialog';
+
 import { ThemePicker } from './theme-picker';
 import { WellbeingCard, FocusCard, DigestToggle, CalendarLink, MissedEmailToggle, GoogleCalendarCard } from './wellbeing-card';
-import { WorkflowsDialog } from './workflows-dialog';
-import { UserGroupsDialog, AnalyticsDialog, AuditDialog } from './workspace-admin';
-import { Tooltip } from './tooltip';
+
 import { GuidedTour, type TourStep } from './guided-tour';
 import { CustomSections, MoveToSectionMenu, useSidebarSections } from './sidebar-sections';
 import { AccountSecurityDialog } from './account-security';
@@ -83,16 +69,19 @@ export function Sidebar({
   onNavigate,
   channels,
   conversations,
+  searchAnchorRef,
 }: {
   workspaceId: string;
   container: Container | null;
   onNavigate: (c: Container) => void;
   channels: ChannelWithMeta[];
   conversations: ConversationDto[];
+  /** The search button (it lives in the marquee); the guided tour points at it. */
+  searchAnchorRef: React.RefObject<HTMLButtonElement>;
 }) {
   const me = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const { setRightPanel, rightPanel, setCommandOpen, mainView, setMainView, lang } = useUiStore();
+  const { mainView, setMainView, toggleSidebar, lang } = useUiStore();
   const unreads = useUnreads(workspaceId);
   const presence = usePresence(workspaceId);
   const notifications = useNotifications();
@@ -100,35 +89,76 @@ export function Sidebar({
   const workspaces = useWorkspaces();
   const workspace = workspaces.data?.find((w) => w.id === workspaceId);
 
-  const [dialog, setDialog] = useState<
-    'none' | 'create-channel' | 'browse' | 'invite' | 'dm' | 'status' | 'availability' | 'settings' | 'catch-up' | 'scheduled' | 'workflows' | 'user-groups' | 'analytics' | 'audit' | 'standups' | 'integrations' | 'decisions' | 'weekly-reports' | 'work-dashboard' | 'account-security'
-  >('none');
-  const isAdmin = workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN';
+  const [dialog, setDialog] = useState<SidebarDialog>('none');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
 
-  // Let other surfaces (e.g. the getting-started checklist in the main pane)
-  // open one of the sidebar's dialogs by name via a window event.
+  // Let other surfaces (the getting-started checklist, the command palette, the
+  // marquee) open one of the sidebar's dialogs by name via a window event.
+  // Names of tools that became views or settings sections still work.
   useEffect(() => {
     const onOpenDialog = (e: Event) => {
       const name = (e as CustomEvent<string>).detail;
-      setDialog(name as Parameters<typeof setDialog>[0]);
+      const view = DIALOG_VIEWS[name];
+      if (view) {
+        useUiStore.getState().setMainView(view);
+        useUiStore.getState().toggleSidebar(false);
+        return;
+      }
+      const settingsTab = DIALOG_SETTINGS[name];
+      if (settingsTab || name === 'settings') {
+        setSettingsSection(settingsTab ?? 'general');
+        setDialog('settings');
+        return;
+      }
+      if (SIDEBAR_DIALOGS.has(name as SidebarDialog)) setDialog(name as SidebarDialog);
     };
     window.addEventListener('bs:open-dialog', onOpenDialog);
     return () => window.removeEventListener('bs:open-dialog', onOpenDialog);
   }, []);
 
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  // Platform-aware search shortcut hint (⌘K on Mac, Ctrl K elsewhere). Resolved
-  // after mount to keep SSR output stable and avoid a hydration mismatch.
-  const [modKey, setModKey] = useState('⌘K');
+  // Navigate to a view; on phones the drawer closes so the view is visible.
+  const go = (view: MainView) => {
+    setMainView(view);
+    toggleSidebar(false);
+  };
+  const currentHub = hubOf(mainView);
+  // The open channel/DM is only "where you are" while the chat is showing.
+  const inChat = mainView === 'chat';
+  const reportTabs = useHubTabs(workspaceId, 'reports');
+  const automationTabs = useHubTabs(workspaceId, 'automations');
+  const atlassianTabs = useHubTabs(workspaceId, 'atlassian');
+  // A hub opens on its first tab, or stays put if you're already in it.
+  const openHub = (hub: HubKey, tabs: { view: MainView }[]) => {
+    if (currentHub === hub) {
+      toggleSidebar(false);
+      return;
+    }
+    if (tabs[0]) go(tabs[0].view);
+  };
+
+  // The "you" menu in the footer (profile, availability, feedback, sign out).
+  const [youMenuOpen, setYouMenuOpen] = useState(false);
+  const youMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
-    setModKey(mac ? '⌘K' : 'Ctrl K');
-  }, []);
-  const catchUpRef = useRef<HTMLButtonElement>(null);
-  const searchRef = useRef<HTMLButtonElement>(null);
-  const threadsRef = useRef<HTMLButtonElement>(null);
-  const activityRef = useRef<HTMLButtonElement>(null);
-  const timelineRef = useRef<HTMLButtonElement>(null);
+    if (!youMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (youMenuRef.current && !youMenuRef.current.contains(e.target as Node)) setYouMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setYouMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [youMenuOpen]);
+
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const inboxRef = useRef<HTMLButtonElement>(null);
+  const myDayRef = useRef<HTMLButtonElement>(null);
+  const reportsRef = useRef<HTMLButtonElement>(null);
   const channelsRef = useRef<HTMLDivElement>(null);
   const t = useT();
 
@@ -181,39 +211,32 @@ export function Sidebar({
         : "Let's take 30 seconds to meet the left menu — just once. You can skip anytime.",
     },
     {
-      anchorRef: searchRef,
+      anchorRef: searchAnchorRef,
       title: id ? 'Cari apa saja' : 'Find anything',
       body: id
         ? 'Cari pesan, orang, channel, dan file dari satu tempat. Tekan ⌘K / Ctrl+K kapan saja.'
         : 'Search messages, people, channels and files from one place. Hit ⌘K / Ctrl+K anytime.',
     },
     {
-      anchorRef: threadsRef,
-      title: id ? 'Utas' : 'Threads',
+      anchorRef: inboxRef,
+      title: id ? 'Kotak masuk' : 'Inbox',
       body: id
-        ? 'Semua balasan utas yang kamu ikuti berkumpul di sini — jadi tidak ada diskusi yang terlewat.'
-        : 'Every threaded reply you follow collects here, so no side conversation slips past you.',
+        ? 'Semua yang butuh kamu di satu tempat: aktivitas & mention, utas yang kamu ikuti, dan item tersimpan. Baru kembali? Tekan "Rangkum untukku".'
+        : 'Everything that needs you in one place: activity and mentions, threads you follow, and saved items. Been away? Hit "Catch me up".',
     },
     {
-      anchorRef: activityRef,
-      title: id ? 'Aktivitas' : 'Activity',
+      anchorRef: myDayRef,
+      title: id ? 'Hariku' : 'My day',
       body: id
-        ? 'Mention, reaksi, dan update Jira yang ditujukan ke kamu — lencana merah menandai yang belum dibaca.'
-        : 'Mentions, reactions and Jira updates aimed at you — the red badge counts what is unread.',
+        ? 'Rencana harimu: agenda hari ini, Tugas, dan Kalender — tinggal pindah tab.'
+        : 'Your day planner: today’s agenda, Tasks and Calendar — just switch tabs.',
     },
     {
-      anchorRef: catchUpRef,
-      title: id ? 'Rangkum untukku' : 'Catch me up',
+      anchorRef: reportsRef,
+      title: id ? 'Laporan' : 'Reports',
       body: id
-        ? 'Baru kembali? Dapatkan ringkasan sekali klik — mention dulu, lalu channel & DM tersibuk.'
-        : 'Been away? Get a one-click digest — mentions first, then your busiest channels and DMs.',
-    },
-    {
-      anchorRef: timelineRef,
-      title: id ? 'Timeline tim' : 'Team timeline',
-      body: id
-        ? 'Di grup "Alat": lini masa transparan berisi huddle, aktivitas Jira/Confluence, dan kehadiran tim — plus dashboard utilisasi.'
-        : 'Under "Tools": a transparent feed of huddles, Jira/Confluence activity and presence — plus a utilization dashboard.',
+        ? 'Di grup "Alat": timeline tim & utilisasi, laporan mingguan, dan (untuk admin) proyek & analitik.'
+        : 'Under "Tools": the team timeline and utilization, weekly reports and, for admins, projects and analytics.',
     },
     {
       anchorRef: channelsRef,
@@ -238,7 +261,7 @@ export function Sidebar({
     <ChannelRow
       key={ch.id}
       ch={ch}
-      active={container?.kind === 'channel' && container.id === ch.id}
+      active={inChat && container?.kind === 'channel' && container.id === ch.id}
       unread={unreadFor(ch.id)}
       onClick={() => onNavigate({ kind: 'channel', id: ch.id })}
       menu={sectionMenu('channel', ch.id, ch.sectionId)}
@@ -250,7 +273,7 @@ export function Sidebar({
     const label =
       dm.title ?? (others.length > 0 ? others.map((o) => o.displayName).join(', ') : 'You');
     const u = unreadFor(dm.id);
-    const active = container?.kind === 'conversation' && container.id === dm.id;
+    const active = inChat && container?.kind === 'conversation' && container.id === dm.id;
     const first = others[0] ?? me;
     return (
       <li key={dm.id} className="group/row relative flex items-center">
@@ -259,7 +282,7 @@ export function Sidebar({
           className={clsx(
             'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-[5px] text-[13px]',
             active
-              ? 'bg-hovered font-medium text-ink shadow-[inset_2px_0_0_rgb(var(--accent))]'
+              ? 'nav-active font-medium'
               : u.unread > 0
                 ? 'font-semibold text-ink hover:bg-hovered'
                 : 'text-ink-2 hover:bg-hovered hover:text-ink',
@@ -284,221 +307,75 @@ export function Sidebar({
 
   return (
     <aside className="sidebar-surface flex h-full w-64 shrink-0 flex-col border-r border-line text-ink md:border-r-0">
-      {/* Workspace header */}
-      <div className="flex h-12 items-center justify-between px-3">
-        <button
-          className="-ml-1 flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-[14px] font-semibold tracking-tight text-ink hover:bg-hovered"
-          onClick={() => setDialog('settings')}
-          title="Workspace settings"
-          data-testid="workspace-menu"
-        >
-          <span className="truncate">{workspace?.name ?? 'Workspace'}</span> <ChevronDown size={14} className="shrink-0 text-ink-3" />
-        </button>
-        {(workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN') && (
-          <button
-            title="Invite people"
-            onClick={() => setDialog('invite')}
-            className="icon-btn"
-            data-testid="invite-button"
-          >
-            <UserPlus size={16} />
-          </button>
-        )}
-      </div>
-
-      {/* Command palette launcher (search + jump + run) */}
-      <button
-        ref={searchRef}
-        onClick={() => setCommandOpen(true)}
-        className="mx-2.5 mb-2 flex items-center gap-2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink-3 shadow-soft transition-colors hover:border-line-strong hover:text-ink-2"
-        data-testid="search-trigger"
-      >
-        <Search size={14} className="text-ink-3" /> Search or jump to…
-        <kbd className="kbd ml-auto">{modKey}</kbd>
-      </button>
-
-      <div className="thin-scrollbar flex-1 overflow-y-auto px-2 pb-2">
-        {/* Primary quick-access */}
-        <SectionButton
-          icon={<Sun size={15} />}
-          label={t('my_day')}
-          active={mainView === 'myday'}
-          onClick={() => setMainView('myday')}
-          testId="my-day-button"
-        />
-        <SectionButton
-          icon={<CalendarDays size={15} />}
-          label={t('calendar')}
-          active={mainView === 'calendar'}
-          onClick={() => setMainView('calendar')}
-          testId="calendar-button"
-        />
+      {/* The workspace switcher, search and invite live in the marquee above. */}
+      <div className="thin-scrollbar flex-1 overflow-y-auto px-2 pb-2 pt-1">
+        {/* Primary: what needs you, your day, and what's worth a look */}
         <SectionButton
           icon={<Inbox size={15} />}
           label={t('inbox')}
           badge={activityBadge}
           active={mainView === 'inbox'}
-          onClick={() => setMainView('inbox')}
+          onClick={() => go('inbox')}
           testId="inbox-button"
+          buttonRef={inboxRef}
+        />
+        <SectionButton
+          icon={<Sun size={15} />}
+          label={t('my_day')}
+          badge={overdueTasks + (workflowRequests.data?.length ?? 0)}
+          active={currentHub === 'planner'}
+          onClick={() => go('myday')}
+          testId="my-day-button"
+          buttonRef={myDayRef}
         />
         <SectionButton
           icon={<Compass size={15} />}
           label={t('discover')}
           active={mainView === 'discover'}
-          onClick={() => setMainView('discover')}
+          onClick={() => go('discover')}
           testId="discover-button"
         />
-        <SectionButton
-          icon={<CheckSquare size={15} />}
-          label={t('tasks')}
-          badge={overdueTasks + (workflowRequests.data?.length ?? 0)}
-          active={mainView === 'tasks'}
-          onClick={() => setMainView('tasks')}
-          testId="tasks-button"
-        />
-        <SectionButton
-          icon={<MessageSquare size={15} />}
-          label={t('threads')}
-          active={rightPanel.kind === 'threads' || rightPanel.kind === 'thread'}
-          onClick={() => setRightPanel({ kind: 'threads' })}
-          testId="threads-button"
-          buttonRef={threadsRef}
-        />
-        <SectionButton
-          icon={<Bell size={15} />}
-          label={t('activity')}
-          badge={activityBadge}
-          active={rightPanel.kind === 'activity'}
-          onClick={() => setRightPanel({ kind: 'activity' })}
-          testId="activity-button"
-          buttonRef={activityRef}
-        />
-        <SectionButton
-          icon={<Bookmark size={15} />}
-          label={t('later')}
-          active={rightPanel.kind === 'saved'}
-          onClick={() => setRightPanel({ kind: 'saved' })}
-          testId="saved-button"
-        />
-        <SectionButton
-          icon={<Sparkles size={15} />}
-          label={t('catch_me_up')}
-          onClick={() => setDialog('catch-up')}
-          testId="catch-up-button"
-          buttonRef={catchUpRef}
-        />
 
-        {/* Insights — data views that replace the chat pane */}
-        <NavGroup id="insights" label={t('insights')}>
+        {/* Tools — each opens a view with its own tabs */}
+        <NavGroup id="tools" label={t('tools')}>
+          <SectionButton
+            icon={<BarChart3 size={15} />}
+            label={t('reports')}
+            active={currentHub === 'reports'}
+            onClick={() => openHub('reports', reportTabs)}
+            testId="reports-button"
+            buttonRef={reportsRef}
+          />
+          <SectionButton
+            icon={<Zap size={15} />}
+            label={t('automations')}
+            active={currentHub === 'automations'}
+            onClick={() => openHub('automations', automationTabs)}
+            testId="automations-button"
+          />
           {atlassian.data?.connected && (
             <SectionButton
               icon={<SquareKanban size={15} />}
-              label="Jira"
-              active={mainView === 'jira'}
-              onClick={() => setMainView('jira')}
-              testId="jira-view-button"
-            />
-          )}
-          {atlassian.data?.connected && atlassian.data.confluenceReady && (
-            <SectionButton
-              icon={<FileText size={15} />}
-              label="Confluence"
-              active={mainView === 'confluence'}
-              onClick={() => setMainView('confluence')}
-              testId="confluence-view-button"
-            />
-          )}
-          <SectionButton
-            icon={<Timer size={15} />}
-            label={t('team_timeline')}
-            active={mainView === 'timeline'}
-            onClick={() => setMainView('timeline')}
-            testId="timeline-button"
-            buttonRef={timelineRef}
-          />
-          {isAdmin && (
-            <SectionButton
-              icon={<Briefcase size={15} />}
-              label={t('clients_projects')}
-              active={mainView === 'projects'}
-              onClick={() => setMainView('projects')}
-              testId="projects-button"
+              label={t('atlassian')}
+              active={currentHub === 'atlassian'}
+              onClick={() => openHub('atlassian', atlassianTabs)}
+              testId="atlassian-button"
             />
           )}
           <SectionButton
             icon={<Siren size={15} />}
             label={t('incidents')}
             active={mainView === 'incidents'}
-            onClick={() => setMainView('incidents')}
+            onClick={() => go('incidents')}
             testId="incidents-button"
-          />
-        </NavGroup>
-
-        {/* Productivity — actions and recurring work */}
-        <NavGroup id="productivity" label={t('productivity')}>
-          <SectionButton
-            icon={<CalendarClock size={15} />}
-            label={t('standups')}
-            onClick={() => setDialog('standups')}
-            testId="standups-button"
           />
           <SectionButton
             icon={<LayoutGrid size={15} />}
             label={t('applications')}
             active={mainView === 'applications'}
-            onClick={() => setMainView('applications')}
+            onClick={() => go('applications')}
             testId="applications-button"
           />
-          <SectionButton
-            icon={<BarChart3 size={15} />}
-            label={t('weekly_reports')}
-            onClick={() => setDialog('weekly-reports')}
-            testId="weekly-reports-button"
-          />
-          <SectionButton
-            icon={<Zap size={15} />}
-            label={t('workflows')}
-            onClick={() => setDialog('workflows')}
-            testId="workflows-button"
-          />
-          <SectionButton
-            icon={<Clock size={15} />}
-            label={t('scheduled')}
-            onClick={() => setDialog('scheduled')}
-            testId="scheduled-button"
-          />
-        </NavGroup>
-
-        {/* Workspace — configuration & admin */}
-        <NavGroup id="workspace" label={t('workspace_group')} defaultOpen={false}>
-          <SectionButton
-            icon={<Webhook size={15} />}
-            label={t('integrations')}
-            onClick={() => setDialog('integrations')}
-            testId="integrations-button"
-          />
-          <SectionButton
-            icon={<UsersRound size={15} />}
-            label={t('user_groups')}
-            onClick={() => setDialog('user-groups')}
-            testId="user-groups-button"
-          />
-          {isAdmin && (
-            <>
-              <SectionButton
-                icon={<BarChart3 size={15} />}
-                label={t('analytics')}
-                onClick={() => setDialog('analytics')}
-                testId="analytics-button"
-              />
-              <SectionButton
-                icon={<ScrollText size={15} />}
-                label={t('audit_log')}
-                onClick={() => setDialog('audit')}
-                testId="audit-button"
-              />
-            </>
-          )}
         </NavGroup>
 
         {/* The user's own sections (channels/DMs they've filed) */}
@@ -555,49 +432,73 @@ export function Sidebar({
         <ul>{freeConversations.map(renderDm)}</ul>
       </div>
 
-      {/* Footer: current user */}
-      <div className="flex items-center gap-2 border-t border-line px-3 py-2.5">
-        <button onClick={() => setDialog('status')} title="Edit profile & status" className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 hover:bg-hovered">
-          <Avatar user={me} size="sm" presence={me ? (presence.data?.[me.id] ?? 'ACTIVE') : undefined} />
-          <span className="min-w-0 flex-1 text-left">
-            <span className="block truncate text-[13px] font-medium text-ink">{me?.displayName}</span>
-            {me?.statusText && (
+      {/* Footer: you. One menu for profile, availability, feedback and sign out; theme beside it. */}
+      <div className="flex items-center gap-1 border-t border-line px-2 py-2">
+        <div ref={youMenuRef} className="relative min-w-0 flex-1">
+          <button
+            onClick={() => setYouMenuOpen((o) => !o)}
+            aria-haspopup="menu"
+            aria-expanded={youMenuOpen}
+            className="flex w-full min-w-0 items-center gap-2 rounded-lg p-1.5 text-left hover:bg-hovered"
+            data-testid="you-menu"
+          >
+            <Avatar user={me} size="sm" presence={me ? (presence.data?.[me.id] ?? 'ACTIVE') : undefined} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium text-ink">{me?.displayName}</span>
               <span className="block truncate text-[11px] text-ink-2">
-                {me.statusEmoji ? `${emojiChar(me.statusEmoji)} ` : ''}
-                {me.statusText}
+                {me?.statusText
+                  ? `${me.statusEmoji ? `${emojiChar(me.statusEmoji)} ` : ''}${me.statusText}`
+                  : presenceLabel(me ? (presence.data?.[me.id] ?? 'ACTIVE') : undefined)}
               </span>
-            )}
-          </span>
-        </button>
-        <Tooltip label="Availability & focus hours">
-          <button
-            aria-label="Availability & focus hours"
-            onClick={() => setDialog('availability')}
-            className="icon-btn"
-          >
-            <Clock size={15} />
+            </span>
+            <ChevronUp size={14} className={clsx('shrink-0 text-ink-3 transition-transform', !youMenuOpen && 'rotate-180')} />
           </button>
-        </Tooltip>
-        <Tooltip label="Send feedback">
-          <button
-            aria-label="Send feedback"
-            onClick={() => useUiStore.getState().setFeedbackOpen(true)}
-            className="icon-btn"
-            data-testid="feedback-button"
-          >
-            <MessageSquareHeart size={15} />
-          </button>
-        </Tooltip>
+          {youMenuOpen && (
+            <div
+              role="menu"
+              className="absolute bottom-full left-0 z-50 mb-1.5 w-60 rounded-xl border border-line bg-overlay p-1.5 text-[13px] shadow-pop"
+            >
+              <YouMenuItem
+                icon={<UserRound size={15} />}
+                label={t('profile_status')}
+                onClick={() => {
+                  setYouMenuOpen(false);
+                  setDialog('status');
+                }}
+                testId="profile-status-button"
+              />
+              <YouMenuItem
+                icon={<Clock size={15} />}
+                label={t('availability_focus')}
+                onClick={() => {
+                  setYouMenuOpen(false);
+                  setDialog('availability');
+                }}
+                testId="availability-button"
+              />
+              <YouMenuItem
+                icon={<MessageSquareHeart size={15} />}
+                label={t('send_feedback')}
+                onClick={() => {
+                  setYouMenuOpen(false);
+                  useUiStore.getState().setFeedbackOpen(true);
+                }}
+                testId="feedback-button"
+              />
+              <div className="my-1 h-px bg-line" />
+              <YouMenuItem
+                icon={<LogOut size={15} />}
+                label={t('sign_out')}
+                onClick={() => {
+                  setYouMenuOpen(false);
+                  void logout();
+                }}
+                testId="sign-out-button"
+              />
+            </div>
+          )}
+        </div>
         <ThemePicker />
-        <Tooltip label="Sign out">
-          <button
-            aria-label="Sign out"
-            onClick={() => void logout()}
-            className="icon-btn"
-          >
-            <LogOut size={15} />
-          </button>
-        </Tooltip>
       </div>
 
       {dialog === 'create-channel' && (
@@ -630,46 +531,18 @@ export function Sidebar({
           workspaceName={workspace?.name ?? 'Workspace'}
           isAdmin={workspace?.myRole === 'OWNER' || workspace?.myRole === 'ADMIN'}
           isOwner={workspace?.myRole === 'OWNER'}
+          channels={channels}
+          initialSection={settingsSection}
           onClose={() => setDialog('none')}
         />
       )}
       {dialog === 'catch-up' && (
         <CatchUpDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
       )}
-      {dialog === 'scheduled' && (
-        <ScheduledDialog
-          workspaceId={workspaceId}
-          channels={channels}
-          conversations={conversations}
-          onClose={() => setDialog('none')}
-        />
-      )}
-      {dialog === 'workflows' && (
-        <WorkflowsDialog
-          workspaceId={workspaceId}
-          channels={channels}
-          canManage={isAdmin}
-          onClose={() => setDialog('none')}
-        />
-      )}
-      {dialog === 'user-groups' && (
-        <UserGroupsDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
-      )}
-      {dialog === 'analytics' && (
-        <AnalyticsDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
-      )}
-      {dialog === 'audit' && (
-        <AuditDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />
-      )}
-      {dialog === 'standups' && (
-        <StandupsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
-      )}
-      {dialog === 'weekly-reports' && (
-        <WeeklyReportsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
-      )}
-      {dialog === 'integrations' && (
-        <IntegrationsDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
-      )}
+      {/* Scheduled, Workflows, Standups, Weekly reports and Analytics are views
+          now (Reports / Automations); Integrations, User groups and Audit log
+          are Workspace settings sections. Their old dialog names still work —
+          see DIALOG_VIEWS / DIALOG_SETTINGS above. */}
 
       <GuidedTour
         storageKey="bs.tour.sidebar.v1"
@@ -687,6 +560,68 @@ export function Sidebar({
 }
 
 const GROUP_LABELS: Record<string, string> = { jira: 'Jira', confluence: 'Confluence' };
+
+/** Dialogs the sidebar still opens itself. */
+type SidebarDialog =
+  | 'none'
+  | 'create-channel'
+  | 'browse'
+  | 'invite'
+  | 'dm'
+  | 'status'
+  | 'availability'
+  | 'settings'
+  | 'catch-up'
+  | 'account-security';
+const SIDEBAR_DIALOGS = new Set<SidebarDialog>([
+  'create-channel',
+  'browse',
+  'invite',
+  'dm',
+  'status',
+  'availability',
+  'settings',
+  'catch-up',
+  'account-security',
+]);
+/** Old dialog names that are now views (Reports / Automations tabs). */
+const DIALOG_VIEWS: Record<string, MainView | undefined> = {
+  standups: 'standups',
+  'weekly-reports': 'weekly-reports',
+  workflows: 'workflows',
+  scheduled: 'scheduled',
+  analytics: 'analytics',
+};
+/** Old dialog names that are now Workspace settings sections. */
+const DIALOG_SETTINGS: Record<string, SettingsSection | undefined> = {
+  integrations: 'integrations',
+  'user-groups': 'groups',
+  audit: 'audit',
+};
+
+function YouMenuItem({
+  icon,
+  label,
+  onClick,
+  testId,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-ink-2 hover:bg-hovered hover:text-ink"
+      data-testid={testId}
+    >
+      <span className="flex w-5 justify-center text-ink-3">{icon}</span>
+      {label}
+    </button>
+  );
+}
 
 function ChannelRow({
   ch,
@@ -710,7 +645,7 @@ function ChannelRow({
         className={clsx(
           'group flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-[5px] text-[13px]',
           active
-            ? 'bg-hovered font-medium text-ink shadow-[inset_2px_0_0_rgb(var(--accent))]'
+            ? 'nav-active font-medium'
             : unread.unread > 0
               ? 'font-semibold text-ink hover:bg-hovered'
               : 'text-ink-2 hover:bg-hovered hover:text-ink',
@@ -774,7 +709,7 @@ function SectionButton({
       className={clsx(
         'relative flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors',
         active
-          ? 'bg-hovered font-medium text-ink shadow-[inset_2px_0_0_rgb(var(--accent))]'
+          ? 'nav-active font-medium'
           : 'text-ink-2 hover:bg-hovered hover:text-ink',
       )}
     >
@@ -1133,10 +1068,10 @@ function DmPickerDialog({
   );
 }
 
-const PRESENCE_META: Record<'ACTIVE' | 'AWAY' | 'DND', { label: string; dot: string }> = {
-  ACTIVE: { label: 'Active', dot: 'bg-green-500' },
-  AWAY: { label: 'Away', dot: 'bg-yellow-400' },
-  DND: { label: 'Do not disturb', dot: 'bg-red-500' },
+const PRESENCE_META: Record<'ACTIVE' | 'AWAY' | 'DND', { label: string; hint?: string; dot: string }> = {
+  ACTIVE: { label: STAGE_PRESENCE.ACTIVE.label, hint: STAGE_PRESENCE.ACTIVE.plain, dot: 'bg-green-500' },
+  AWAY: { label: STAGE_PRESENCE.AWAY.label, hint: STAGE_PRESENCE.AWAY.plain, dot: 'bg-yellow-400' },
+  DND: { label: STAGE_PRESENCE.DND.label, dot: 'bg-red-500' },
 };
 
 function ProfileDialog({
@@ -1365,6 +1300,7 @@ function ProfileDialog({
             <input type="radio" checked={presenceState === s} onChange={() => setPresenceState(s)} />
             <span className={clsx('h-2.5 w-2.5 rounded-full', PRESENCE_META[s].dot)} />
             {PRESENCE_META[s].label}
+            {PRESENCE_META[s].hint && <span className="text-xs text-ink-3">({PRESENCE_META[s].hint.toLowerCase()})</span>}
           </label>
         ))}
       </div>

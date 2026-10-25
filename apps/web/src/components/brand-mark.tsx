@@ -1,17 +1,23 @@
 import clsx from 'clsx';
 
 /**
- * The Backstages mark: a "B" on a stage lit by the spotlight gradient (violet
- * stage light fading to a warm footlight).
+ * The Backstages mark: a "B" on a stage lit by the spotlight gradient (sky
+ * stage light into deep blue, the same in every theme), finished like glass: a bright top
+ * lip, a hairline rim, and a sheen that sweeps across on hover. `glow` adds a
+ * soft halo in the accent colour.
  */
-export function BrandMark({ size = 28, className }: { size?: number; className?: string }) {
+export function BrandMark({ size = 28, glow = false, className }: { size?: number; glow?: boolean; className?: string }) {
   return (
     <span
       aria-hidden
-      className={clsx('brand-spotlight inline-flex shrink-0 items-center justify-center rounded-[28%] shadow-sm', className)}
+      className={clsx(
+        'brand-mark brand-spotlight inline-flex shrink-0 items-center justify-center rounded-[28%]',
+        glow && 'brand-mark-glow',
+        className,
+      )}
       style={{ width: size, height: size }}
     >
-      <span className="select-none font-bold leading-none tracking-tight text-white" style={{ fontSize: size * 0.5 }}>
+      <span className="brand-mark-letter select-none font-bold leading-none tracking-tight text-white" style={{ fontSize: size * 0.5 }}>
         B
       </span>
     </span>
@@ -21,8 +27,8 @@ export function BrandMark({ size = 28, className }: { size?: number; className?:
 /** Mark + wordmark, for the sign-in / onboarding pages. */
 export function BrandLockup() {
   return (
-    <span className="inline-flex items-center gap-2.5">
-      <BrandMark size={30} />
+    <span className="group inline-flex items-center gap-2.5">
+      <BrandMark size={30} glow />
       <span className="text-[19px] font-semibold tracking-tight text-ink">Backstages</span>
     </span>
   );

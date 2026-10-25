@@ -15,6 +15,10 @@
   --sidebar-bg: var(--nav);
   --sidebar-hover: var(--hover);
   --sidebar-muted: var(--ink-2);
+  /* The brand's own colours (sky stage light into deep blue). Fixed across
+     themes: the logo and the landing/auth stage always look the same. */
+  --brand-from: 56 189 248;
+  --brand-to: 59 130 246;
 }
 
 /* ---------- Daylight (default, light) ---------- */
@@ -232,11 +236,55 @@ html {
 
 /* ---- Backstage component vocabulary ---- */
 @layer components {
-  /* The brand mark's "spotlight" gradient. */
+  /* The brand mark's "spotlight" gradient (brand colours, not the theme's). */
   .brand-spotlight {
     background-image:
       radial-gradient(120% 90% at 20% 0%, rgb(255 255 255 / 0.28), transparent 55%),
-      linear-gradient(140deg, rgb(var(--accent-grad-from)) 0%, rgb(var(--accent-grad-from)) 45%, rgb(var(--accent-grad-to)) 100%);
+      linear-gradient(140deg, rgb(var(--brand-from)) 0%, rgb(var(--brand-from)) 45%, rgb(var(--brand-to)) 100%);
+  }
+  /* The mark itself (BrandMark): glass rim + top lip, and a hover sheen. */
+  .brand-mark {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 4px 12px -4px rgb(var(--brand-to) / 0.55);
+  }
+  .brand-mark::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: linear-gradient(115deg, transparent 38%, rgb(255 255 255 / 0.55) 50%, transparent 62%) no-repeat;
+    background-size: 250% 100%;
+    background-position: 100% 0;
+    mix-blend-mode: overlay;
+    transition: background-position 0.7s ease;
+  }
+  .brand-mark:hover::before,
+  .group:hover .brand-mark::before {
+    background-position: 0% 0;
+  }
+  .brand-mark::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), inset 0 0 0 1px rgb(255 255 255 / 0.18);
+  }
+  .brand-mark-letter {
+    position: relative;
+    text-shadow: 0 1px 2px rgb(0 0 0 / 0.22);
+  }
+  .brand-mark-glow {
+    box-shadow: 0 0 22px 1px rgb(var(--brand-from) / 0.35), 0 4px 12px -4px rgb(var(--brand-to) / 0.55);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .brand-mark::before {
+      transition: none;
+    }
   }
   .kbd {
     @apply inline-flex min-w-[1.25rem] items-center justify-center rounded border border-line bg-surface px-1 font-sans text-[10px] font-medium leading-4 text-ink-3;
@@ -264,9 +312,71 @@ html {
   }
 }
 
-/* The nav surface: flat, part of the system, with a whisper of accent at the top. */
+/* The nav surface. On phones it's a drawer, so it needs its own fill; on wider
+   screens it sits straight on the backstage. */
 .sidebar-surface {
   background-color: rgb(var(--nav));
+}
+@media (min-width: 768px) {
+  .sidebar-surface {
+    background-color: transparent;
+  }
+}
+
+/* ============================================================================
+   APP SHELL — "Floating Stage"
+   The app sits on a dim backstage (the theme's canvas); the content pane and
+   the right panel float on it as lit stages (the theme's surface), each with a
+   faint brand spotlight along the top edge.
+   ========================================================================== */
+.backstage {
+  background-color: rgb(var(--canvas));
+  background-image: radial-gradient(60% 320px at 50% -120px, rgb(var(--brand-from) / 0.08), transparent 100%);
+  background-repeat: no-repeat;
+}
+.stage-frame {
+  background-color: rgb(var(--surface));
+  background-image: radial-gradient(50% 120px at 50% -40px, rgb(var(--brand-from) / 0.09), transparent 100%);
+  background-repeat: no-repeat;
+}
+/* The selected row in the sidebar: a small lit card with a brand light bar. */
+.nav-active {
+  position: relative;
+  background-color: rgb(var(--surface));
+  color: rgb(var(--ink));
+  box-shadow: 0 0 0 1px rgb(var(--line)), 0 1px 2px rgb(0 0 0 / 0.05);
+}
+.nav-active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background-image: linear-gradient(rgb(var(--brand-from)), rgb(var(--brand-to)));
+}
+/* The channel's cover tile in its playbill header. */
+.playbill-cover {
+  background-image: linear-gradient(140deg, rgb(var(--accent) / 0.18), rgb(var(--accent) / 0.06));
+  box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.22);
+}
+/* "Live" indicator (huddles in the marquee). */
+.live-dot {
+  height: 7px;
+  width: 7px;
+  border-radius: 9999px;
+  background: rgb(16 185 129);
+  box-shadow: 0 0 0 3px rgb(16 185 129 / 0.2);
+  animation: live-blink 1.4s ease-in-out infinite;
+}
+@keyframes live-blink {
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot {
+    animation: none;
+  }
 }
 
 /* ---- interactive polish: smooth, tactile, modern ---- */
@@ -442,4 +552,723 @@ select:focus-visible {
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* ============================================================================
+   LANDING — "Spotlight Stage" (/)
+   Always a dark stage whatever the theme; only the accent and the brand
+   spotlight gradient follow the user's theme. The JS publishes --sx/--sy (the
+   light's position), --beam-angle/--beam-length and --ex/--ey (exit origin).
+   Everything tagged [data-anim] is held at its first frame until .is-live.
+   ========================================================================== */
+.stage {
+  /* The stage is brand territory: it ignores the user's theme accent. */
+  --accent: var(--brand-from);
+  --accent-grad-from: var(--brand-from);
+  --accent-grad-to: var(--brand-to);
+  --light: 255 246 228;
+  --sx: 50%;
+  --sy: 42%;
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  isolation: isolate;
+  color: #fff;
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgb(var(--accent) / 0.12), transparent 60%),
+    linear-gradient(to bottom, #0b0a12, #050508 70%);
+}
+.stage [data-anim] {
+  animation-play-state: paused;
+}
+.stage.is-live [data-anim] {
+  animation-play-state: running;
+}
+
+/* ---- light rig ---- */
+.stage-beam {
+  position: absolute;
+  left: 50%;
+  top: -60px;
+  width: calc(var(--beam-length, 600px) * 0.62);
+  height: var(--beam-length, 600px);
+  transform: translateX(-50%) rotate(var(--beam-angle, 0deg));
+  transform-origin: 50% 0;
+  clip-path: polygon(46% 0, 54% 0, 100% 100%, 0 100%);
+  background: linear-gradient(to bottom, rgb(var(--light) / 0.26), rgb(var(--light) / 0.07) 70%, transparent);
+  filter: blur(8px);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  animation: stage-lamp-on 1.2s linear 0.15s both;
+}
+.stage-pool {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(260px 200px at var(--sx) var(--sy), rgb(var(--light) / 0.2), transparent 70%),
+    radial-gradient(520px 380px at var(--sx) var(--sy), rgb(var(--accent) / 0.14), transparent 70%);
+  animation: stage-lamp-on 1.2s linear 0.15s both;
+}
+.stage-dust {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(340px 300px at var(--sx) var(--sy), #000, transparent 75%);
+  mask-image: radial-gradient(340px 300px at var(--sx) var(--sy), #000, transparent 75%);
+  animation: stage-fade-in 1.4s ease-out 0.9s both;
+}
+.stage-dust span {
+  position: absolute;
+  border-radius: 9999px;
+  background: rgb(var(--light) / 0.85);
+  box-shadow: 0 0 6px rgb(var(--light) / 0.6);
+  animation-name: stage-dust;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* ---- floor & footlights ---- */
+.stage-floor {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 22vh;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgb(255 255 255 / 0.035), transparent 60%);
+  border-top: 1px solid rgb(255 255 255 / 0.06);
+}
+.stage-footlights {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  display: flex;
+  gap: clamp(28px, 7vw, 96px);
+  transform: translateX(-50%);
+}
+.stage-footlights span {
+  width: 14px;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgb(var(--accent-grad-to));
+  box-shadow: 0 0 18px 6px rgb(var(--accent-grad-to) / 0.45), 0 -20px 50px 10px rgb(var(--accent-grad-to) / 0.12);
+  animation: stage-footlight 0.5s ease-out both;
+}
+
+/* ---- the act ---- */
+.stage-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px 6vh;
+  text-align: center;
+}
+.stage-mark {
+  position: relative;
+  margin-bottom: 26px;
+  animation: stage-mark-in 0.9s cubic-bezier(0.2, 0.9, 0.3, 1.3) 0.75s both;
+}
+/* The mark floats gently, with a slowly turning halo of the brand gradient behind it. */
+.stage-mark-float {
+  position: relative;
+  border-radius: 26%;
+  box-shadow: 0 0 70px 8px rgb(var(--accent) / 0.45), 0 22px 40px -14px rgb(0 0 0 / 0.85);
+  animation: stage-bob 5s ease-in-out infinite;
+}
+.stage-mark-float::before {
+  content: '';
+  position: absolute;
+  inset: -18px;
+  z-index: -1;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgb(var(--accent-grad-from) / 0.9),
+    rgb(var(--accent-grad-to) / 0.7),
+    transparent 45%,
+    rgb(var(--accent-grad-from) / 0.6),
+    transparent 85%,
+    rgb(var(--accent-grad-from) / 0.9)
+  );
+  filter: blur(18px);
+  opacity: 0.75;
+  animation: stage-spin 9s linear infinite;
+}
+/* The glass rim comes with BrandMark; on stage the sheen also sweeps by itself. */
+.stage-mark-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 26%;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 38%, rgb(255 255 255 / 0.6) 50%, transparent 62%) no-repeat;
+  background-size: 250% 100%;
+  background-position: 100% 0;
+  mix-blend-mode: overlay;
+  animation: stage-sheen 7s ease-in-out 2.6s infinite;
+}
+
+/* ---- twinkling stars over the logo ---- */
+.stage-stars {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 36px);
+  width: 300px;
+  height: 130px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: stage-fade-in 1s ease-out 1.4s both;
+}
+.stage-star {
+  position: absolute;
+  translate: -50% -50%;
+  fill: #fff;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 3px rgb(255 255 255 / 0.9)) drop-shadow(0 0 10px rgb(var(--light) / 0.7));
+  animation-name: stage-twinkle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+}
+.stage-star-accent {
+  fill: rgb(var(--accent-grad-from));
+  filter: drop-shadow(0 0 3px rgb(255 255 255 / 0.7)) drop-shadow(0 0 10px rgb(var(--accent-grad-from) / 0.9));
+}
+.stage-star-warm {
+  fill: rgb(var(--accent-grad-to));
+  filter: drop-shadow(0 0 3px rgb(255 255 255 / 0.7)) drop-shadow(0 0 10px rgb(var(--accent-grad-to) / 0.9));
+}
+.stage-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.55);
+  animation: stage-rise 0.7s ease-out 0.95s both;
+}
+.stage-wordmark {
+  margin-top: 10px;
+  font-size: clamp(2.75rem, 9vw, 5.75rem);
+  font-weight: 650;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  filter: drop-shadow(0 0 28px rgb(var(--light) / 0.28));
+}
+/* A soft glow washes over each letter in turn, so it ripples along the word. */
+.stage-wordmark span {
+  --i: 0;
+  display: inline-block;
+  color: transparent;
+  background-image:
+    linear-gradient(
+      100deg,
+      transparent 30%,
+      rgb(var(--light)) 42%,
+      rgb(var(--accent-grad-to)) 50%,
+      rgb(var(--light)) 58%,
+      transparent 70%
+    ),
+    linear-gradient(to bottom, #fff 35%, rgb(214 214 228));
+  background-size: 400% 100%, 100% 100%;
+  background-position: 100% 0, 0 0;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation:
+    stage-letter 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    stage-shimmer 7s ease-in-out infinite;
+  animation-delay: calc(1.05s + var(--i) * 0.055s), calc(2.8s + var(--i) * 0.06s);
+}
+.stage-tagline {
+  max-width: 34rem;
+  margin-top: 18px;
+  font-size: clamp(0.975rem, 2.4vw, 1.125rem);
+  line-height: 1.6;
+  color: rgb(255 255 255 / 0.62);
+  animation: stage-rise 0.8s ease-out 1.75s both;
+}
+.stage-cta-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-top: 36px;
+  animation: stage-rise 0.8s ease-out 2.05s both;
+}
+.stage-cta {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 9999px;
+  background: #fff;
+  padding: 15px 30px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #0b0b10;
+  box-shadow: 0 10px 40px -8px rgb(var(--accent) / 0.7), 0 0 0 1px rgb(255 255 255 / 0.4);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.stage-cta::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  animation: stage-pulse 2.4s ease-out 2.9s infinite;
+}
+.stage-cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 50px -8px rgb(var(--accent) / 0.85), 0 0 0 1px rgb(255 255 255 / 0.6);
+}
+.stage-cta:focus-visible {
+  outline: 3px solid rgb(var(--accent));
+  outline-offset: 4px;
+}
+.stage-cta-arrow {
+  transition: transform 0.2s ease;
+}
+.stage-cta:hover .stage-cta-arrow {
+  transform: translateX(4px);
+}
+.stage-secondary {
+  font-size: 14px;
+  color: rgb(255 255 255 / 0.5);
+}
+.stage-secondary span {
+  color: rgb(255 255 255 / 0.85);
+  text-decoration: underline;
+  text-decoration-color: rgb(255 255 255 / 0.3);
+  text-underline-offset: 3px;
+}
+.stage-secondary:hover span {
+  text-decoration-color: currentColor;
+}
+.stage-secondary:focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+.stage-credits {
+  position: absolute;
+  inset: auto 0 28px 0;
+  z-index: 2;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: rgb(255 255 255 / 0.35);
+  animation: stage-fade-in 1s ease-out 2.4s both;
+}
+
+/* ---- exit: the act fades into the light, and a soft-edged glow in the
+   (theme-coloured) page background spreads from the click until it fills the
+   screen; the sign-in card then fades in on that same colour. ---- */
+@property --exit-r {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+.stage-content,
+.stage-credits {
+  transition:
+    opacity 0.55s ease-out,
+    transform 1s cubic-bezier(0.4, 0, 0.2, 1),
+    filter 0.55s ease-out;
+}
+.stage.is-exiting .stage-content,
+.stage.is-exiting .stage-credits {
+  opacity: 0;
+  transform: scale(1.05) translateY(-8px);
+  filter: blur(6px);
+}
+.stage-pool {
+  transition: filter 0.6s ease-out;
+}
+.stage.is-exiting .stage-pool {
+  filter: brightness(1.8);
+}
+.stage-exit {
+  --exit-r: -30vmax;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at var(--ex, 50%) var(--ey, 50%),
+    rgb(var(--canvas)) 0,
+    rgb(var(--canvas)) var(--exit-r),
+    rgb(var(--canvas) / 0) calc(var(--exit-r) + 30vmax)
+  );
+  transition: --exit-r 1s cubic-bezier(0.65, 0, 0.35, 1) 0.1s;
+}
+.stage.is-exiting .stage-exit {
+  --exit-r: 150vmax;
+}
+
+/* Sign-in / sign-up card: settles in on arrival (seamless after the stage's exit). */
+.auth-enter {
+  animation: auth-enter 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes auth-enter {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ============================================================================
+   AUTH — "Split Stage" (login, signup and friends)
+   Left: a slice of the landing stage (a short banner on phones). Right: the
+   form, in the user's own theme.
+   ========================================================================== */
+.auth-stage {
+  height: 230px;
+  animation: stage-fade-in 0.6s ease-out both;
+}
+@media (min-width: 1024px) {
+  .auth-stage {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+.auth-stage .stage-mark {
+  margin-bottom: 16px;
+  animation-delay: 0.1s;
+}
+.auth-stage .stage-stars {
+  transform: translateX(-50%) scale(0.8);
+  transform-origin: 50% 100%;
+  animation-delay: 0.4s;
+}
+.auth-stage-inner {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  padding: 28px 16px 0;
+  text-align: center;
+}
+.auth-stage-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.auth-stage-wordmark {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  color: #fff;
+  filter: drop-shadow(0 0 20px rgb(var(--light) / 0.3));
+}
+.auth-stage-tagline,
+.auth-showcase,
+.auth-stage-credits {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .auth-stage-wordmark {
+    font-size: 40px;
+  }
+  .auth-stage-tagline {
+    display: block;
+    margin-top: 6px;
+    font-size: 15px;
+    color: rgb(255 255 255 / 0.6);
+  }
+  .auth-showcase {
+    display: block;
+    width: min(400px, 100%);
+  }
+  .auth-stage-credits {
+    display: block;
+    animation-delay: 0.8s;
+  }
+}
+
+/* ---- feature showcase card ---- */
+.auth-showcase-slide {
+  padding: 20px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: 0 24px 60px -24px rgb(0 0 0 / 0.8);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  text-align: left;
+  animation: auth-slide-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.auth-showcase-icon {
+  display: flex;
+  height: 38px;
+  width: 38px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  color: #fff;
+  background-image: linear-gradient(140deg, rgb(var(--accent-grad-from)), rgb(var(--accent-grad-to)));
+  box-shadow: 0 6px 18px -4px rgb(var(--accent) / 0.6);
+}
+.auth-showcase-mock {
+  display: flex;
+  min-height: 140px;
+  flex-direction: column;
+  justify-content: center;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgb(255 255 255 / 0.06);
+  border-radius: 12px;
+  background: rgb(0 0 0 / 0.25);
+}
+.auth-mock-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  animation: stage-rise 0.45s ease-out both;
+}
+.auth-bubble {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 6px 10px;
+  border-radius: 4px 12px 12px 12px;
+  background: rgb(255 255 255 / 0.09);
+  font-size: 12.5px;
+  color: rgb(255 255 255 / 0.9);
+}
+.auth-typing {
+  display: inline-flex;
+  gap: 3px;
+  padding: 10px 11px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.09);
+}
+.auth-typing span {
+  height: 5px;
+  width: 5px;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.7);
+  animation: auth-typing 1.2s ease-in-out infinite;
+}
+.auth-typing span:nth-child(2) { animation-delay: 0.15s; }
+.auth-typing span:nth-child(3) { animation-delay: 0.3s; }
+.auth-huddle-person > span {
+  height: 42px;
+  width: 42px;
+  font-size: 12px;
+}
+.auth-huddle-person.is-speaking > span {
+  animation: auth-speaking 1.4s ease-in-out infinite;
+}
+.auth-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: rgb(52 211 153 / 0.12);
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(110 231 183);
+}
+.auth-live-dot {
+  height: 6px;
+  width: 6px;
+  border-radius: 9999px;
+  background: rgb(52 211 153);
+  animation: auth-blink 1.2s ease-in-out infinite;
+}
+.auth-task {
+  display: block;
+}
+.auth-progress {
+  width: 72%;
+  background-image: linear-gradient(90deg, rgb(var(--accent-grad-from)), rgb(var(--accent-grad-to)));
+  animation: auth-progress 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) 0.4s both;
+}
+.auth-showcase-dot {
+  height: 6px;
+  width: 6px;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.25);
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+.auth-showcase-dot.is-active {
+  width: 20px;
+  background: #fff;
+}
+
+/* ---- form ---- */
+.auth-submit {
+  position: relative;
+  display: flex;
+  height: 44px;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background-image: linear-gradient(120deg, rgb(var(--accent)) 0%, rgb(var(--accent-grad-from)) 45%, rgb(var(--accent-grad-to)) 120%);
+  background-size: 160% 100%;
+  background-position: 0 0;
+  box-shadow: 0 8px 20px -8px rgb(var(--accent) / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.2);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background-position 0.5s ease, opacity 0.2s ease;
+}
+.auth-submit:not(:disabled):hover {
+  background-position: 100% 0;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 26px -8px rgb(var(--accent) / 0.8), inset 0 1px 0 rgb(255 255 255 / 0.25);
+}
+.auth-submit:not(:disabled):active {
+  transform: scale(0.98);
+}
+.auth-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.auth-submit:focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 2px;
+}
+.auth-error {
+  animation: auth-shake 0.42s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes auth-slide-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes auth-typing {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+@keyframes auth-speaking {
+  0%, 100% { box-shadow: 0 0 0 2px #0b0a12, 0 0 0 4px rgb(52 211 153 / 0.9); }
+  50% { box-shadow: 0 0 0 2px #0b0a12, 0 0 0 8px rgb(52 211 153 / 0.25); }
+}
+@keyframes auth-blink {
+  50% { opacity: 0.3; }
+}
+@keyframes auth-progress {
+  from { width: 0; }
+}
+@keyframes auth-shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-4px); }
+  40%, 60% { transform: translateX(4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-stage,
+  .auth-showcase-slide,
+  .auth-mock-row,
+  .auth-typing span,
+  .auth-huddle-person.is-speaking > span,
+  .auth-live-dot,
+  .auth-progress,
+  .auth-error {
+    animation: none;
+  }
+}
+
+@keyframes stage-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* A lamp striking up: a couple of stutters before it holds. */
+@keyframes stage-lamp-on {
+  0% { opacity: 0; }
+  8% { opacity: 0.8; }
+  14% { opacity: 0.1; }
+  24% { opacity: 0.9; }
+  30% { opacity: 0.3; }
+  45%, 100% { opacity: 1; }
+}
+@keyframes stage-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes stage-letter {
+  from { opacity: 0; transform: translateY(0.45em) rotateX(60deg); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes stage-mark-in {
+  from { opacity: 0; transform: scale(0.4) rotate(-12deg); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes stage-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+@keyframes stage-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes stage-sheen {
+  0% { background-position: 100% 0; }
+  22%, 100% { background-position: 0% 0; }
+}
+@keyframes stage-shimmer {
+  0% { background-position: 100% 0, 0 0; }
+  20%, 100% { background-position: 0% 0, 0 0; }
+}
+@keyframes stage-twinkle {
+  0%, 100% { opacity: 0; transform: scale(0.2) rotate(0deg); }
+  45% { opacity: 1; transform: scale(1) rotate(45deg); }
+  60% { opacity: 0.9; transform: scale(0.85) rotate(60deg); }
+}
+@keyframes stage-footlight {
+  0% { opacity: 0; }
+  60% { opacity: 1; }
+  75% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+@keyframes stage-dust {
+  0%, 100% { transform: translate(0, 0); opacity: 0.25; }
+  50% { transform: translate(14px, -26px); opacity: 1; }
+}
+@keyframes stage-pulse {
+  0% { box-shadow: 0 0 0 0 rgb(var(--accent) / 0.55); }
+  100% { box-shadow: 0 0 0 18px rgb(var(--accent) / 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage [data-anim] {
+    animation: stage-fade-in 0.5s ease-out 0.1s both;
+  }
+  .stage-dust {
+    display: none;
+  }
+  .stage-cta::before,
+  .stage-mark-float,
+  .stage-mark-float::before,
+  .stage-mark-sheen,
+  .stage-star {
+    animation: none;
+  }
+  .stage-exit,
+  .stage.is-exiting .stage-exit {
+    --exit-r: 200vmax;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  .stage.is-exiting .stage-exit {
+    opacity: 1;
+  }
+  .stage-content,
+  .stage-credits,
+  .stage-pool {
+    transition: none;
+  }
+  .auth-enter {
+    animation: stage-fade-in 0.3s ease-out both;
+  }
 }

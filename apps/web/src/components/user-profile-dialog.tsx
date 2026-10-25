@@ -5,14 +5,15 @@ import { MessageSquare } from 'lucide-react';
 import type { UserDto } from '@backstages/shared';
 import { useAuthStore } from '@/stores/auth-store';
 import { emojiChar } from '@/lib/emoji';
+import { STAGE_PRESENCE } from '@/lib/presence';
 import { Avatar } from './avatar';
 import { Dialog } from './dialog';
 
 const PRESENCE: Record<string, { label: string; dot: string }> = {
-  ACTIVE: { label: 'Active', dot: 'bg-green-500' },
-  AWAY: { label: 'Away', dot: 'bg-yellow-400' },
-  DND: { label: 'Do not disturb', dot: 'bg-red-500' },
-  OFFLINE: { label: 'Offline', dot: 'bg-gray-300 dark:bg-gray-600' },
+  ACTIVE: { label: STAGE_PRESENCE.ACTIVE.label, dot: 'bg-green-500' },
+  AWAY: { label: STAGE_PRESENCE.AWAY.label, dot: 'bg-yellow-400' },
+  DND: { label: STAGE_PRESENCE.DND.label, dot: 'bg-red-500' },
+  OFFLINE: { label: STAGE_PRESENCE.OFFLINE.label, dot: 'bg-gray-300 dark:bg-gray-600' },
 };
 
 type ProfileUser = Pick<

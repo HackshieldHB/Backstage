@@ -3,6 +3,7 @@
 import clsx from 'clsx';
 import type { UserDto } from '@backstages/shared';
 import { fileUrl } from '@/lib/api';
+import { presenceLabel } from '@/lib/presence';
 
 const PALETTE = ['bg-rose-500', 'bg-orange-500', 'bg-amber-500', 'bg-emerald-500', 'bg-cyan-500', 'bg-blue-500', 'bg-violet-500', 'bg-fuchsia-500'];
 
@@ -54,6 +55,7 @@ export function Avatar({
       {presence && (
         <span
           data-testid="presence-dot"
+          title={presenceLabel(presence)}
           className={clsx(
             'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-surface',
             presence === 'ACTIVE' && 'bg-green-500',

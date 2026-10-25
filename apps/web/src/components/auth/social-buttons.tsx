@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { OAuthProvidersDto } from '@backstages/shared';
 import { api, API_URL } from '@/lib/api';
+import { altButton } from './auth-card';
 
 export function GoogleIcon({ className = 'h-4 w-4' }: { className?: string }) {
   return (
@@ -22,9 +23,6 @@ export function GithubIcon({ className = 'h-4 w-4' }: { className?: string }) {
     </svg>
   );
 }
-
-const btn =
-  'flex w-full items-center justify-center gap-2 rounded-md border border-line-strong px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800';
 
 /** Which providers the server has configured (cached for the page's lifetime). */
 let cached: OAuthProvidersDto | null = null;
@@ -54,16 +52,28 @@ export function useOAuthProviders(): OAuthProvidersDto | null {
 export function SocialButtons({ verb = 'Continue' }: { verb?: string }) {
   const providers = useOAuthProviders();
   if (!providers || (!providers.google && !providers.github)) return null;
+  // Side by side when both exist, so the short provider name is enough.
+  const both = providers.google && providers.github;
   return (
-    <div className="flex flex-col gap-2" data-testid="social-buttons">
+    <div className={both ? 'grid grid-cols-2 gap-2' : 'flex flex-col gap-2'} data-testid="social-buttons">
       {providers.google && (
-        <a href={`${API_URL}/auth/oauth/google/start`} className={btn} data-testid="oauth-google">
-          <GoogleIcon /> {verb} with Google
+        <a
+          href={`${API_URL}/auth/oauth/google/start`}
+          className={altButton}
+          aria-label={`${verb} with Google`}
+          data-testid="oauth-google"
+        >
+          <GoogleIcon /> {both ? 'Google' : `${verb} with Google`}
         </a>
       )}
       {providers.github && (
-        <a href={`${API_URL}/auth/oauth/github/start`} className={btn} data-testid="oauth-github">
-          <GithubIcon /> {verb} with GitHub
+        <a
+          href={`${API_URL}/auth/oauth/github/start`}
+          className={altButton}
+          aria-label={`${verb} with GitHub`}
+          data-testid="oauth-github"
+        >
+          <GithubIcon /> {both ? 'GitHub' : `${verb} with GitHub`}
         </a>
       )}
     </div>
@@ -71,12 +81,12 @@ export function SocialButtons({ verb = 'Continue' }: { verb?: string }) {
 }
 
 /** "or" divider used between the social buttons and the email form. */
-export function OrDivider() {
+export function OrDivider({ label = 'or' }: { label?: string }) {
   return (
-    <div className="my-4 flex items-center gap-3">
-      <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
-      <span className="text-xs text-gray-500 dark:text-gray-400">or</span>
-      <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+    <div className="my-5 flex items-center gap-3">
+      <span className="h-px flex-1 bg-gradient-to-r from-transparent to-line-strong" />
+      <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-ink-3">{label}</span>
+      <span className="h-px flex-1 bg-gradient-to-l from-transparent to-line-strong" />
     </div>
   );
 }

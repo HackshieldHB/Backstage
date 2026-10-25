@@ -68,7 +68,7 @@ export function RightPanelView({
   const fromThreads = panel.kind === 'thread' && panel.from === 'threads';
 
   return (
-    <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-md shrink-0 flex-col border-l border-line bg-surface md:static md:my-1.5 md:mr-1.5 md:w-96 md:overflow-hidden md:rounded-lg md:border md:shadow-soft">
+    <aside className="stage-frame absolute inset-y-0 right-0 z-30 flex w-full max-w-md shrink-0 flex-col border-l border-line md:static md:mb-2 md:mr-2 md:w-96 md:overflow-hidden md:rounded-[18px] md:border md:shadow-stage">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4 dark:border-line">
         <h2 className="flex items-center gap-1.5 text-[14px] font-semibold tracking-tight text-ink">
           {fromThreads && (
@@ -112,7 +112,8 @@ export function RightPanelView({
 
 // ---------- threads inbox ----------
 
-function ThreadsPanel({ workspaceId }: { workspaceId: string }) {
+/** `inPane`: shown as the Inbox's Threads tab, so a thread opens on the right without a back-to-list step. */
+export function ThreadsPanel({ workspaceId, inPane = false }: { workspaceId: string; inPane?: boolean }) {
   const threads = useMyThreads(workspaceId);
   const setRightPanel = useUiStore((s) => s.setRightPanel);
 
@@ -132,7 +133,11 @@ function ThreadsPanel({ workspaceId }: { workspaceId: string }) {
       {threads.data.threads.map(({ message, containerLabel }) => (
         <button
           key={message.id}
-          onClick={() => setRightPanel({ kind: 'thread', messageId: message.id, from: 'threads' })}
+          onClick={() =>
+            setRightPanel(
+              inPane ? { kind: 'thread', messageId: message.id } : { kind: 'thread', messageId: message.id, from: 'threads' },
+            )
+          }
           className="mb-2 block w-full rounded-lg border border-line p-3 text-left hover:border-accent dark:border-line"
           data-testid="thread-row"
         >
@@ -679,7 +684,7 @@ function systemText(pl: NotifPayload): string | null {
   return null;
 }
 
-function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: string) => void }) {
+export function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: string) => void }) {
   const notifications = useNotifications();
   const qc = useQueryClient();
   const muted = useUiStore((s) => s.notificationsMuted);
@@ -793,7 +798,7 @@ function ActivityPanel({ onNavigate }: { onNavigate: (c: Container, highlight?: 
 
 // ---------- saved ----------
 
-function SavedPanel({
+export function SavedPanel({
   workspaceId,
   onNavigate,
 }: {

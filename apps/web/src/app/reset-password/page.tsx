@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { AuthCard, Field, FormError, SubmitButton } from '@/components/auth/auth-card';
+import { AuthCard, Field, FormError, PasswordStrength, SubmitButton } from '@/components/auth/auth-card';
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -35,6 +35,8 @@ export default function ResetPasswordPage() {
           onChange={(e) => setPassword(e.target.value)}
           minLength={8}
           required
+          autoComplete="new-password"
+          hint={<PasswordStrength password={password} />}
         />
         <SubmitButton>Reset password</SubmitButton>
       </form>

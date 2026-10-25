@@ -1,12 +1,45 @@
 'use client';
 
-import { useEffect, useId, useRef } from 'react';
+import { createContext, useContext, useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function Dialog({
+/**
+ * Set by a page or tab that hosts a dialog's content in place (e.g. Workflows
+ * inside the Automations view, User groups inside Workspace settings). The
+ * hosted Dialog then renders as an ordinary section instead of a modal. `label`
+ * is what the host already shows as a heading, so a matching title isn't repeated.
+ */
+const InlineDialogContext = createContext<{ label?: string } | null>(null);
+
+export function InlineDialogHost({ label, children }: { label?: string; children: React.ReactNode }) {
+  return <InlineDialogContext.Provider value={{ label }}>{children}</InlineDialogContext.Provider>;
+}
+
+export function Dialog(props: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
+  const inline = useContext(InlineDialogContext);
+  if (inline) {
+    return (
+      <section aria-label={props.title}>
+        {props.title !== inline.label && (
+          <h2 className="mb-3 text-[15px] font-semibold tracking-tight text-ink">{props.title}</h2>
+        )}
+        {/* Anything the content opens itself (confirmations, editors) is a real modal again. */}
+        <InlineDialogContext.Provider value={null}>{props.children}</InlineDialogContext.Provider>
+      </section>
+    );
+  }
+  return <ModalDialog {...props} />;
+}
+
+function ModalDialog({
   title,
   onClose,
   children,

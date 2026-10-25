@@ -32,7 +32,7 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const WELCOME_TEXT = [
   '👋 Welcome to your new workspace!',
   'A few things to try:',
-  '• Invite your team with the invite button next to the workspace name.',
+  '• Invite your team from the workspace menu (top left) or the invite button at the top right.',
   '• Start a huddle from any channel or DM for voice, video and screen sharing.',
   '• Plan meetings in Calendar — everyone invited gets a reminder before it starts.',
   '• Turn messages into Tasks, and see your day in My day.',

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import '@fontsource-variable/inter';
+import '@fontsource-variable/bricolage-grotesque';
 import './globals.css';
 import { Providers } from './providers';
 import { PwaRegistrar } from '@/components/pwa-registrar';
@@ -13,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#6858e0',
+  themeColor: '#3b82f6',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

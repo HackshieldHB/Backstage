@@ -4,7 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth-store';
-import { AuthCard, Field, FormError, SubmitButton } from '@/components/auth/auth-card';
+import { UserRound } from 'lucide-react';
+import { AuthCard, Field, FormError, PasswordStrength, SubmitButton } from '@/components/auth/auth-card';
 import { OrDivider, SocialButtons, useOAuthProviders } from '@/components/auth/social-buttons';
 
 export default function SignupPage() {
@@ -32,47 +33,56 @@ export default function SignupPage() {
   };
 
   return (
-    <AuthCard title="Create your account">
+    <AuthCard title="Join the crew" subtitle="Create your Backstages account. It takes less than a minute.">
       {hasSocial && (
         <>
           <SocialButtons verb="Sign up" />
-          <OrDivider />
+          <OrDivider label="or sign up with email" />
         </>
       )}
       <form onSubmit={onSubmit}>
         <FormError message={error} />
         <Field
           label="Full name"
+          icon={UserRound}
+          placeholder="Ada Lovelace"
           value={displayName}
           onChange={(e) => setDisplayName(e.target.value)}
           required
           autoFocus
+          autoComplete="name"
           data-testid="signup-name"
         />
         <Field
           label="Email"
           type="email"
+          placeholder="you@company.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
+          autoComplete="email"
           data-testid="signup-email"
         />
         <Field
           label="Password"
           type="password"
+          placeholder="At least 8 characters"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           minLength={8}
           required
+          autoComplete="new-password"
+          hint={<PasswordStrength password={password} />}
           data-testid="signup-password"
         />
-        <SubmitButton disabled={busy}>{busy ? 'Creating…' : 'Create account'}</SubmitButton>
+        <SubmitButton busy={busy}>{busy ? 'Creating…' : 'Create account'}</SubmitButton>
       </form>
-      <div className="mt-4 text-sm">
-        <Link className="text-accent hover:underline" href="/login">
-          Already have an account? Sign in
+      <p className="mt-7 text-center text-sm text-ink-2">
+        Already have an account?{' '}
+        <Link className="font-semibold text-accent hover:underline" href="/login">
+          Sign in
         </Link>
-      </div>
+      </p>
     </AuthCard>
   );
 }

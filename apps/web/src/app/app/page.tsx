@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore, type RightPanel } from '@/stores/ui-store';
@@ -17,7 +17,7 @@ import { api } from '@/lib/api';
 import { useHuddle } from '@/hooks/use-huddle';
 import { useHuddleRecording } from '@/hooks/use-huddle-recording';
 import { VerifyEmailBanner } from '@/components/verify-email-banner';
-import { WorkspaceRail } from '@/components/workspace-rail';
+import { StageMarquee } from '@/components/stage-marquee';
 import { Sidebar } from '@/components/sidebar';
 import { MainPane } from '@/components/main-pane';
 import { MeetingRoom } from '@/components/meeting/meeting-room';
@@ -33,6 +33,9 @@ import { ApplicationsPane } from '@/components/applications/applications-pane';
 import { TasksPane } from '@/components/tasks-pane';
 import { MyDayPane } from '@/components/my-day-pane';
 import { CalendarPane } from '@/components/calendar-pane';
+import { DialogViewPane } from '@/components/dialog-view-pane';
+import { HubTabStrip, hubOf } from '@/components/view-hubs';
+import { PaneTabsProvider } from '@/components/pane-tabs';
 import { MeetingDetailDialog } from '@/components/meeting-detail';
 import { FeedbackDialog } from '@/components/feedback-dialog';
 import { setUsageWorkspace, track, trackView } from '@/lib/usage';
@@ -61,6 +64,8 @@ function AppShell() {
     if (wsParam && workspaces.data?.some((w) => w.id === wsParam)) return wsParam;
     return workspaces.data?.[0]?.id ?? null;
   }, [wsParam, workspaces.data]);
+  const myRole = workspaces.data?.find((w) => w.id === workspaceId)?.myRole;
+  const isAdmin = myRole === 'OWNER' || myRole === 'ADMIN';
 
   const channels = useChannels(workspaceId ?? '');
   const conversations = useConversations(workspaceId ?? '');
@@ -68,6 +73,8 @@ function AppShell() {
   const cParam = params.get('c');
   const tParam = params.get('t');
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
+  // The marquee's search button; the sidebar's guided tour points at it.
+  const searchRef = useRef<HTMLButtonElement>(null);
 
   const container: Container | null = useMemo(() => {
     if (cParam && tParam === 'dm') return { kind: 'conversation', id: cParam };
@@ -264,14 +271,20 @@ function AppShell() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-canvas">
-      <WorkspaceRail
+    <div className="backstage flex h-screen flex-col overflow-hidden">
+      <StageMarquee
         workspaces={workspaces.data ?? []}
         activeId={workspaceId}
-        onSelect={(id) => router.push(`/app?ws=${id}`)}
+        onSelectWorkspace={(id) => router.push(`/app?ws=${id}`)}
+        huddle={huddle}
+        channels={channels.data ?? []}
+        conversations={conversations.data ?? []}
+        onNavigate={navigate}
+        searchRef={searchRef}
       />
+      <div className="relative flex min-h-0 flex-1">
       <div
-        className={`${sidebarOpen ? 'flex' : 'hidden'} absolute inset-y-0 left-[52px] z-40 shadow-pop md:static md:flex md:shadow-none`}
+        className={`${sidebarOpen ? 'flex' : 'hidden'} absolute inset-y-0 left-0 z-40 shadow-pop md:static md:flex md:shadow-none`}
       >
         <Sidebar
           workspaceId={workspaceId}
@@ -279,16 +292,31 @@ function AppShell() {
           onNavigate={navigate}
           channels={channels.data ?? []}
           conversations={conversations.data ?? []}
+          searchAnchorRef={searchRef}
         />
       </div>
       {sidebarOpen && (
         <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => toggleSidebar(false)} />
       )}
       {huddle.joined && <MeetingRoom huddle={huddle} label={huddleLabel} workspaceId={workspaceId} recording={huddleRecording} />}
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface md:my-1.5 md:mr-1.5 md:rounded-lg md:border md:border-line md:shadow-soft">
+      <main className="stage-frame flex min-w-0 flex-1 flex-col overflow-hidden border-t border-line md:mb-2 md:mr-2 md:rounded-[18px] md:border md:shadow-stage">
         <VerifyEmailBanner />
         <ErrorBoundary key={`${mainView}:${container?.id ?? 'none'}`}>
-          {mainView === 'timeline' ? (
+          {/* Views in a hub (My day, Reports, Automations, Atlassian) get its tab strip. */}
+          <PaneTabsProvider tabs={hubOf(mainView) ? <HubTabStrip workspaceId={workspaceId} view={mainView} /> : null}>
+          {mainView === 'weekly-reports' ||
+          mainView === 'analytics' ||
+          mainView === 'workflows' ||
+          mainView === 'scheduled' ||
+          mainView === 'standups' ? (
+            <DialogViewPane
+              view={mainView}
+              workspaceId={workspaceId}
+              channels={channels.data ?? []}
+              conversations={conversations.data ?? []}
+              isAdmin={isAdmin}
+            />
+          ) : mainView === 'timeline' ? (
             <TeamTimelinePane workspaceId={workspaceId} />
           ) : mainView === 'jira' ? (
             <JiraPane workspaceId={workspaceId} />
@@ -327,6 +355,7 @@ function AppShell() {
               Pick a channel to get started
             </div>
           )}
+          </PaneTabsProvider>
         </ErrorBoundary>
       </main>
       {rightPanel.kind !== 'none' &&
@@ -341,6 +370,8 @@ function AppShell() {
           />
         </ErrorBoundary>
       )}
+      </div>
+      {/* Dialogs and overlays below are fixed-position; they sit outside the stage row. */}
       {searchOpen && (
         <SearchDialog
           workspaceId={workspaceId}

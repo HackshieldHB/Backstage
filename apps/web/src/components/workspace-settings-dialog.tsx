@@ -2,20 +2,31 @@
 
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { ArrowLeftRight, Building2, Plug, ShieldCheck, Trash2, Users } from 'lucide-react';
+import { ArrowLeftRight, Building2, Plug, ScrollText, ShieldCheck, Trash2, Users, UsersRound, Webhook } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { JoinRequestDto, WorkspaceMemberDto, WorkspaceRole } from '@backstages/shared';
 import { api } from '@/lib/api';
-import { keys, useMembers, useRemoveMember, useUpdateMemberRole } from '@/hooks/queries';
+import { keys, useMembers, useRemoveMember, useUpdateMemberRole, type ChannelWithMeta } from '@/hooks/queries';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
-import { Dialog } from './dialog';
+import { Dialog, InlineDialogHost } from './dialog';
+import { IntegrationsDialog } from './integrations-dialog';
+import { AuditDialog, UserGroupsDialog } from './workspace-admin';
 import { Avatar } from './avatar';
 import { AtlassianSettings } from './atlassian-dialog';
 import { WorkspaceSecuritySettings } from './workspace-security';
 import { SharedChannelsSettings } from './shared-channels-settings';
 
-type Section = 'general' | 'members' | 'atlassian' | 'shared' | 'security';
+export type SettingsSection =
+  | 'general'
+  | 'members'
+  | 'atlassian'
+  | 'shared'
+  | 'security'
+  | 'integrations'
+  | 'groups'
+  | 'audit';
+type Section = SettingsSection;
 
 /**
  * Workspace settings, opened from the workspace name. Home for everything that
@@ -27,15 +38,22 @@ export function WorkspaceSettingsDialog({
   workspaceName,
   isAdmin,
   isOwner = false,
+  channels,
+  initialSection = 'general',
   onClose,
 }: {
   workspaceId: string;
   workspaceName: string;
   isAdmin: boolean;
   isOwner?: boolean;
+  /** For the Integrations section (incoming webhooks post into a channel). */
+  channels: ChannelWithMeta[];
+  initialSection?: SettingsSection;
   onClose: () => void;
 }) {
-  const [section, setSection] = useState<Section>('general');
+  const [section, setSection] = useState<Section>(
+    initialSection === 'audit' && !isAdmin ? 'general' : initialSection,
+  );
   const setMainView = useUiStore((s) => s.setMainView);
 
   const openConfluence = () => {
@@ -79,9 +97,44 @@ export function WorkspaceSettingsDialog({
               onClick={() => setSection('security')}
             />
           )}
+          <SectionTab
+            icon={<Webhook size={15} />}
+            label="Integrations"
+            active={section === 'integrations'}
+            onClick={() => setSection('integrations')}
+            testId="settings-integrations"
+          />
+          <SectionTab
+            icon={<UsersRound size={15} />}
+            label="User groups"
+            active={section === 'groups'}
+            onClick={() => setSection('groups')}
+            testId="settings-user-groups"
+          />
+          {isAdmin && (
+            <SectionTab
+              icon={<ScrollText size={15} />}
+              label="Audit log"
+              active={section === 'audit'}
+              onClick={() => setSection('audit')}
+              testId="settings-audit"
+            />
+          )}
         </nav>
         <div className="min-w-0 flex-1">
-          {section === 'general' ? (
+          {section === 'integrations' ? (
+            <InlineDialogHost label="Integrations">
+              <IntegrationsDialog workspaceId={workspaceId} channels={channels} onClose={onClose} />
+            </InlineDialogHost>
+          ) : section === 'groups' ? (
+            <InlineDialogHost label="User groups">
+              <UserGroupsDialog workspaceId={workspaceId} onClose={onClose} />
+            </InlineDialogHost>
+          ) : section === 'audit' && isAdmin ? (
+            <InlineDialogHost label="Audit log">
+              <AuditDialog workspaceId={workspaceId} onClose={onClose} />
+            </InlineDialogHost>
+          ) : section === 'general' ? (
             <GeneralSettings
               workspaceId={workspaceId}
               workspaceName={workspaceName}
@@ -356,15 +409,18 @@ function SectionTab({
   label,
   active,
   onClick,
+  testId,
 }: {
   icon: React.ReactNode;
   label: string;
   active: boolean;
   onClick: () => void;
+  testId?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      data-testid={testId}
       className={clsx(
         'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px]',
         active

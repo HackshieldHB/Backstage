@@ -25,7 +25,16 @@ export type MainView =
   | 'applications'
   | 'tasks'
   | 'myday'
-  | 'calendar';
+  | 'calendar'
+  // Reports and Automations tabs whose content used to be modal dialogs.
+  | 'weekly-reports'
+  | 'analytics'
+  | 'workflows'
+  | 'scheduled'
+  | 'standups';
+
+/** The tabs of the Inbox view (Activity, Threads and Saved used to be separate panels). */
+export type InboxTab = 'overview' | 'activity' | 'threads' | 'saved';
 
 interface TypingEntry {
   userId: string;
@@ -91,6 +100,7 @@ export const ACCENT_LABEL: Record<AccentId, string> = {
 interface UiState {
   rightPanel: RightPanel;
   mainView: MainView;
+  inboxTab: InboxTab;
   sidebarOpen: boolean; // mobile drawer
   searchOpen: boolean;
   commandOpen: boolean;
@@ -122,6 +132,9 @@ interface UiState {
   setEditingMessageId: (id: string | null) => void;
   setRightPanel: (panel: RightPanel) => void;
   setMainView: (view: MainView) => void;
+  /** Open the Inbox view on a given tab. */
+  openInbox: (tab?: InboxTab) => void;
+  setInboxTab: (tab: InboxTab) => void;
   toggleSidebar: (open?: boolean) => void;
   setSearchOpen: (open: boolean) => void;
   setCommandOpen: (open: boolean) => void;
@@ -135,6 +148,7 @@ interface UiState {
 export const useUiStore = create<UiState>((set) => ({
   rightPanel: { kind: 'none' },
   mainView: 'chat',
+  inboxTab: 'overview',
   sidebarOpen: false,
   searchOpen: false,
   commandOpen: false,
@@ -178,6 +192,8 @@ export const useUiStore = create<UiState>((set) => ({
   },
   setRightPanel: (panel) => set({ rightPanel: panel }),
   setMainView: (view) => set({ mainView: view }),
+  openInbox: (tab = 'overview') => set({ mainView: 'inbox', inboxTab: tab }),
+  setInboxTab: (tab) => set({ inboxTab: tab }),
   toggleSidebar: (open) => set((s) => ({ sidebarOpen: open ?? !s.sidebarOpen })),
   setSearchOpen: (open) => set({ searchOpen: open }),
   setCommandOpen: (open) => set({ commandOpen: open }),

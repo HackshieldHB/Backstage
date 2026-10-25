@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import {
   BarChart3,
   Bell,
+  Bookmark,
   Briefcase,
   CalendarClock,
   CheckSquare,
@@ -27,7 +28,7 @@ import {
   CalendarDays,
 } from 'lucide-react';
 import { ACCENTS, ACCENT_LABEL, ACCENT_SWATCH, useUiStore } from '@/stores/ui-store';
-import type { MainView } from '@/stores/ui-store';
+import type { InboxTab, MainView } from '@/stores/ui-store';
 
 interface Cmd {
   id: string;
@@ -79,12 +80,21 @@ export function CommandPalette() {
       setMainView(view);
       setCommandOpen(false);
     };
+    const inbox = (tab: InboxTab) => () => {
+      useUiStore.getState().openInbox(tab);
+      setCommandOpen(false);
+    };
     const tool = (key: string) => () => {
       openTool(key);
       setCommandOpen(false);
     };
     const views: Cmd[] = [
       { id: 'v-inbox', label: 'Open Inbox', group: 'Navigate', icon: Inbox, keywords: 'assigned threads activity mentions todo', run: go('inbox') },
+      { id: 'v-activity', label: 'Open Activity', group: 'Navigate', icon: Bell, keywords: 'notifications mentions reactions inbox', run: inbox('activity') },
+      { id: 'v-threads', label: 'Open Threads', group: 'Navigate', icon: MessagesSquare, keywords: 'replies conversations inbox', run: inbox('threads') },
+      { id: 'v-saved', label: 'Open Saved for later', group: 'Navigate', icon: Bookmark, keywords: 'later bookmarks reminders inbox', run: inbox('saved') },
+      { id: 'v-reports', label: 'Open Reports', group: 'Navigate', icon: BarChart3, keywords: 'timeline utilization weekly reports analytics projects', run: go('timeline') },
+      { id: 'v-automations', label: 'Open Automations', group: 'Navigate', icon: Workflow, keywords: 'workflows scheduled messages standups', run: go('workflows') },
       { id: 'v-chat', label: 'Go to Chat', group: 'Navigate', icon: MessagesSquare, keywords: 'channels messages', run: go('chat') },
       { id: 'v-jira', label: 'Open Jira', group: 'Navigate', icon: SquareKanban, keywords: 'issues dashboard gadgets sprint alerts', run: go('jira') },
       { id: 'v-confluence', label: 'Open Confluence', group: 'Navigate', icon: FileText, keywords: 'pages wiki spaces', run: go('confluence') },

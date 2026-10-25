@@ -3,12 +3,12 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, Loader2 } from 'lucide-react';
 import type { SsoDiscoveryDto } from '@backstages/shared';
 import { api, API_URL } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
-import { AuthCard, Field, FormError, SubmitButton } from '@/components/auth/auth-card';
-import { SocialButtons } from '@/components/auth/social-buttons';
+import { AuthCard, Field, FormError, SubmitButton, altButton } from '@/components/auth/auth-card';
+import { OrDivider, SocialButtons } from '@/components/auth/social-buttons';
 import { MFA_HANDOFF_KEY } from '@/lib/auth-handoff';
 
 /** Friendly copy for the ?error= codes the Atlassian and SSO callbacks bounce back with. */
@@ -139,7 +139,7 @@ export default function LoginPage() {
       <AuthCard title="Two-factor authentication">
         <form onSubmit={onSubmitCode}>
           <FormError message={error} />
-          <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
+          <p className="mb-4 text-sm text-ink-2">
             {useRecovery
               ? 'Enter one of the recovery codes you saved when you turned on two-factor authentication.'
               : 'Enter the 6-digit code from your authenticator app.'}
@@ -154,12 +154,14 @@ export default function LoginPage() {
             inputMode={useRecovery ? 'text' : 'numeric'}
             data-testid="login-2fa-code"
           />
-          <SubmitButton disabled={busy || code.trim().length < 6}>{busy ? 'Verifying…' : 'Verify'}</SubmitButton>
+          <SubmitButton busy={busy} disabled={code.trim().length < 6}>
+            {busy ? 'Verifying…' : 'Verify'}
+          </SubmitButton>
         </form>
-        <div className="mt-4 flex justify-between text-sm">
+        <div className="mt-5 flex justify-between text-sm">
           <button
             type="button"
-            className="text-accent hover:underline"
+            className="font-medium text-accent hover:underline"
             onClick={() => {
               setUseRecovery((v) => !v);
               setCode('');
@@ -169,7 +171,7 @@ export default function LoginPage() {
           </button>
           <button
             type="button"
-            className="text-accent hover:underline"
+            className="font-medium text-accent hover:underline"
             onClick={() => {
               setMfaToken(null);
               setCode('');
@@ -184,63 +186,66 @@ export default function LoginPage() {
   }
 
   return (
-    <AuthCard title="Sign in">
+    <AuthCard title="Welcome back" subtitle="Sign in to pick up where your team left off.">
       <form onSubmit={onSubmit}>
         <FormError message={error} />
         <Field
           label="Email"
           type="email"
+          placeholder="you@company.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
           autoFocus
+          autoComplete="email"
           data-testid="login-email"
         />
         <Field
           label="Password"
           type="password"
+          placeholder="Your password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
+          autoComplete="current-password"
           data-testid="login-password"
         />
-        <SubmitButton disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</SubmitButton>
+        <div className="-mt-1.5 mb-4 flex justify-end">
+          <Link className="text-[13px] font-medium text-accent hover:underline" href="/forgot-password">
+            Forgot password?
+          </Link>
+        </div>
+        <SubmitButton busy={busy}>{busy ? 'Signing in…' : 'Sign in'}</SubmitButton>
       </form>
-      <div className="my-4 flex items-center gap-3">
-        <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
-        <span className="text-xs text-gray-500 dark:text-gray-400">or</span>
-        <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
-      </div>
-      <div className="mb-2">
+      <OrDivider label="or continue with" />
+      <div className="space-y-2">
         <SocialButtons />
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => void continueWithSso()}
+            disabled={ssoBusy}
+            className={altButton}
+            aria-label="Continue with SSO"
+            data-testid="login-sso"
+          >
+            {ssoBusy ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <KeyRound size={16} aria-hidden />}
+            {ssoBusy ? 'Redirecting…' : 'SSO'}
+          </button>
+          <a href={`${API_URL}/auth/atlassian`} className={altButton} aria-label="Log in with Atlassian">
+            <svg viewBox="0 0 24 24" className="h-4 w-4 fill-[#2684FF]" aria-hidden>
+              <path d="M7.12 11.08a.68.68 0 0 0-1.16.13L.55 21.99a.7.7 0 0 0 .63 1.01h7.52a.67.67 0 0 0 .63-.39c1.63-3.37.64-8.49-2.21-11.53zM11.44.36a15.4 15.4 0 0 0-.9 15.23l3.63 7.02a.7.7 0 0 0 .62.38h7.53a.7.7 0 0 0 .63-1.01L12.6.37a.65.65 0 0 0-1.16-.01z" />
+            </svg>
+            Atlassian
+          </a>
+        </div>
       </div>
-      <button
-        type="button"
-        onClick={() => void continueWithSso()}
-        disabled={ssoBusy}
-        className="mb-2 flex w-full items-center justify-center gap-2 rounded-md border border-line-strong px-3 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50 dark:border-line-strong dark:hover:bg-gray-800"
-        data-testid="login-sso"
-      >
-        <KeyRound size={16} aria-hidden />
-        {ssoBusy ? 'Redirecting…' : 'Continue with SSO'}
-      </button>
-      <a
-        href={`${API_URL}/auth/atlassian`}
-        className="flex w-full items-center justify-center gap-2 rounded-md border border-line-strong px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800"
-      >
-        <svg viewBox="0 0 24 24" className="h-4 w-4 fill-[#2684FF]" aria-hidden>
-          <path d="M7.12 11.08a.68.68 0 0 0-1.16.13L.55 21.99a.7.7 0 0 0 .63 1.01h7.52a.67.67 0 0 0 .63-.39c1.63-3.37.64-8.49-2.21-11.53zM11.44.36a15.4 15.4 0 0 0-.9 15.23l3.63 7.02a.7.7 0 0 0 .62.38h7.53a.7.7 0 0 0 .63-1.01L12.6.37a.65.65 0 0 0-1.16-.01z" />
-        </svg>
-        Log in with Atlassian
-      </a>
-      <div className="mt-4 flex justify-between text-sm">
-        <Link className="text-accent hover:underline" href="/signup">
-          Create account
+      <p className="mt-7 text-center text-sm text-ink-2">
+        New to Backstages?{' '}
+        <Link className="font-semibold text-accent hover:underline" href="/signup">
+          Create an account
         </Link>
-        <Link className="text-accent hover:underline" href="/forgot-password">
-          Forgot password?
-        </Link>
-      </div>
+      </p>
     </AuthCard>
   );
 }

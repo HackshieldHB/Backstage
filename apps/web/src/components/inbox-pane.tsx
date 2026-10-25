@@ -1,7 +1,7 @@
 'use client';
 
 import { formatDistanceToNow } from 'date-fns';
-import { AtSign, ExternalLink, Inbox, MessagesSquare, SquareKanban, Zap } from 'lucide-react';
+import { AtSign, ExternalLink, Inbox, MessagesSquare, Sparkles, SquareKanban, Zap } from 'lucide-react';
 import {
   useMyJiraIssues,
   useMyThreads,
@@ -9,11 +9,15 @@ import {
   usePriorityInbox,
   type Container,
 } from '@/hooks/queries';
-import { useUiStore } from '@/stores/ui-store';
+import { useUiStore, type InboxTab } from '@/stores/ui-store';
+import { useT } from '@/lib/i18n';
 import { useAtlassianStatus } from './atlassian-dialog';
 import { MessageBody } from './message-body';
 import { Avatar } from './avatar';
 import { PaneShell } from './pane-shell';
+import { PaneTabsProvider } from './pane-tabs';
+import { ViewTabs } from './view-hubs';
+import { ActivityPanel, SavedPanel, ThreadsPanel } from './right-panel';
 
 const ago = (iso: string) => {
   try {
@@ -24,7 +28,9 @@ const ago = (iso: string) => {
 };
 
 /** Unified, prioritized inbox: what needs you (Jira) → conversations you're in
- *  (threads) → everything else (activity). Composed from existing feeds. */
+ *  (threads) → everything else (activity). Composed from existing feeds. The
+ *  Activity, Threads and Saved tabs are the full lists (formerly side panels);
+ *  "Catch me up" summarises what you missed. */
 export function InboxPane({
   workspaceId,
   onNavigate,
@@ -38,14 +44,52 @@ export function InboxPane({
   const notifications = useNotifications();
   const priority = usePriorityInbox(workspaceId);
   const setRightPanel = useUiStore((s) => s.setRightPanel);
+  const inboxTab = useUiStore((s) => s.inboxTab);
+  const setInboxTab = useUiStore((s) => s.setInboxTab);
+  const t = useT();
 
   const jiraRows = jira.data ?? [];
   const threadRows = threads.data?.threads ?? [];
   const notifRows = notifications.data?.notifications ?? [];
   const priorityRows = priority.data?.items ?? [];
 
+  const tabs = (
+    <ViewTabs
+      label={t('inbox')}
+      tabs={[
+        { key: 'overview', label: t('overview'), testId: 'inbox-tab-overview' },
+        { key: 'activity', label: t('activity'), testId: 'activity-button', badge: notifications.data?.unreadCount ?? 0 },
+        { key: 'threads', label: t('threads'), testId: 'threads-button' },
+        { key: 'saved', label: t('saved'), testId: 'saved-button' },
+      ]}
+      active={inboxTab}
+      onSelect={(key) => setInboxTab(key as InboxTab)}
+    />
+  );
+
   return (
-    <PaneShell icon={<Inbox size={18} className="text-accent" />} title="Inbox" subtitle="Everything that needs you">
+    <PaneTabsProvider tabs={tabs}>
+    <PaneShell
+      icon={<Inbox size={18} className="text-accent" />}
+      title={t('inbox')}
+      subtitle="Everything that needs you"
+      actions={
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('bs:open-dialog', { detail: 'catch-up' }))}
+          className="btn-secondary px-2.5 py-1.5 text-[12.5px]"
+          data-testid="catch-up-button"
+        >
+          <Sparkles size={14} className="text-accent" /> {t('catch_me_up')}
+        </button>
+      }
+    >
+      {inboxTab !== 'overview' ? (
+        <div className="mx-auto max-w-3xl overflow-hidden rounded-xl border border-line bg-elevated">
+          {inboxTab === 'activity' && <ActivityPanel onNavigate={onNavigate} />}
+          {inboxTab === 'threads' && <ThreadsPanel workspaceId={workspaceId} inPane />}
+          {inboxTab === 'saved' && <SavedPanel workspaceId={workspaceId} onNavigate={onNavigate} />}
+        </div>
+      ) : (
       <div className="mx-auto max-w-3xl space-y-6">
         {priorityRows.length > 0 && (
           <Section icon={<Zap size={14} />} title="Top priority" count={priorityRows.length}>
@@ -134,7 +178,9 @@ export function InboxPane({
           ))}
         </Section>
       </div>
+      )}
     </PaneShell>
+    </PaneTabsProvider>
   );
 }
 

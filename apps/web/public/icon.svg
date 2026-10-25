@@ -1,4 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#4f46e5"/>
-  <path fill="#fff" d="M160 150h150a70 70 0 0 1 0 140h-70l90 122h-78l-84-118v118h-56V150h48zm48 92h96a24 24 0 0 0 0-48h-96z"/>
+  <defs>
+    <!-- The brand "spotlight": sky stage light into deep blue. -->
+    <linearGradient id="stage" x1="0.12" y1="0" x2="0.88" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="0.45" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+    <radialGradient id="lip" cx="0.2" cy="0" r="0.75">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="133" fill="url(#stage)"/>
+  <rect width="512" height="512" rx="133" fill="url(#lip)"/>
+  <rect x="5" y="5" width="502" height="502" rx="128" fill="none" stroke="#fff" stroke-opacity="0.2" stroke-width="10"/>
+  <path fill="#fff" fill-rule="evenodd" transform="translate(-18 0)" d="M176 136H296C340 136 360 160 360 192C360 214 349 232 330 241C356 249 372 270 372 300C372 344 344 376 296 376H176ZM236 184V226H286C300 226 308 218 308 205C308 192 300 184 286 184ZM236 272V328H292C308 328 318 318 318 300C318 282 308 272 292 272Z"/>
 </svg>

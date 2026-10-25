@@ -1,12 +1,14 @@
 'use client';
 
-import { ArrowLeftRight, CalendarClock, FileText, Hash, Headphones, Info, Lightbulb, Lock, Menu, NotebookPen, Pin, Sparkles, Users } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowLeftRight, CalendarClock, ChevronDown, FileText, Hash, Headphones, Info, Lightbulb, Lock, Menu, NotebookPen, Pin, Sparkles, Users } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import clsx from 'clsx';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
-import { useAiStatus, useChannelMembers, useChannels, useConversations, usePins, type Container } from '@/hooks/queries';
+import { useAiStatus, useChannelMembers, useChannels, useConversations, usePins, usePresence, type Container } from '@/hooks/queries';
+import { presenceLabel } from '@/lib/presence';
 import type { HuddleController } from '@/hooks/use-huddle';
 import { MessageList } from './message-list';
 import { Composer, TypingIndicator } from './composer';
@@ -16,6 +18,7 @@ import { Dialog } from './dialog';
 import { ScheduleHuddleDialog, UpcomingHuddles } from './schedule-huddle';
 import { MeetingHistoryDialog } from './meeting-history-dialog';
 import { BookmarksBar } from './bookmarks-bar';
+import { Avatar } from './avatar';
 
 export function MainPane({
   workspaceId,
@@ -42,6 +45,7 @@ export function MainPane({
   const pins = usePins(container.kind === 'channel' ? container.id : null);
   const channelMembers = useChannelMembers(container.kind === 'channel' ? container.id : null);
   const conversations = useConversations(workspaceId);
+  const presence = usePresence(workspaceId);
   // Share info comes with the sidebar list (already cached), not the channel itself.
   const sidebarChannel = useChannels(workspaceId).data?.find((c) => c.id === container.id);
 
@@ -69,99 +73,91 @@ export function MainPane({
 
   return (
     <>
-      {/* header */}
-      <header className="shrink-0 border-b border-line bg-surface">
-        <div className="no-scrollbar mx-auto flex h-12 w-full max-w-[1000px] items-center gap-1 overflow-x-auto px-3 sm:px-5">
-        <button className="icon-btn mr-1 md:hidden" aria-label="Open sidebar" onClick={() => toggleSidebar()}>
+      {/* header: the channel's "playbill" — cover, title, topic, then actions */}
+      <header className="shrink-0 border-b border-line">
+        <div className="mx-auto flex w-full max-w-[1000px] items-center gap-3 px-3 py-2.5 sm:px-5">
+        <button className="icon-btn -mr-1 md:hidden" aria-label="Open sidebar" onClick={() => toggleSidebar()}>
           <Menu size={18} />
         </button>
-        <h1 className="flex min-w-0 max-w-[55vw] shrink-0 items-center gap-1.5 truncate text-[14px] font-semibold tracking-tight text-ink sm:max-w-none sm:shrink" data-testid="channel-title">
-          {container.kind === 'channel' ? (
-            channel.data?.isPrivate ? <Lock size={15} className="text-ink-3" /> : <Hash size={15} className="text-ink-3" />
-          ) : null}
-          {title}
-        </h1>
-        {container.kind === 'channel' && (sidebarChannel?.sharedFrom || sidebarChannel?.isShared) && (
+        {container.kind === 'channel' ? (
           <span
-            className="flex shrink-0 items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 text-[11px] font-medium text-accent"
-            data-testid="channel-shared-badge"
+            aria-hidden
+            className="playbill-cover flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-accent"
           >
-            <ArrowLeftRight size={11} />
-            {sidebarChannel.sharedFrom ? `From ${sidebarChannel.sharedFrom.name}` : 'Shared'}
+            {channel.data?.isPrivate ? <Lock size={18} /> : <Hash size={18} />}
           </span>
+        ) : (
+          <Avatar user={dmOthers[0] ?? me} size="md" className="hidden sm:inline-block" />
         )}
-        {channel.data?.topic && (
-          <span className="ml-1.5 hidden min-w-0 truncate border-l border-line pl-2.5 text-[13px] text-ink-3 md:inline">{channel.data.topic}</span>
-        )}
-        <span className="flex-1" />
-        {/* When a huddle is already running here, the persistent huddle bar shows
-            the controls — so the header button only offers to start or join. */}
-        {!activeHere &&
-          (ongoingHere ? (
-            <button
-              onClick={() => void huddle.join(container)}
-              className="btn-primary mr-1 px-2.5 py-1 text-[12px]"
-              data-testid="join-huddle"
+        {/* The title keeps a readable minimum; on narrow stages the actions scroll instead. */}
+        <div className="min-w-[7.5rem] flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h1
+              className="flex min-w-0 items-center gap-1 truncate font-display text-[19px] font-bold leading-tight tracking-tight text-ink"
+              data-testid="channel-title"
             >
-              <Headphones size={14} /> Join huddle
-            </button>
-          ) : (
-            <Tooltip label="Start a huddle">
+              {container.kind === 'channel' && (
+                <span className="font-medium text-ink-3" aria-hidden>
+                  #
+                </span>
+              )}
+              <span className="truncate">{title}</span>
+            </h1>
+            {container.kind === 'channel' && (sidebarChannel?.sharedFrom || sidebarChannel?.isShared) && (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 text-[11px] font-medium text-accent"
+                data-testid="channel-shared-badge"
+              >
+                <ArrowLeftRight size={11} />
+                {sidebarChannel.sharedFrom ? `From ${sidebarChannel.sharedFrom.name}` : 'Shared'}
+              </span>
+            )}
+          </div>
+          <p className="truncate text-[12.5px] text-ink-3" data-testid="channel-subtitle">
+            {container.kind === 'channel'
+              ? channel.data?.topic ||
+                (channelMembers.data
+                  ? `${channelMembers.data.length} ${channelMembers.data.length === 1 ? 'member' : 'members'}`
+                  : ' ')
+              : dmOthers.length === 1
+                ? presenceLabel(presence.data?.[dmOthers[0].id])
+                : dmOthers.length > 1
+                  ? `${dmOthers.length + 1} people`
+                  : 'Notes to yourself'}
+          </p>
+        </div>
+        <div className="no-scrollbar flex min-w-0 shrink items-center gap-1 overflow-x-auto">
+        {/* Huddle: one split button — start/join, plus ▾ for scheduling and past
+            meetings. When a huddle is already running here, the persistent huddle
+            bar shows the controls, so the main part only offers to start or join. */}
+        <div className="flex shrink-0 items-center">
+          {!activeHere &&
+            (ongoingHere ? (
               <button
                 onClick={() => void huddle.join(container)}
-                className="icon-btn gap-1 text-[12px]"
-                data-testid="start-huddle"
-                aria-label="Start a huddle"
+                className="btn-primary shrink-0 whitespace-nowrap rounded-r-none px-2.5 py-1 text-[12px]"
+                data-testid="join-huddle"
               >
-                <Headphones size={15} />
+                <Headphones size={14} /> Join huddle
               </button>
-            </Tooltip>
-          ))}
-        <Tooltip label="Schedule a huddle for later">
-          <button
-            onClick={() => setScheduleOpen(true)}
-            className="icon-btn"
-            data-testid="schedule-huddle"
-            aria-label="Schedule a huddle"
-          >
-            <CalendarClock size={16} />
-          </button>
-        </Tooltip>
-        <Tooltip label="Meeting history & minutes">
-          <button
-            onClick={() => setHistoryOpen(true)}
-            className="icon-btn"
-            data-testid="meeting-history"
-            aria-label="Meeting history & minutes"
-          >
-            <FileText size={16} />
-          </button>
-        </Tooltip>
-        {container.kind === 'channel' && (
-          <>
-            {(pins.data?.length ?? 0) > 0 && (
-              <Tooltip label="Pinned messages">
+            ) : (
+              <Tooltip label="Start a huddle">
                 <button
-                  onClick={() => setRightPanel({ kind: 'details' })}
-                  className="icon-btn gap-1 text-[12px]"
-                  aria-label="Pinned messages"
+                  onClick={() => void huddle.join(container)}
+                  className="icon-btn gap-1 rounded-r-none text-[12px]"
+                  data-testid="start-huddle"
+                  aria-label="Start a huddle"
                 >
-                  <Pin size={14} /> {pins.data?.length}
+                  <Headphones size={15} />
                 </button>
               </Tooltip>
-            )}
-            <Tooltip label="Members">
-              <button
-                onClick={() => setRightPanel({ kind: 'details' })}
-                className="icon-btn gap-1 text-[12px]"
-                data-testid="member-count"
-                aria-label="Members"
-              >
-                <Users size={14} /> {channelMembers.data?.length ?? ''}
-              </button>
-            </Tooltip>
-          </>
-        )}
+            ))}
+          <HuddleMenu
+            attached={!activeHere}
+            onSchedule={() => setScheduleOpen(true)}
+            onHistory={() => setHistoryOpen(true)}
+          />
+        </div>
         {container.kind === 'channel' && (
           <Tooltip label="Channel canvas (shared notes)">
             <button
@@ -210,16 +206,30 @@ export function MainPane({
             <Lightbulb size={16} />
           </button>
         </Tooltip>
-        <Tooltip label="Details">
-          <button
-            onClick={() => setRightPanel({ kind: 'details' })}
-            className="icon-btn"
-            data-testid="details-button"
-            aria-label="Details"
-          >
-            <Info size={16} />
-          </button>
-        </Tooltip>
+        {/* Details: members, pinned messages, files and settings in one panel. */}
+        {container.kind === 'channel' && (
+          <Tooltip label="Details, members & pinned">
+            <button
+              onClick={() => setRightPanel({ kind: 'details' })}
+              className="flex shrink-0 items-center gap-2 rounded-lg border border-line px-2 py-1 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:bg-hovered hover:text-ink"
+              data-testid="details-button"
+              aria-label={`Details: ${channelMembers.data?.length ?? 0} members${
+                (pins.data?.length ?? 0) > 0 ? `, ${pins.data?.length} pinned` : ''
+              }`}
+            >
+              <span className="flex items-center gap-1" data-testid="member-count">
+                <Users size={14} /> {channelMembers.data?.length ?? ''}
+              </span>
+              {(pins.data?.length ?? 0) > 0 && (
+                <span className="flex items-center gap-1 border-l border-line pl-2" data-testid="pin-count">
+                  <Pin size={13} /> {pins.data?.length}
+                </span>
+              )}
+              <Info size={14} className="text-ink-3" />
+            </button>
+          </Tooltip>
+        )}
+        </div>
         </div>
         {container.kind === 'channel' && <BookmarksBar channelId={container.id} />}
       </header>
@@ -269,6 +279,105 @@ export function MainPane({
           </p>
         </div>
       </div>
+    </>
+  );
+}
+
+/**
+ * The ▾ beside the huddle button: schedule a huddle for later, or open past
+ * meetings and their minutes. The menu is fixed-positioned so the header's
+ * scrolling action row can't clip it.
+ */
+function HuddleMenu({
+  attached,
+  onSchedule,
+  onHistory,
+}: {
+  /** Joined to the start/join button on its left (square left corners). */
+  attached: boolean;
+  onSchedule: () => void;
+  onHistory: () => void;
+}) {
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pos) return;
+    const close = () => setPos(null);
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [pos]);
+
+  const toggle = () => {
+    if (pos) {
+      setPos(null);
+      return;
+    }
+    const r = buttonRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+  };
+  const pick = (fn: () => void) => () => {
+    setPos(null);
+    fn();
+  };
+
+  return (
+    <>
+      <Tooltip label="Schedule or see past huddles">
+        <button
+          ref={buttonRef}
+          onClick={toggle}
+          aria-haspopup="menu"
+          aria-expanded={!!pos}
+          aria-label="More huddle options"
+          data-testid="huddle-menu"
+          className={clsx('icon-btn px-1', attached && 'rounded-l-none')}
+        >
+          <ChevronDown size={14} />
+        </button>
+      </Tooltip>
+      {pos && (
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{ position: 'fixed', top: pos.top, right: pos.right }}
+          className="z-50 w-64 rounded-xl border border-line bg-overlay p-1.5 text-[13px] shadow-pop animate-fade-in"
+        >
+          <button
+            role="menuitem"
+            onClick={pick(onSchedule)}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-ink-2 hover:bg-hovered hover:text-ink"
+            data-testid="schedule-huddle"
+          >
+            <CalendarClock size={15} className="text-ink-3" /> Schedule a huddle
+          </button>
+          <button
+            role="menuitem"
+            onClick={pick(onHistory)}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-ink-2 hover:bg-hovered hover:text-ink"
+            data-testid="meeting-history"
+          >
+            <FileText size={15} className="text-ink-3" /> Meeting history & minutes
+          </button>
+        </div>
+      )}
     </>
   );
 }
