@@ -51,6 +51,7 @@ import { egressEnabled } from '../sfu/livekit-api';
 import { HuddleSessionService } from '../timesheet/huddle-session.service';
 import { MeetingMinutesService } from '../meeting-minutes/meeting-minutes.service';
 import { PresenceService } from '../presence/presence.service';
+import { AutoStatusService } from '../auto-status/auto-status.service';
 import type { AccessTokenPayload } from '../auth/jwt-auth.guard';
 
 interface AuthedSocket extends Socket {
@@ -79,6 +80,7 @@ export class RealtimeGateway
     private readonly meetingMinutes: MeetingMinutesService,
     private readonly persistence: HuddlePersistenceService,
     private readonly mediaHooks: HuddleMediaHooks,
+    private readonly autoStatus: AutoStatusService,
   ) {}
 
   afterInit(server: Server) {
@@ -158,6 +160,7 @@ export class RealtimeGateway
       for (const key of this.huddle.removeSocket(socket.data.userId, socket.id)) {
         this.mediaHooks.memberLeft(key, socket.data.userId);
         await this.huddleSession.leave(key, socket.data.userId);
+        void this.autoStatus.huddle(socket.data.userId, this.huddle.inAnyHuddle(socket.data.userId));
         await this.broadcastHuddle(key);
         await this.endMeetingIfEmpty(key);
       }
@@ -215,6 +218,7 @@ export class RealtimeGateway
 
     this.huddle.join(key, userId, socket.id);
     await this.huddleSession.join(key, userId);
+    void this.autoStatus.huddle(userId, true);
     await this.broadcastHuddle(key);
     // Hand the newcomer the current room state (settings, whiteboard, breakouts),
     // and confirm admission so a client that showed a waiting screen can proceed.
@@ -304,6 +308,7 @@ export class RealtimeGateway
     if (fullyLeft) {
       this.mediaHooks.memberLeft(key, socket.data.userId);
       await this.huddleSession.leave(key, socket.data.userId);
+      void this.autoStatus.huddle(socket.data.userId, this.huddle.inAnyHuddle(socket.data.userId));
     }
     await this.broadcastHuddle(key);
     await this.endMeetingIfEmpty(key);
@@ -721,6 +726,7 @@ export class RealtimeGateway
         for (const sid of sockets) this.huddle.join(key, uid, sid);
         if (sockets.length) {
           await this.huddleSession.join(key, uid);
+          void this.autoStatus.huddle(uid, true);
           this.realtime.emitToUser(uid, SOCKET_EVENTS.HUDDLE_WAITING, {
             ...this.idFieldForKey(key),
             waiting: [],
@@ -746,6 +752,7 @@ export class RealtimeGateway
     if (body.action === 'admit') {
       for (const sid of sockets) this.huddle.join(key, target, sid);
       await this.huddleSession.join(key, target);
+      void this.autoStatus.huddle(target, true);
       await this.broadcastHuddle(key);
       this.realtime.emitToUser(target, SOCKET_EVENTS.HUDDLE_WAITING, { ...idField, waiting: [], status: 'admitted' });
       this.emitRoomStateTo(target, key);

@@ -361,6 +361,67 @@ html {
   background-image: linear-gradient(140deg, rgb(var(--accent) / 0.18), rgb(var(--accent) / 0.06));
   box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.22);
 }
+/* Stagehand, the assistant mascot: bobs gently, blinks, its bulb glows; while
+   thinking its eyes dart and the bulb pulses faster. */
+.stagehand-launcher {
+  filter: drop-shadow(0 10px 18px rgb(var(--brand-to) / 0.45));
+}
+.stagehand-launcher .stagehand {
+  animation: stagehand-bob 3.2s ease-in-out infinite;
+}
+.stagehand-launcher:hover .stagehand-pupil {
+  transform: translateY(-1.5px);
+}
+.stagehand-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: stagehand-blink 4.6s infinite;
+}
+.stagehand-pupil {
+  transition: transform 0.2s ease;
+}
+.stagehand-bulb {
+  filter: drop-shadow(0 0 3px #fde68a);
+  animation: stagehand-glow 2.4s ease-in-out infinite;
+}
+.stagehand.is-thinking .stagehand-pupil {
+  animation: stagehand-look 1.2s ease-in-out infinite;
+}
+.stagehand.is-thinking .stagehand-bulb {
+  animation-duration: 0.8s;
+}
+/* The "thinking" dots reuse the auth showcase's typing bubble, recoloured for the theme. */
+.assistant-panel .auth-typing {
+  background: rgb(var(--hover));
+}
+.assistant-panel .auth-typing span {
+  background: rgb(var(--ink-3));
+}
+@keyframes stagehand-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes stagehand-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+@keyframes stagehand-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@keyframes stagehand-look {
+  0%, 100% { transform: translateX(0); }
+  30% { transform: translateX(-1.6px); }
+  70% { transform: translateX(1.6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stagehand-launcher .stagehand,
+  .stagehand-eyes,
+  .stagehand-bulb,
+  .stagehand.is-thinking .stagehand-pupil {
+    animation: none;
+  }
+}
 /* "Live" indicator (huddles in the marquee). */
 .live-dot {
   height: 7px;

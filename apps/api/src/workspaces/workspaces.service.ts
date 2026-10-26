@@ -55,9 +55,9 @@ export class WorkspacesService {
    * (new workspace, accepted invite) must subscribe the user's open sockets too
    * — otherwise they see nothing live until they reload.
    */
-  private async subscribeToWorkspace(userId: string, workspaceId: string, channelId: string | null) {
+  private async subscribeToWorkspace(userId: string, workspaceId: string, channelIds: string[]) {
     await this.realtime.subscribeUserToRoom(userId, roomForWorkspace(workspaceId)).catch(() => undefined);
-    if (channelId) {
+    for (const channelId of channelIds) {
       await this.realtime.subscribeUserToRoom(userId, roomForChannel(channelId)).catch(() => undefined);
     }
   }
@@ -101,7 +101,7 @@ export class WorkspacesService {
       });
       return { workspace, generalId: general.id };
     });
-    await this.subscribeToWorkspace(userId, created.workspace.id, created.generalId);
+    await this.subscribeToWorkspace(userId, created.workspace.id, created.generalId ? [created.generalId] : []);
     return created.workspace;
   }
 
@@ -199,12 +199,15 @@ export class WorkspacesService {
 
   async createInvite(actorId: string, workspaceId: string, input: CreateInviteInput) {
     await this.policy.requireWorkspaceMember(actorId, workspaceId, 'ADMIN');
+    // A guest invited without channels sees nothing until an admin adds them to one.
+    const channelIds = await this.invitableChannels(actorId, workspaceId, input.channelIds ?? []);
     const rawToken = randomBytes(24).toString('base64url');
     const invite = await this.prisma.workspaceInvite.create({
       data: {
         workspaceId,
         email: input.email ?? null,
         role: input.role,
+        channelIds,
         tokenHash: sha256(rawToken),
         createdById: actorId,
         expiresAt: new Date(Date.now() + INVITE_TTL_MS),
@@ -222,6 +225,27 @@ export class WorkspacesService {
     }
     // The raw token is returned exactly once; only its hash is stored.
     return { id: invite.id, email: invite.email, role: invite.role, token: rawToken, url, expiresAt: invite.expiresAt };
+  }
+
+  /**
+   * The requested channels an admin may hand out with an invite: in this
+   * workspace, not archived, and either public or a private channel the admin
+   * is in. Unknown ids are an error rather than silently dropped.
+   */
+  private async invitableChannels(actorId: string, workspaceId: string, requested: string[]): Promise<string[]> {
+    const ids = [...new Set(requested)];
+    if (ids.length === 0) return [];
+    const found = await this.prisma.channel.findMany({
+      where: {
+        id: { in: ids },
+        workspaceId,
+        isArchived: false,
+        OR: [{ isPrivate: false }, { members: { some: { userId: actorId } } }],
+      },
+      select: { id: true },
+    });
+    if (found.length !== ids.length) throw new BadRequestException('Some of those channels can’t be shared in an invite');
+    return ids;
   }
 
   async listInvites(actorId: string, workspaceId: string) {
@@ -315,27 +339,34 @@ export class WorkspacesService {
       throw new UnauthorizedException('Invite already used');
     }
 
-    return this.addMember(userId, invite.workspaceId, invite.role, (tx) =>
-      tx.workspaceInvite.update({
-        where: { id: invite.id },
-        data: {
-          usedCount: { increment: 1 },
-          ...(invite.email ? { usedAt: new Date(), usedById: userId } : {}),
-        },
-      }),
+    return this.addMember(
+      userId,
+      invite.workspaceId,
+      invite.role,
+      (tx) =>
+        tx.workspaceInvite.update({
+          where: { id: invite.id },
+          data: {
+            usedCount: { increment: 1 },
+            ...(invite.email ? { usedAt: new Date(), usedById: userId } : {}),
+          },
+        }),
+      invite.channelIds,
     );
   }
 
   /**
    * Make someone a member: workspace membership, #general (not for guests),
-   * live socket rooms, "member joined" events. Shared by invites, domain joins
-   * and approved join requests. `within` runs in the same transaction.
+   * any channels their invite names, live socket rooms, "member joined" events.
+   * Shared by invites, domain joins and approved join requests. `within` runs
+   * in the same transaction.
    */
   async addMember(
     userId: string,
     workspaceId: string,
     role: WorkspaceRole,
     within?: (tx: Prisma.TransactionClient) => Promise<unknown>,
+    channelIds: string[] = [],
   ) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const existing = await this.prisma.workspaceMember.findUnique({
@@ -343,23 +374,37 @@ export class WorkspacesService {
     });
     if (existing) throw new BadRequestException('Already a member of this workspace');
 
-    const joinedChannelId = await this.prisma.$transaction(async (tx) => {
+    const joinedChannelIds = await this.prisma.$transaction(async (tx) => {
       await tx.workspaceMember.create({ data: { workspaceId, userId, role } });
+      const joined: string[] = [];
       const general = await tx.channel.findFirst({ where: { workspaceId, isDefault: true } });
-      // Guests are not auto-added anywhere: they only see explicitly granted channels.
+      // Guests are not auto-added to #general: they only see explicitly granted channels.
       if (general && role !== 'GUEST') {
         await tx.channelMember.create({ data: { channelId: general.id, userId } });
+        joined.push(general.id);
+      }
+      // The invite's channels — re-checked here, since one may have been archived
+      // or deleted since the invite was sent.
+      if (channelIds.length) {
+        const granted = await tx.channel.findMany({
+          where: { id: { in: channelIds }, workspaceId, isArchived: false, NOT: { id: { in: joined } } },
+          select: { id: true },
+        });
+        if (granted.length) {
+          await tx.channelMember.createMany({
+            data: granted.map((c) => ({ channelId: c.id, userId })),
+            skipDuplicates: true,
+          });
+          joined.push(...granted.map((c) => c.id));
+        }
       }
       if (within) await within(tx);
-      return general && role !== 'GUEST' ? general.id : null;
+      return joined;
     });
-    await this.subscribeToWorkspace(userId, workspaceId, joinedChannelId);
-    if (joinedChannelId) {
-      this.realtime.emitToChannel(joinedChannelId, SOCKET_EVENTS.MEMBER_JOINED, {
-        channelId: joinedChannelId,
-        user: toUserDto(user),
-      });
-      void this.workflowEvents.emit({ type: 'member_joined', workspaceId, channelId: joinedChannelId, userId });
+    await this.subscribeToWorkspace(userId, workspaceId, joinedChannelIds);
+    for (const channelId of joinedChannelIds) {
+      this.realtime.emitToChannel(channelId, SOCKET_EVENTS.MEMBER_JOINED, { channelId, user: toUserDto(user) });
+      void this.workflowEvents.emit({ type: 'member_joined', workspaceId, channelId, userId });
     }
     return this.getById(userId, workspaceId);
   }

@@ -35,14 +35,19 @@ function SummaryTile({
 }
 
 export function ApplicationSummary({ apps }: { apps: Application[] }) {
-  const total = apps.length;
-  const healthy = apps.filter((a) => a.status === 'healthy').length;
-  const attention = apps.filter((a) => a.status === 'warning' || a.status === 'critical').length;
-  const latest = apps.reduce((max, a) => Math.max(max, new Date(a.lastChecked).getTime()), 0);
+  const connected = apps.filter((a) => a.connected).length;
+  const healthy = apps.filter((a) => a.connected && a.status === 'healthy').length;
+  const attention = apps.filter((a) => a.connected && (a.status === 'warning' || a.status === 'critical')).length;
+  const latest = apps.reduce((max, a) => (a.lastChecked ? Math.max(max, new Date(a.lastChecked).getTime()) : max), 0);
 
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <SummaryTile icon={<Boxes size={17} />} label="Applications" value={total} sub="Connected" />
+      <SummaryTile
+        icon={<Boxes size={17} />}
+        label="Connected"
+        value={`${connected} / ${apps.length}`}
+        sub={connected ? 'Applications' : 'None yet'}
+      />
       <SummaryTile
         icon={<CheckCircle2 size={17} />}
         label="Operational"

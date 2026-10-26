@@ -1,5 +1,12 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { AskSchema, type AskInput, HuddleRecapSchema, type HuddleRecapInput } from '@backstages/shared';
+import {
+  AskSchema,
+  AssistantChatSchema,
+  type AskInput,
+  type AssistantChatInput,
+  HuddleRecapSchema,
+  type HuddleRecapInput,
+} from '@backstages/shared';
 import { AiService } from './ai.service';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -35,6 +42,16 @@ export class AiController {
     @Body(new ZodValidationPipe(AskSchema)) body: AskInput,
   ) {
     return this.ai.ask(user.id, workspaceId, body.question);
+  }
+
+  /** The floating assistant: a multi-turn chat grounded in the workspace. */
+  @Post('workspaces/:id/chat')
+  chat(
+    @CurrentUser() user: AuthUser,
+    @Param('id') workspaceId: string,
+    @Body(new ZodValidationPipe(AssistantChatSchema)) body: AssistantChatInput,
+  ) {
+    return this.ai.chat(user.id, workspaceId, body.messages);
   }
 
   @Post('workspaces/:id/huddle-recap')

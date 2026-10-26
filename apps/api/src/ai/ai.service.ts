@@ -1,11 +1,28 @@
-import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
+import { Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { extractJsonObject, resolveProvider, type ChatTurn, type LlmProvider } from './ai-provider';
 import type { AskAnswerDto, AskSourceDto } from '@backstages/shared';
 import type { HuddleRecapInput, HuddleRecapDto } from '@backstages/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { PolicyService } from '../authz/policy.service';
+import { WebSearchService } from './web-search';
 import { IntegrationMessagesService } from '../messages/integration-messages.service';
 import { channelContainer, conversationContainer } from '../messages/messages.service';
+
+/**
+ * Keep only the sources a reply actually cites, renumbering its [n] markers
+ * 1..k in order of first use; markers pointing at no source are dropped.
+ */
+export function keepCitedSources(answer: string, sources: AskSourceDto[]): AskAnswerDto {
+  const cited = [...new Set([...answer.matchAll(/\[(\d{1,2})\]/g)].map((m) => Number(m[1])))].filter(
+    (n) => n >= 1 && n <= sources.length,
+  );
+  const renumber = new Map(cited.map((n, i) => [n, i + 1]));
+  const text = answer.replace(/\[(\d{1,2})\]/g, (_whole, n: string) => {
+    const next = renumber.get(Number(n));
+    return next ? `[${next}]` : '';
+  });
+  return { answer: text, sources: cited.map((n) => sources[n - 1]) };
+}
 
 /** Build a minimal TipTap doc from plain-text lines (blank lines → empty paragraphs). */
 function textDoc(lines: string[]): unknown {
@@ -32,99 +49,73 @@ export function parseActionItems(raw: string): string[] {
 }
 
 /**
- * AI helpers backed by the Claude API. Enabled only when ANTHROPIC_API_KEY is
- * set; otherwise every endpoint reports "disabled" and the UI hides the actions.
- * Kept to single, stateless calls (summaries, translation) — no tools, no state.
+ * AI helpers backed by a language model: Claude, or any OpenAI-compatible chat
+ * API (GPT, Groq, Gemini, OpenRouter, a self-hosted Ollama) — see ai-provider.ts.
+ * Enabled only when a provider is configured; otherwise every endpoint reports
+ * "disabled" and the UI hides or explains the actions.
  */
 @Injectable()
 export class AiService {
-  private client: Anthropic | null = null;
+  private readonly logger = new Logger(AiService.name);
+  private readonly provider: LlmProvider | null = resolveProvider();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
     private readonly integrationMessages: IntegrationMessagesService,
-  ) {}
+    private readonly web: WebSearchService,
+  ) {
+    if (this.provider) this.logger.log(`AI enabled: ${this.provider.name} (${this.provider.model})`);
+  }
 
   get enabled(): boolean {
-    return Boolean(process.env.ANTHROPIC_API_KEY);
+    return this.provider !== null;
   }
 
-  private anthropic(): Anthropic {
-    if (!this.enabled) throw new ServiceUnavailableException('AI features are not configured');
-    if (!this.client) this.client = new Anthropic();
-    return this.client;
+  private llm(): LlmProvider {
+    if (!this.provider) throw new ServiceUnavailableException('AI features are not configured');
+    return this.provider;
   }
 
-  /** One-shot Claude call returning plain text. These are lightweight text
-   *  transforms, so effort is `low`; thinking can't be disabled on this model.
-   *  Output length is steered by the prompts — `max_tokens` is only a safety cap
-   *  (it also covers thinking tokens, so it is deliberately generous). A safety
-   *  decline is retried server-side on a fallback model before we give up. */
+  /** One-shot call returning plain text. Output length is steered by the prompts. */
   private async complete(system: string, user: string): Promise<string> {
-    const res = await this.anthropic().beta.messages.create({
-      model: 'claude-opus-5-5',
-      max_tokens: 16000,
-      output_config: { effort: 'low' },
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      system,
-      messages: [{ role: 'user', content: user }],
-    });
-    if (res.stop_reason === 'refusal') return 'The assistant declined to respond to this content.';
-    return res.content
-      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim();
+    const res = await this.llm().complete({ system, messages: [{ role: 'user', content: user }] });
+    if (res.refused) return 'The assistant declined to respond to this content.';
+    return res.text;
   }
 
   /**
    * Suggest an order for the day's work. Returns the item ids in the suggested
-   * order with a short reason each, or null when AI is off or declines. The
-   * response is schema-constrained (structured outputs), so it always parses;
-   * callers still validate ids against what they sent.
+   * order with a short reason each, or null when AI is off, declines, or replies
+   * with something unusable. Callers still validate ids against what they sent.
    */
   async planDay(context: string): Promise<Array<{ id: string; reason: string }> | null> {
     if (!this.enabled) return null;
-    const res = await this.anthropic().beta.messages.create({
-      model: 'claude-opus-5-5',
-      max_tokens: 16000,
-      output_config: {
-        effort: 'low',
-        format: {
-          type: 'json_schema',
-          schema: {
-            type: 'object',
-            properties: {
-              order: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: { id: { type: 'string' }, reason: { type: 'string' } },
-                  required: ['id', 'reason'],
-                  additionalProperties: false,
-                },
-              },
+    const res = await this.llm().complete({
+      json: true,
+      jsonSchema: {
+        type: 'object',
+        properties: {
+          order: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { id: { type: 'string' }, reason: { type: 'string' } },
+              required: ['id', 'reason'],
+              additionalProperties: false,
             },
-            required: ['order'],
-            additionalProperties: false,
           },
         },
+        required: ['order'],
+        additionalProperties: false,
       },
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
       system:
-        'You help a teammate plan their working day. Order the given work items into the sequence they should tackle them today, considering deadlines, people waiting on them, priority, and the fixed meetings (work around them; do not list meetings). Give each item a reason of at most 12 words. Include every item id exactly once and only ids from the list.',
+        'You help a teammate plan their working day. Order the given work items into the sequence they should tackle them today, considering deadlines, people waiting on them, priority, and the fixed meetings (work around them; do not list meetings). Give each item a reason of at most 12 words. Include every item id exactly once and only ids from the list. Reply as JSON: {"order":[{"id":"…","reason":"…"}]}.',
       messages: [{ role: 'user', content: context }],
     });
-    if (res.stop_reason === 'refusal' || res.stop_reason === 'max_tokens') return null;
-    const text = res.content
-      .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    if (res.refused || res.truncated) return null;
     try {
-      const parsed = JSON.parse(text) as { order?: Array<{ id?: unknown; reason?: unknown }> };
+      const parsed = extractJsonObject(res.text) as { order?: Array<{ id?: unknown; reason?: unknown }> };
       return (parsed.order ?? [])
         .filter((o) => typeof o.id === 'string' && typeof o.reason === 'string')
         .map((o) => ({ id: o.id as string, reason: (o.reason as string).slice(0, 120) }));
@@ -160,10 +151,18 @@ export class AiService {
    * can't see). Retrieval is keyword-based; the model must cite sources and admit
    * when the answer isn't in the context.
    */
-  async ask(userId: string, workspaceId: string, question: string): Promise<AskAnswerDto> {
-    await this.policy.requireWorkspaceMember(userId, workspaceId);
-    const terms = [...new Set((question.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []))].slice(0, 8);
-    if (terms.length === 0) return { answer: 'Please ask a more specific question.', sources: [] };
+  /**
+   * Find what the workspace knows about a question: recorded decisions, messages
+   * in channels and DMs the caller is in, and their own tasks. Returns numbered
+   * context lines for the model plus the matching sources for the UI.
+   */
+  private async gatherContext(
+    userId: string,
+    workspaceId: string,
+    question: string,
+  ): Promise<{ ctx: string[]; sources: AskSourceDto[] }> {
+    const terms = [...new Set(question.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])].slice(0, 8);
+    if (terms.length === 0) return { ctx: [], sources: [] };
 
     const [decisions, messages, tasks] = await Promise.all([
       this.prisma.decision.findMany({
@@ -182,8 +181,16 @@ export class AiService {
         where: {
           workspaceId,
           deletedAt: null,
-          channel: { members: { some: { userId } } },
-          OR: terms.map((t) => ({ contentText: { contains: t, mode: 'insensitive' as const } })),
+          // Only places the caller can read: their channels and their DMs.
+          AND: [
+            {
+              OR: [
+                { channel: { members: { some: { userId } } } },
+                { conversation: { members: { some: { userId } } } },
+              ],
+            },
+            { OR: terms.map((t) => ({ contentText: { contains: t, mode: 'insensitive' as const } })) },
+          ],
         },
         take: 10,
         orderBy: { createdAt: 'desc' },
@@ -218,17 +225,16 @@ export class AiService {
       );
     }
     for (const m of messages) {
+      const where = m.channel ? `#${m.channel.name}` : 'a direct message';
       sources.push({
         kind: 'message',
-        label: `#${m.channel?.name ?? 'channel'} · ${m.user?.displayName ?? 'someone'}`,
+        label: `${m.channel ? `#${m.channel.name}` : 'DM'} · ${m.user?.displayName ?? 'someone'}`,
         ref: m.id,
         channelId: m.channelId,
+        conversationId: m.conversationId,
       });
-      ctx.push(
-        `[${sources.length}] MESSAGE in #${m.channel?.name ?? 'channel'} by ${m.user?.displayName ?? 'someone'}: ${m.contentText.slice(0, 300)}`,
-      );
+      ctx.push(`[${sources.length}] MESSAGE in ${where} by ${m.user?.displayName ?? 'someone'}: ${m.contentText.slice(0, 300)}`);
     }
-
     for (const t of tasks) {
       sources.push({ kind: 'task', label: t.title, ref: t.id, channelId: t.channelId });
       const due = t.dueAt ? `, due ${t.dueAt.toISOString().slice(0, 10)}` : '';
@@ -236,19 +242,83 @@ export class AiService {
         `[${sources.length}] TASK "${t.title}" — ${t.status === 'DONE' ? 'done' : 'open'}${due}${t.assignee ? `, assigned to ${t.assignee.displayName}` : ''}`,
       );
     }
+    return { ctx, sources };
+  }
 
+  async ask(userId: string, workspaceId: string, question: string): Promise<AskAnswerDto> {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    if (!/[\p{L}\p{N}]{3,}/u.test(question)) return { answer: 'Please ask a more specific question.', sources: [] };
+    const { ctx, sources } = await this.gatherContext(userId, workspaceId, question);
     if (ctx.length === 0) {
       return {
         answer: "I couldn't find anything about that in this workspace's decisions, tasks or your channels.",
         sources: [],
       };
     }
-
     const answer = await this.complete(
       "You answer a teammate's question using ONLY the numbered context from their workspace. Cite the sources you rely on inline as [n]. Be concise (2–5 sentences). If the context doesn't contain the answer, say you couldn't find it — never invent facts.",
       `Question: ${question}\n\nContext:\n${ctx.join('\n')}`,
     );
     return { answer, sources };
+  }
+
+  /**
+   * The assistant chat (the floating "Stagehand"). A normal conversation: it
+   * helps with writing, brainstorming and how-to from general knowledge, and
+   * whenever the workspace has something relevant (decisions, messages in the
+   * caller's channels/DMs, their tasks) it answers from that and cites [n].
+   * Only the sources actually cited are returned.
+   */
+  async chat(userId: string, workspaceId: string, messages: ChatTurn[]): Promise<AskAnswerDto> {
+    await this.policy.requireWorkspaceMember(userId, workspaceId);
+    const recent = messages.slice(-12);
+    const userTurns = recent.filter((m) => m.role === 'user');
+    // Search with the latest question plus the one before it, so short follow-ups
+    // ("and who owns it?") still find the topic.
+    const query = userTurns
+      .slice(-2)
+      .map((m) => m.content)
+      .join(' ');
+    const { ctx, sources } = await this.gatherContext(userId, workspaceId, query);
+    // Live information (web, news, weather) for questions about the outside world.
+    // Short follow-ups ("and tomorrow?") carry the previous question along.
+    const latest = userTurns[userTurns.length - 1]?.content ?? '';
+    const webQuestion = latest.trim().split(/\s+/).length < 4 && userTurns.length > 1 ? query : latest;
+    const web = await this.web.lookup(webQuestion, ctx.length > 0);
+    if (web) {
+      web.lines.forEach((line, i) => {
+        sources.push(web.sources[i] ?? web.sources[0]);
+        ctx.push(`[${sources.length}] ${line}`);
+      });
+    }
+
+    const workspace = await this.prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } });
+    const system = [
+      `You are Stagehand, the friendly AI assistant inside Backstages, a team chat app. You are helping a member of the "${workspace?.name ?? 'team'}" workspace.`,
+      'Be warm, clear and concise (usually under 150 words). Use short paragraphs or "-" bullet lists; plain text otherwise (bold with **text** is fine).',
+      "Always reply in the language the user writes in.",
+      `Current date and time: ${new Date().toUTCString()}.`,
+      ctx.length > 0
+        ? 'Below is numbered context: items from their workspace, and live results from the internet (marked WEB, WEATHER or FORECAST). When it is relevant, answer from it and cite inline as [n]. For news, weather, prices and other real-time questions, answer from the live results and say how recent they are; if they do not contain the answer, say you could not find current information instead of guessing. Never invent workspace facts (decisions, owners, dates, people) that are not in the context; if the context does not cover a workspace question, say so plainly. For general questions (writing, brainstorming, explanations) answer from general knowledge without citations.'
+        : 'Nothing in their workspace or on the web matched this message. For questions about their team, decisions, tasks or messages, say you could not find it rather than guessing. For real-time questions (news, weather, prices) say you could not fetch current information right now. For general questions (writing, brainstorming, explanations) answer from general knowledge.',
+      ctx.length > 0 ? `\nContext:\n${ctx.join('\n')}` : '',
+    ].join('\n');
+
+    const res = await this.llm().complete({ system, messages: recent, maxTokens: 900 });
+    if (res.refused) return { answer: "Sorry — I can't help with that one.", sources: [] };
+    const answer = res.text || "Sorry, I couldn't come up with an answer. Try rephrasing?";
+
+    const result = keepCitedSources(answer, sources);
+    // Live answers always show where they came from, even when the model forgot to cite.
+    if (web && !result.sources.some((s) => s.kind === 'web')) {
+      const seen = new Set<string>();
+      for (const s of web.sources) {
+        if (seen.has(s.ref) || seen.size >= 3) continue;
+        seen.add(s.ref);
+        result.sources.push(s);
+      }
+    }
+    return result;
   }
 
   async summarizeThread(userId: string, messageId: string): Promise<{ summary: string }> {

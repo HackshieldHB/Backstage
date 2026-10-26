@@ -154,6 +154,7 @@ model User {
   standupResponses        StandupResponse[]
   webhooksCreated         IncomingWebhook[]        @relation("WebhookCreator")
   customCommands          CustomCommand[]
+  messageTemplates        MessageTemplate[]
   weeklyReports           WeeklyReport[]           @relation("WeeklyReportCreator")
   decisionsCreated        Decision[]               @relation("DecisionCreator")
   decisionsDecided        Decision[]               @relation("DecisionDecider")
@@ -273,6 +274,8 @@ model Workspace {
   utilizationDays        UtilizationDaily[]
   incomingWebhooks       IncomingWebhook[]
   customCommands         CustomCommand[]
+  appConnections         AppConnection[]
+  messageTemplates       MessageTemplate[]
   weeklyReports          WeeklyReport[]
   decisions              Decision[]
   channelEmails          ChannelEmail[]
@@ -352,6 +355,8 @@ model WorkspaceInvite {
   /// Targeted email invite when set; shareable link invite when null.
   email       String?
   role        WorkspaceRole @default(MEMBER)
+  /// Channels the invitee joins on accepting (a guest's only channels; extras for others).
+  channelIds  String[]      @default([])
   /// SHA-256 hash of the invite token; the raw token only appears in the email/link.
   tokenHash   String        @unique
   createdById String
@@ -1903,4 +1908,42 @@ model HuddleRecording {
   endedAt     DateTime?
 
   @@index([huddleKey, status])
+}
+
+/// A workspace's connection to an external application in the Applications hub
+/// (Datadog, LaunchDarkly, Miro, Salesforce). Secrets are AES-256-GCM encrypted
+/// with TOKEN_ENCRYPTION_KEY; only admins can set or remove them.
+model AppConnection {
+  id          String    @id @default(cuid())
+  workspaceId String
+  /// Registry id, e.g. "datadog".
+  appId       String
+  /// Non-secret settings (site, project key, instance URL…).
+  config      Json      @default("{}")
+  /// Encrypted JSON object of the secret fields.
+  secretEnc   String
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, appId])
+}
+
+/// A reusable message (snippet). Personal by default; `shared` makes it
+/// available to everyone in the workspace. Supports {{date}}, {{time}}, {{me}}.
+model MessageTemplate {
+  id          String    @id @default(cuid())
+  workspaceId String
+  ownerId     String
+  name        String
+  content     String
+  shared      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, ownerId])
+  @@index([workspaceId, shared])
 }

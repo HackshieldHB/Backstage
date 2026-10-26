@@ -2,10 +2,12 @@ import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/commo
 import type { CalendarLinkDto, MyExternalEventsDto } from '@backstages/shared';
 import { GoogleCalendarService } from '../google-calendar/google-calendar.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { UsersService } from '../users/users.service';
+import { AutoStatusService, MEETING_STATUS } from '../auto-status/auto-status.service';
 import { safeGetText, validatePublicUrl } from '../common/safe-http';
 
-const MEETING_EMOJI = '🗓️';
+const MEETING_EMOJI = MEETING_STATUS.emoji;
+/** A Backstages meeting without a set length is treated as an hour long. */
+const DEFAULT_MEETING_MINS = 60;
 
 const ICS_SCHEMES = ['https:', 'http:'];
 
@@ -45,6 +47,35 @@ export function unescapeIcs(value: string): string {
   return value.replace(/\\([nN,;\\])/g, (_m, c: string) => (c === 'n' || c === 'N' ? ' ' : c)).trim();
 }
 
+/** The latest of some dates (undefined when none). */
+function latest(dates: Array<Date | undefined>): Date | undefined {
+  return dates.filter((d): d is Date => !!d).sort((x, y) => y.getTime() - x.getTime())[0];
+}
+
+/**
+ * Who's in a meeting right now, and until when (their latest end). Pure, so it
+ * can be tested: the organiser and accepted guests count; untimed meetings run
+ * DEFAULT_MEETING_MINS.
+ */
+export function busyFromMeetings(
+  rows: Array<{ scheduledFor: Date; durationMins: number | null; createdById: string; responses: Array<{ userId: string }> }>,
+  now: Date,
+  onlyUserId?: string,
+): Map<string, Date> {
+  const busy = new Map<string, Date>();
+  for (const r of rows) {
+    if (r.scheduledFor.getTime() > now.getTime()) continue;
+    const end = new Date(r.scheduledFor.getTime() + (r.durationMins ?? DEFAULT_MEETING_MINS) * 60_000);
+    if (end.getTime() <= now.getTime()) continue;
+    for (const userId of [r.createdById, ...r.responses.map((x) => x.userId)]) {
+      if (onlyUserId && userId !== onlyUserId) continue;
+      const prev = busy.get(userId);
+      if (!prev || prev < end) busy.set(userId, end);
+    }
+  }
+  return busy;
+}
+
 export function parseIcs(text: string): IcsEvent[] {
   const events: IcsEvent[] = [];
   let cur: Partial<IcsEvent> | null = null;
@@ -74,7 +105,7 @@ export class CalendarService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly users: UsersService,
+    private readonly autoStatus: AutoStatusService,
     @Optional() private readonly google?: GoogleCalendarService,
   ) {}
 
@@ -105,11 +136,10 @@ export class CalendarService {
 
   async unlink(userId: string): Promise<{ ok: boolean }> {
     await this.prisma.calendarLink.deleteMany({ where: { userId } });
-    // Clear any lingering "in a meeting" status we set.
-    const me = await this.prisma.user.findUnique({ where: { id: userId }, select: { statusEmoji: true } });
-    if (me?.statusEmoji === MEETING_EMOJI) {
-      await this.users.updateStatus(userId, { statusEmoji: null, statusText: null, statusExpiresAt: null });
-    }
+    // Clear a lingering "in a meeting" status from the calendar — unless a
+    // Backstages meeting is on right now.
+    const internal = await this.internalMeetings(new Date(), userId);
+    await this.autoStatus.meeting(userId, internal.has(userId), internal.get(userId));
     return { ok: true };
   }
 
@@ -117,11 +147,12 @@ export class CalendarService {
   async runDue(): Promise<number> {
     const links = await this.prisma.calendarLink.findMany({ select: { userId: true, icsUrl: true } });
     const googleUsers = new Set(this.google ? await this.google.linkedUserIds() : []);
+    const internal = await this.internalMeetings(new Date());
     let synced = 0;
     for (const l of links) {
       if (googleUsers.has(l.userId)) continue; // Google wins when both are linked
       try {
-        await this.syncUser(l.userId, l.icsUrl);
+        await this.syncUser(l.userId, l.icsUrl, internal);
         synced++;
       } catch (e) {
         this.logger.warn(`calendar sync for ${l.userId} failed: ${String(e)}`);
@@ -131,13 +162,68 @@ export class CalendarService {
       try {
         const now = Date.now();
         const events = (await this.google!.eventsBetween(userId, new Date(now - 12 * 3600_000), new Date(now + 60_000))) ?? [];
-        await this.applyMeetingStatus(userId, events.some((e) => e.busy && !e.allDay && e.start <= now && e.end > now));
+        const current = events.filter((e) => e.busy && !e.allDay && e.start <= now && e.end > now);
+        const end = latest([...current.map((e) => new Date(e.end)), internal.get(userId)]);
+        await this.autoStatus.meeting(userId, current.length > 0 || internal.has(userId), end);
         synced++;
       } catch (e) {
         this.logger.warn(`Google calendar status for ${userId} failed: ${String(e)}`);
       }
     }
+    await this.applyInternalMeetings(internal, new Set([...links.map((l) => l.userId), ...googleUsers]));
     return synced;
+  }
+
+  /**
+   * Every minute: Backstages meetings starting/ending flip the 🗓️ status for
+   * people without a linked calendar (linked ones are reconciled by runDue,
+   * which also knows about their outside meetings).
+   */
+  async runInternalMeetings(): Promise<void> {
+    const [internal, links, googleUsers] = await Promise.all([
+      this.internalMeetings(new Date()),
+      this.prisma.calendarLink.findMany({ select: { userId: true } }),
+      this.google ? this.google.linkedUserIds() : Promise.resolve([] as string[]),
+    ]);
+    await this.applyInternalMeetings(internal, new Set([...links.map((l) => l.userId), ...googleUsers]));
+  }
+
+  private async applyInternalMeetings(internal: Map<string, Date>, linked: Set<string>): Promise<void> {
+    for (const [userId, end] of internal) {
+      if (!linked.has(userId)) await this.autoStatus.meeting(userId, true, end);
+    }
+    // Meetings that ended: clear the 🗓️ status of people who no longer have one.
+    const stale = await this.prisma.user.findMany({
+      where: { statusEmoji: MEETING_EMOJI },
+      select: { id: true },
+      take: 1000,
+    });
+    for (const u of stale) {
+      if (!internal.has(u.id) && !linked.has(u.id)) await this.autoStatus.meeting(u.id, false);
+    }
+  }
+
+  /**
+   * Backstages meetings happening right now → who's in them (the organiser and
+   * everyone who accepted) and when each person's last one ends.
+   */
+  async internalMeetings(now: Date, onlyUserId?: string): Promise<Map<string, Date>> {
+    const rows = await this.prisma.scheduledHuddle.findMany({
+      where: {
+        scheduledFor: { lte: now, gte: new Date(now.getTime() - 24 * 3600_000) },
+        ...(onlyUserId
+          ? { OR: [{ createdById: onlyUserId }, { responses: { some: { userId: onlyUserId, response: 'ACCEPTED' } } }] }
+          : {}),
+      },
+      select: {
+        scheduledFor: true,
+        durationMins: true,
+        createdById: true,
+        responses: { where: { response: 'ACCEPTED' }, select: { userId: true } },
+      },
+      take: 2000,
+    });
+    return busyFromMeetings(rows, now, onlyUserId);
   }
 
   /** My own external events for the calendar view (Google if connected, else ICS). */
@@ -209,34 +295,14 @@ export class CalendarService {
    * their status. Only ever touches the calendar-owned status (marked with a
    * 🗓️ emoji) so a manual status or focus block is never clobbered.
    */
-  async syncUser(userId: string, icsUrl: string): Promise<void> {
+  async syncUser(userId: string, icsUrl: string, internal?: Map<string, Date>): Promise<void> {
     const text = await this.fetchIcs(icsUrl);
     const now = Date.now();
-    const inMeeting = parseIcs(text).some((e) => e.start <= now && e.end > now);
-    await this.applyMeetingStatus(userId, inMeeting);
+    const current = parseIcs(text).filter((e) => e.start <= now && e.end > now);
+    const backstages = internal ?? (await this.internalMeetings(new Date(now), userId));
+    const end = latest([...current.map((e) => new Date(e.end)), backstages.get(userId)]);
+    await this.autoStatus.meeting(userId, current.length > 0 || backstages.has(userId), end);
     await this.prisma.calendarLink.update({ where: { userId }, data: { lastSyncAt: new Date() } }).catch(() => undefined);
-  }
-
-  /** Reflect "in a meeting" in the status — only ever touching the calendar-owned (🗓️) status. */
-  private async applyMeetingStatus(userId: string, inMeeting: boolean): Promise<void> {
-    const now = Date.now();
-    const me = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { statusEmoji: true, dndUntil: true },
-    });
-    const hasCalendarStatus = me?.statusEmoji === MEETING_EMOJI;
-
-    if (inMeeting && !hasCalendarStatus && !me?.statusEmoji) {
-      // Only set if the user has no other status (respect manual/focus statuses).
-      const endsSoon = new Date(now + 60 * 60_000).toISOString();
-      await this.users.updateStatus(userId, {
-        statusEmoji: MEETING_EMOJI,
-        statusText: 'In a meeting',
-        statusExpiresAt: endsSoon,
-      });
-    } else if (!inMeeting && hasCalendarStatus) {
-      await this.users.updateStatus(userId, { statusEmoji: null, statusText: null, statusExpiresAt: null });
-    }
   }
 
   /** Fetch the ICS with a timeout + size cap. */

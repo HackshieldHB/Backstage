@@ -39,7 +39,7 @@ import { PaneTabsProvider } from '@/components/pane-tabs';
 import { MeetingDetailDialog } from '@/components/meeting-detail';
 import { FeedbackDialog } from '@/components/feedback-dialog';
 import { setUsageWorkspace, track, trackView } from '@/lib/usage';
-import { AskDialog } from '@/components/ask-dialog';
+import { AssistantWidget } from '@/components/assistant-widget';
 import { SearchDialog } from '@/components/search-dialog';
 import { CommandPalette } from '@/components/command-palette';
 import { GettingStarted } from '@/components/getting-started';
@@ -386,7 +386,7 @@ function AppShell() {
       <FeedbackDialog workspaceId={workspaceId} />
       <ShortcutsHelp />
       <CommandPalette />
-      <AskDialog workspaceId={workspaceId} onNavigate={navigate} />
+      <AssistantWidget workspaceId={workspaceId} onNavigate={navigate} />
       <Toaster />
     </div>
   );

@@ -18,6 +18,10 @@ export const CreateInviteSchema = z.object({
   /** Omit for a shareable link invite. */
   email: z.string().email().max(255).optional(),
   role: WorkspaceRoleSchema.exclude(['OWNER']).default('MEMBER'),
+  /** Channels to join on accepting: a guest's only channels, extra channels
+   *  for members and admins. A guest invited with none sees nothing until an
+   *  admin adds them to a channel (the invite dialog asks for at least one). */
+  channelIds: z.array(z.string().min(1).max(64)).max(50).default([]),
 });
 export type CreateInviteInput = z.infer<typeof CreateInviteSchema>;
 

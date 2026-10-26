@@ -19,6 +19,8 @@ export * from './schemas/projects';
 export * from './schemas/incidents';
 export * from './schemas/calendar';
 export * from './schemas/ask';
+export * from './schemas/applications';
+export * from './schemas/templates';
 export * from './schemas/timesheet';
 export * from './schemas/user-status';
 export * from './schemas/recommendations';

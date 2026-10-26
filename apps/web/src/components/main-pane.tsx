@@ -7,7 +7,8 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import { useUiStore } from '@/stores/ui-store';
-import { useAiStatus, useChannelMembers, useChannels, useConversations, usePins, usePresence, type Container } from '@/hooks/queries';
+import { useAiStatus, useChannelMembers, useChannels, useConversations, useMembers, usePins, usePresence, type Container } from '@/hooks/queries';
+import { emojiChar } from '@/lib/emoji';
 import { presenceLabel } from '@/lib/presence';
 import type { HuddleController } from '@/hooks/use-huddle';
 import { MessageList } from './message-list';
@@ -46,6 +47,7 @@ export function MainPane({
   const channelMembers = useChannelMembers(container.kind === 'channel' ? container.id : null);
   const conversations = useConversations(workspaceId);
   const presence = usePresence(workspaceId);
+  const members = useMembers(workspaceId);
   // Share info comes with the sidebar list (already cached), not the channel itself.
   const sidebarChannel = useChannels(workspaceId).data?.find((c) => c.id === container.id);
 
@@ -62,6 +64,9 @@ export function MainPane({
 
   const dm = conversations.data?.find((c) => c.id === container.id);
   const dmOthers = dm?.members.filter((m) => m.id !== me?.id) ?? [];
+  // The other person's current status (incl. automatic 🎧 / 🗓️), kept fresh by realtime.
+  const dmMember = dmOthers.length === 1 ? members.data?.find((m) => m.user.id === dmOthers[0].id) : undefined;
+  const dmStatus = dmMember?.user;
 
   const title =
     container.kind === 'channel'
@@ -120,7 +125,13 @@ export function MainPane({
                   ? `${channelMembers.data.length} ${channelMembers.data.length === 1 ? 'member' : 'members'}`
                   : ' ')
               : dmOthers.length === 1
-                ? presenceLabel(presence.data?.[dmOthers[0].id])
+                ? [
+                    dmMember?.role === 'GUEST' ? 'Guest' : '',
+                    presenceLabel(presence.data?.[dmOthers[0].id]),
+                    dmStatus ? `${dmStatus.statusEmoji ? `${emojiChar(dmStatus.statusEmoji)} ` : ''}${dmStatus.statusText ?? ''}`.trim() : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')
                 : dmOthers.length > 1
                   ? `${dmOthers.length + 1} people`
                   : 'Notes to yourself'}

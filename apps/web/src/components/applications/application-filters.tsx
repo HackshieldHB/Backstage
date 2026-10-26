@@ -10,7 +10,7 @@ const CHIPS: { id: StatusFilter; label: string }[] = [
   { id: 'healthy', label: 'Healthy' },
   { id: 'warning', label: 'Warning' },
   { id: 'critical', label: 'Critical' },
-  { id: 'unknown', label: 'Unknown' },
+  { id: 'unknown', label: 'Needs setup' },
 ];
 
 export function ApplicationFilters({

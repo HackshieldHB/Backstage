@@ -122,6 +122,7 @@ export function Sidebar({
     toggleSidebar(false);
   };
   const currentHub = hubOf(mainView);
+  const isGuest = workspace?.myRole === 'GUEST';
   // The open channel/DM is only "where you are" while the chat is showing.
   const inChat = mainView === 'chat';
   const reportTabs = useHubTabs(workspaceId, 'reports');
@@ -328,15 +329,19 @@ export function Sidebar({
           testId="my-day-button"
           buttonRef={myDayRef}
         />
-        <SectionButton
-          icon={<Compass size={15} />}
-          label={t('discover')}
-          active={mainView === 'discover'}
-          onClick={() => go('discover')}
-          testId="discover-button"
-        />
+        {/* Guests only see the channels they were given, so no discovery or tools. */}
+        {!isGuest && (
+          <SectionButton
+            icon={<Compass size={15} />}
+            label={t('discover')}
+            active={mainView === 'discover'}
+            onClick={() => go('discover')}
+            testId="discover-button"
+          />
+        )}
 
         {/* Tools — each opens a view with its own tabs */}
+        {!isGuest && (
         <NavGroup id="tools" label={t('tools')}>
           <SectionButton
             icon={<BarChart3 size={15} />}
@@ -377,6 +382,7 @@ export function Sidebar({
             testId="applications-button"
           />
         </NavGroup>
+        )}
 
         {/* The user's own sections (channels/DMs they've filed) */}
         <CustomSections
@@ -395,8 +401,8 @@ export function Sidebar({
           browseTitle={t('browse_channels')}
           addTitle={t('add')}
           headerRef={channelsRef}
-          onAdd={() => setDialog('create-channel')}
-          onBrowse={() => setDialog('browse')}
+          onAdd={isGuest ? undefined : () => setDialog('create-channel')}
+          onBrowse={isGuest ? undefined : () => setDialog('browse')}
         />
         <ul>{ungroupedChannels.map(renderChannel)}</ul>
 
@@ -507,7 +513,9 @@ export function Sidebar({
       {dialog === 'browse' && (
         <BrowseChannelsDialog workspaceId={workspaceId} onClose={() => setDialog('none')} onOpen={(id) => { setDialog('none'); onNavigate({ kind: 'channel', id }); }} />
       )}
-      {dialog === 'invite' && <InviteDialog workspaceId={workspaceId} onClose={() => setDialog('none')} />}
+      {dialog === 'invite' && (
+        <InviteDialog workspaceId={workspaceId} channels={channels} onClose={() => setDialog('none')} />
+      )}
       {dialog === 'dm' && (
         <DmPickerDialog workspaceId={workspaceId} onClose={() => setDialog('none')} onOpen={(id) => { setDialog('none'); onNavigate({ kind: 'conversation', id }); }} />
       )}
@@ -546,7 +554,7 @@ export function Sidebar({
 
       <GuidedTour
         storageKey="bs.tour.sidebar.v1"
-        steps={tourSteps}
+        steps={isGuest ? tourSteps.filter((s) => s.anchorRef !== reportsRef) : tourSteps}
         replayEvent="bs:start-tour"
         labels={{
           skip: lang === 'id' ? 'Lewati' : 'Skip',
@@ -594,6 +602,7 @@ const DIALOG_VIEWS: Record<string, MainView | undefined> = {
 };
 /** Old dialog names that are now Workspace settings sections. */
 const DIALOG_SETTINGS: Record<string, SettingsSection | undefined> = {
+  atlassian: 'atlassian',
   integrations: 'integrations',
   'user-groups': 'groups',
   audit: 'audit',
@@ -919,19 +928,40 @@ function BrowseChannelsDialog({
   );
 }
 
-function InviteDialog({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+function InviteDialog({
+  workspaceId,
+  channels,
+  onClose,
+}: {
+  workspaceId: string;
+  channels: ChannelWithMeta[];
+  onClose: () => void;
+}) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'MEMBER' | 'ADMIN' | 'GUEST'>('MEMBER');
+  const [picked, setPicked] = useState<string[]>([]);
   const [result, setResult] = useState<{ url: string; email: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isGuest = role === 'GUEST';
+  // #general is automatic for members and admins, so it isn't offered for them.
+  const choosable = channels.filter((c) => !c.groupKey && (isGuest || !c.isDefault));
+  const needsChannel = isGuest && picked.length === 0;
+
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
   const create = async (withEmail: boolean) => {
     setError(null);
+    if (needsChannel) {
+      setError('Choose at least one channel for a guest.');
+      return;
+    }
+    // Only send channels that are still on offer for the chosen role.
+    const channelIds = picked.filter((id) => choosable.some((c) => c.id === id));
     try {
       const invite = await api<{ url: string; email: string | null }>(
         'POST',
         `/workspaces/${workspaceId}/invites`,
-        withEmail ? { email, role } : { role },
+        withEmail ? { email, role, channelIds } : { role, channelIds },
       );
       setResult(invite);
     } catch (err) {
@@ -949,13 +979,24 @@ function InviteDialog({ workspaceId, onClose }: { workspaceId: string; onClose: 
           <code className="block break-all rounded-md bg-gray-100 p-2 text-xs dark:bg-gray-800" data-testid="invite-url">
             {result.url}
           </code>
-          <button onClick={() => setResult(null)} className="mt-3 text-sm text-accent hover:underline">
+          {isGuest && (
+            <p className="mt-2 text-[12.5px] text-ink-3">
+              They’ll join as a guest in {picked.length} channel{picked.length === 1 ? '' : 's'} only.
+            </p>
+          )}
+          <button
+            onClick={() => {
+              setResult(null);
+              setPicked([]);
+            }}
+            className="mt-3 text-sm text-accent hover:underline"
+          >
             Create another
           </button>
         </div>
       ) : (
         <div>
-          {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+          {error && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
           <input
             className="mb-2 w-full rounded-md border border-line-strong px-3 py-2 text-sm outline-none focus:border-accent dark:border-line dark:bg-gray-800"
             placeholder="colleague@company.com"
@@ -965,25 +1006,68 @@ function InviteDialog({ workspaceId, onClose }: { workspaceId: string; onClose: 
           />
           <select
             value={role}
-            onChange={(e) => setRole(e.target.value as typeof role)}
+            onChange={(e) => {
+              setRole(e.target.value as typeof role);
+              setError(null);
+            }}
             className="mb-3 w-full rounded-md border border-line-strong px-3 py-2 text-sm dark:border-line dark:bg-gray-800"
+            data-testid="invite-role"
           >
             <option value="MEMBER">Member</option>
             <option value="ADMIN">Admin</option>
-            <option value="GUEST">Guest (explicit channels only)</option>
+            <option value="GUEST">Guest (only the channels you pick)</option>
           </select>
+
+          <div className="mb-3">
+            <div className="mb-1.5 flex items-baseline justify-between">
+              <span className="text-[13px] font-medium text-ink-2">
+                {isGuest ? 'Channels they can see' : 'Also add them to'}
+              </span>
+              <span className="text-[11.5px] text-ink-3">{isGuest ? 'Required' : 'Optional'}</span>
+            </div>
+            {choosable.length === 0 ? (
+              <p className="rounded-md border border-dashed border-line px-3 py-2 text-[12.5px] text-ink-3">
+                No other channels yet.
+              </p>
+            ) : (
+              <ul
+                className={clsx(
+                  'thin-scrollbar max-h-40 overflow-y-auto rounded-md border p-1',
+                  needsChannel ? 'border-amber-400/70' : 'border-line',
+                )}
+                data-testid="invite-channels"
+              >
+                {choosable.map((c) => (
+                  <li key={c.id}>
+                    <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[13px] text-ink hover:bg-hovered">
+                      <input type="checkbox" checked={picked.includes(c.id)} onChange={() => toggle(c.id)} />
+                      {c.isPrivate ? <Lock size={12} className="text-ink-3" /> : <Hash size={12} className="text-ink-3" />}
+                      <span className="truncate">{c.name}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {isGuest && (
+              <p className="mt-1.5 text-[11.5px] text-ink-3">
+                Guests can’t browse or join other channels, create channels, or see workspace tools.
+              </p>
+            )}
+          </div>
+
           <div className="flex gap-2">
             <button
               onClick={() => void create(true)}
-              disabled={!email}
+              disabled={!email || needsChannel}
               className="flex-1 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
             >
               Send email invite
             </button>
             <button
               onClick={() => void create(false)}
+              disabled={needsChannel}
               data-testid="create-invite-link"
-              className="flex-1 rounded-md border border-line-strong px-3 py-2 text-sm font-medium hover:bg-gray-50 dark:border-line-strong dark:hover:bg-gray-800"
+              className="flex-1 rounded-md border border-line-strong px-3 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50 dark:border-line-strong dark:hover:bg-gray-800"
             >
               Create link
             </button>

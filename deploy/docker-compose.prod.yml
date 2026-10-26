@@ -78,6 +78,8 @@ services:
       PUBLIC_API_URL: ${API_URL:?set API_URL in deploy/.env}
       ATLASSIAN_REDIRECT_URI: ${API_URL}/atlassian/callback
       UPLOAD_DIR: /data/uploads
+      # The assistant's web search (the searxng service below). AI_WEB_SEARCH=off disables it.
+      WEB_SEARCH_URL: ${WEB_SEARCH_URL:-http://searxng:8080}
     volumes:
       - uploads:/data/uploads
     # Reaches LiveKit (host network) for its server API: LIVEKIT_API_URL=http://host.docker.internal:7880
@@ -90,6 +92,16 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+
+  # SearXNG, an open-source metasearch engine: web and news search for the
+  # Stagehand assistant. Internal only (no published port); the API calls it.
+  searxng:
+    image: searxng/searxng:2026.10.25-54ca1d9cf
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-backstages-searxng}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
 
   web:
     build:

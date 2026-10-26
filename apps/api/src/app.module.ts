@@ -29,6 +29,9 @@ import { PollsModule } from './polls/polls.module';
 import { CanvasModule } from './canvas/canvas.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AiModule } from './ai/ai.module';
+import { ApplicationsModule } from './applications/applications.module';
+import { AutoStatusModule } from './auto-status/auto-status.service';
+import { TemplatesModule } from './templates/templates.module';
 import { PushModule } from './push/push.module';
 import { SearchModule } from './search/search.module';
 import { UsersModule } from './users/users.module';
@@ -95,6 +98,9 @@ import { RateLimitGuard } from './common/rate-limit.guard';
     CanvasModule,
     AnalyticsModule,
     AiModule,
+    ApplicationsModule,
+    AutoStatusModule,
+    TemplatesModule,
     PushModule,
     SearchModule,
     UsersModule,

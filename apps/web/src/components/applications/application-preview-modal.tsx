@@ -1,32 +1,34 @@
 'use client';
 
 import { useEffect, useId, useRef } from 'react';
-import { ExternalLink, Maximize2, X } from 'lucide-react';
+import { ExternalLink, Settings2, X } from 'lucide-react';
 import type { Application } from './types';
 import { ApplicationLogo } from './application-logo';
 import { StatusPill } from './primitives';
-import { useApplicationData } from './use-applications';
-import { ApplicationExperience, MonitoringUnavailable } from './experiences';
+import { useApplicationDetail } from './use-applications';
+import { ApplicationDetailBody } from './application-detail-body';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * Shared preview shell (Layer 1). The header/footer/behaviour are identical for
- * every application; the body is the application's OWN experience (Layer 2).
+ * Preview of a connected application: its live status, figures and lists, read
+ * from the service through the workspace's connection.
  */
 export function ApplicationPreviewModal({
   app,
+  canManage,
   onClose,
-  onOpenDetail,
+  onManage,
 }: {
   app: Application;
+  canManage: boolean;
   onClose: () => void;
-  onOpenDetail: () => void;
+  onManage: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const dataQ = useApplicationData(app.id);
+  const dataQ = useApplicationDetail(app);
 
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -112,25 +114,37 @@ export function ApplicationPreviewModal({
         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {dataQ.isLoading ? (
             <PreviewSkeleton />
-          ) : dataQ.data && dataQ.data.ok ? (
-            <ApplicationExperience appData={dataQ.data.data} variant="modal" activeTab="overview" />
+          ) : dataQ.data ? (
+            <ApplicationDetailBody detail={dataQ.data} />
           ) : (
-            <MonitoringUnavailable
-              reason={dataQ.data && !dataQ.data.ok ? dataQ.data.reason : 'Monitoring unavailable'}
-              lastSuccessfulSync={dataQ.data && !dataQ.data.ok ? dataQ.data.lastSuccessfulSync : app.lastChecked}
-              onRetry={() => void dataQ.refetch()}
-            />
+            <div className="rounded-xl border border-dashed border-line py-10 text-center">
+              <p className="text-[14px] font-semibold text-ink">Couldn’t read {app.name}</p>
+              <p className="mt-1 text-[13px] text-ink-3">
+                {dataQ.error instanceof Error ? dataQ.error.message : 'Try again in a moment.'}
+              </p>
+              <button
+                onClick={() => void dataQ.refetch()}
+                className="mt-3 rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium text-ink-2 hover:bg-hovered"
+              >
+                Retry
+              </button>
+            </div>
           )}
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-2 border-t border-line px-5 py-3.5">
-          <button
-            onClick={onOpenDetail}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-ink-2 hover:bg-hovered"
-          >
-            <Maximize2 size={14} /> Full details
-          </button>
+          {canManage ? (
+            <button
+              onClick={onManage}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-ink-2 hover:bg-hovered"
+              data-testid="preview-manage"
+            >
+              <Settings2 size={14} /> Manage connection
+            </button>
+          ) : (
+            <span />
+          )}
           <a
             href={app.url}
             target="_blank"

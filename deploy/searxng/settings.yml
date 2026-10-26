@@ -1,0 +1,21 @@
+# SearXNG for the Stagehand assistant's web search (internal only: the API
+# calls http://searxng:8080; it is never published to the internet).
+# Docs: https://docs.searxng.org/admin/settings/
+use_default_settings: true
+
+server:
+  # Overridden by SEARXNG_SECRET in the container environment.
+  secret_key: 'change-me'
+  limiter: false
+  image_proxy: false
+  public_instance: false
+
+search:
+  safe_search: 1
+  # The API reads JSON results.
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true

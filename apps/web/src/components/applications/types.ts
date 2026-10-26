@@ -1,177 +1,29 @@
+import type { AppCatalogEntry, AppStat, AppStatus } from '@backstages/shared';
+
 /**
- * Application Hub — shared platform types (Layer 1).
- *
- * The base `Application` model is deliberately GENERIC: identity, status, and the
- * few metrics shown on the card. Domain data (boards, flags, services, …) lives in
- * per-application `*Data` types (Layer 2) and never leaks into the base model.
+ * Application Hub types. Every number shown comes from a real connection
+ * (see use-applications.ts) — an application that isn't connected shows no
+ * figures at all, only how to connect it.
  */
+export type ApplicationStatus = AppStatus;
 
-export type ApplicationStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
-
-export type ApplicationExperienceType =
-  | 'miro'
-  | 'launchdarkly'
-  | 'atlassian'
-  | 'datadog'
-  | 'salesforce';
-
-export type ApplicationCategory =
-  | 'Collaboration'
-  | 'Feature Management'
-  | 'Productivity'
-  | 'Observability'
-  | 'CRM';
-
-/** One headline metric shown on the application card (domain label + value). */
-export interface CardMetric {
-  label: string;
-  value: string;
-}
-
-/** Shared, platform-level application identity + state. */
 export interface Application {
   id: string;
   name: string;
-  /** Short product tagline. */
   description: string;
-  /** Longer sub-label (e.g. "Jira • Confluence • JSM"). */
-  tagline: string;
-  category: ApplicationCategory;
-  experience: ApplicationExperienceType;
+  category: string;
+  connected: boolean;
   status: ApplicationStatus;
-  /** Human sentence explaining WHY the status is what it is (domain-specific). */
   statusReason: string;
-  /** External product URL, opened in a new tab. */
+  /** Deep link into the connected account (or the product's home when not connected). */
   url: string;
-  /** ISO timestamp of the last successful monitoring sync. */
-  lastChecked: string;
-  /** 2–3 domain-specific headline metrics for the card. */
-  metrics: CardMetric[];
-  /** 'live' = read from a real connection; 'demo' = sample data (no connection yet). */
-  dataSource?: 'live' | 'demo';
+  /** When the figures were read; null when not connected or unreachable. */
+  lastChecked: string | null;
+  metrics: AppStat[];
+  /** 'atlassian' connects via its own OAuth flow in Workspace settings; 'api' uses keys. */
+  connectVia: 'atlassian' | 'api';
+  /** For 'api' apps: the connect form spec. */
+  catalog?: AppCatalogEntry;
+  settings: Record<string, string>;
+  secretsSet: string[];
 }
-
-/** A monitoring fetch either succeeds with domain data, or reports that monitoring
- *  is unavailable — which is NOT the same as the application being critical. */
-export type MonitoringResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; reason: string; lastSuccessfulSync: string };
-
-// ---------------------------------------------------------------------------
-// Layer 2 — application-specific domain models
-// ---------------------------------------------------------------------------
-
-export interface ActivityEvent {
-  id: string;
-  /** ISO timestamp. */
-  at: string;
-  text: string;
-  tone?: 'default' | 'positive' | 'warning' | 'critical';
-}
-
-export interface MiroWorkspace {
-  id: string;
-  name: string;
-  members: number;
-  boards: number;
-}
-export interface MiroBoard {
-  id: string;
-  name: string;
-  workspace: string;
-  updatedAt: string;
-}
-export interface MiroData {
-  activeUsers: number;
-  activeBoards: number;
-  activityToday: number;
-  workspaces: MiroWorkspace[];
-  recentBoards: MiroBoard[];
-  activity: ActivityEvent[];
-}
-
-export type FlagState = 'on' | 'off' | 'rollout';
-export interface LaunchDarklyFlag {
-  key: string;
-  state: FlagState;
-  /** Percentage when state === 'rollout'. */
-  rollout?: number;
-  environment: string;
-}
-export interface LaunchDarklyEnvironment {
-  name: string;
-  status: ApplicationStatus;
-  flagsEnabled: number;
-}
-export interface LaunchDarklyChange {
-  id: string;
-  at: string;
-  text: string;
-  by: string;
-}
-export interface LaunchDarklyData {
-  featureFlags: number;
-  enabled: number;
-  disabled: number;
-  flags: LaunchDarklyFlag[];
-  environments: LaunchDarklyEnvironment[];
-  changes: LaunchDarklyChange[];
-}
-
-export interface AtlassianProduct {
-  key: 'jira' | 'confluence' | 'jsm';
-  name: string;
-  metricLabel: string;
-  metricValue: number;
-  status: ApplicationStatus;
-}
-export interface AtlassianData {
-  products: AtlassianProduct[];
-  users: number;
-  projects: number;
-  openIssues: number;
-  activity: ActivityEvent[];
-}
-
-export interface DatadogService {
-  name: string;
-  status: ApplicationStatus;
-  latencyMs: number;
-  errorRate: number;
-}
-export interface DatadogIncident {
-  id: string;
-  at: string;
-  title: string;
-  severity: 'sev1' | 'sev2' | 'sev3';
-  resolved: boolean;
-}
-export interface DatadogData {
-  services: DatadogService[];
-  monitors: number;
-  activeIncidents: number;
-  hosts: number;
-  incidents: DatadogIncident[];
-}
-
-export type IntegrationHealth = 'healthy' | 'delayed' | 'failed';
-export interface SalesforceIntegration {
-  name: string;
-  health: IntegrationHealth;
-  lastSync: string;
-}
-export interface SalesforceData {
-  activeUsers: number;
-  apiUsagePct: number;
-  apiLimit: string;
-  integrations: SalesforceIntegration[];
-  activity: ActivityEvent[];
-}
-
-/** Discriminated union tying an experience type to its domain data shape. */
-export type ApplicationData =
-  | { experience: 'miro'; data: MiroData }
-  | { experience: 'launchdarkly'; data: LaunchDarklyData }
-  | { experience: 'atlassian'; data: AtlassianData }
-  | { experience: 'datadog'; data: DatadogData }
-  | { experience: 'salesforce'; data: SalesforceData };

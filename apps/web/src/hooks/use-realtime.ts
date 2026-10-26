@@ -204,6 +204,17 @@ export function useRealtime(workspaceId: string | null) {
       }));
       if (p.statusEmoji !== undefined) {
         qc.invalidateQueries({ queryKey: keys.members(workspaceId) });
+        qc.invalidateQueries({ queryKey: keys.conversations(workspaceId) });
+        // Your own status can change without you (🎧 in a huddle, 🗓️ in a
+        // meeting, "clear after" expiring) — keep the signed-in user in sync.
+        const current = useAuthStore.getState().user;
+        if (current && p.userId === current.id) {
+          useAuthStore.getState().setUser({
+            ...current,
+            statusEmoji: p.statusEmoji ?? null,
+            statusText: p.statusText ?? null,
+          });
+        }
       }
     };
 

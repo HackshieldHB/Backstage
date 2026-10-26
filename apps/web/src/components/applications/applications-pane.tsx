@@ -2,73 +2,59 @@
 
 import { useMemo, useState } from 'react';
 import { LayoutGrid } from 'lucide-react';
+import { useWorkspaces } from '@/hooks/queries';
 import { PaneShell } from '../pane-shell';
-import { ActivityFeed, SectionLabel } from './primitives';
 import { ApplicationSummary } from './application-summary';
 import { ApplicationFilters, type StatusFilter } from './application-filters';
 import { ApplicationCard, ApplicationCardSkeleton } from './application-card';
 import { ApplicationPreviewModal } from './application-preview-modal';
-import { ApplicationDetail } from './application-detail';
-import {
-  ApplicationsWorkspaceContext,
-  useApplications,
-  useGlobalActivity,
-} from './use-applications';
+import { ConnectApplicationDialog } from './connect-application-dialog';
+import { ApplicationsWorkspaceContext, useApplications } from './use-applications';
 import type { Application } from './types';
 
 /**
- * Application Hub — the enterprise application command center. Generic at the
- * platform level (summary, search, filters, grid, preview shell); the per-app
- * experiences it opens are domain-specific.
+ * Application Hub: the tools this workspace has connected, with their live
+ * status read through each connection, and the ones still to connect. No
+ * sample data — an unconnected application shows no figures.
  */
-function ApplicationsHub() {
+function ApplicationsHub({ isAdmin }: { isAdmin: boolean }) {
   const appsQ = useApplications();
-  const activityQ = useGlobalActivity();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<StatusFilter>('all');
-  const [previewApp, setPreviewApp] = useState<Application | null>(null);
-  const [detailApp, setDetailApp] = useState<Application | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [connectId, setConnectId] = useState<string | null>(null);
 
-  const apps = appsQ.data ?? [];
+  const apps = useMemo(() => appsQ.data ?? [], [appsQ.data]);
+  // Look apps up by id so dialogs always show the latest data after a refetch.
+  const previewApp = apps.find((a) => a.id === previewId) ?? null;
+  const connectApp = apps.find((a) => a.id === connectId) ?? null;
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return apps
       .filter((a) => (status === 'all' ? true : a.status === status))
       .filter((a) =>
-        needle
-          ? [a.name, a.description, a.tagline, a.category].some((f) => f.toLowerCase().includes(needle))
-          : true,
+        needle ? [a.name, a.description, a.category].some((f) => f.toLowerCase().includes(needle)) : true,
       )
-      // Applications needing attention float to the top by default.
+      // Connected first, those needing attention on top; then the ones to connect.
       .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   }, [apps, query, status]);
 
-  const globalActivity = useMemo(
-    () =>
-      (activityQ.data ?? []).map((g) => ({
-        id: g.id,
-        at: g.at,
-        text: g.text,
-        tone: g.tone,
-        app: apps.find((a) => a.id === g.appId)?.name ?? g.appId,
-      })),
-    [activityQ.data, apps],
-  );
-
-  if (detailApp) {
-    return (
-      <PaneShell icon={<LayoutGrid size={18} className="text-accent" />} title="Applications" subtitle="Application detail">
-        <ApplicationDetail app={detailApp} onBack={() => setDetailApp(null)} />
-      </PaneShell>
-    );
-  }
+  const startConnect = (app: Application) => {
+    if (app.connectVia === 'atlassian') {
+      // Atlassian connects through its own OAuth flow in Workspace settings.
+      window.dispatchEvent(new CustomEvent('bs:open-dialog', { detail: 'atlassian' }));
+      return;
+    }
+    setPreviewId(null);
+    setConnectId(app.id);
+  };
 
   return (
     <PaneShell
       icon={<LayoutGrid size={18} className="text-accent" />}
       title="Applications"
-      subtitle="Your enterprise tools, activity, and operational status in one place."
+      subtitle="Live status of the tools your workspace has connected."
     >
       <div className="mx-auto max-w-6xl space-y-6">
         <ApplicationSummary apps={apps} />
@@ -76,7 +62,7 @@ function ApplicationsHub() {
 
         {appsQ.isLoading ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
+            {Array.from({ length: 5 }).map((_, i) => (
               <ApplicationCardSkeleton key={i} />
             ))}
           </div>
@@ -107,42 +93,45 @@ function ApplicationsHub() {
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" data-testid="applications-grid">
             {filtered.map((app) => (
-              <ApplicationCard key={app.id} app={app} onView={() => setPreviewApp(app)} />
+              <ApplicationCard
+                key={app.id}
+                app={app}
+                isAdmin={isAdmin}
+                onView={() => setPreviewId(app.id)}
+                onConnect={() => startConnect(app)}
+              />
             ))}
-          </div>
-        )}
-
-        {globalActivity.length > 0 && (
-          <div className="rounded-2xl border border-line bg-surface p-4">
-            <SectionLabel>Recent activity across applications</SectionLabel>
-            <ActivityFeed items={globalActivity} />
           </div>
         )}
       </div>
 
-      {previewApp && (
+      {previewApp && previewApp.connected && (
         <ApplicationPreviewModal
           app={previewApp}
-          onClose={() => setPreviewApp(null)}
-          onOpenDetail={() => {
-            setDetailApp(previewApp);
-            setPreviewApp(null);
-          }}
+          canManage={isAdmin}
+          onClose={() => setPreviewId(null)}
+          onManage={() => startConnect(previewApp)}
         />
+      )}
+      {connectApp && connectApp.catalog && (
+        <ConnectApplicationDialog app={connectApp} onClose={() => setConnectId(null)} />
       )}
     </PaneShell>
   );
 }
 
 function rank(a: Application): number {
+  if (!a.connected) return 4;
   return a.status === 'critical' ? 0 : a.status === 'warning' ? 1 : a.status === 'unknown' ? 2 : 3;
 }
 
-/** The hub for one workspace: Atlassian reads live from its connection; the rest are sample data. */
 export function ApplicationsPane({ workspaceId }: { workspaceId?: string | null }) {
+  const workspaces = useWorkspaces();
+  const role = workspaces.data?.find((w) => w.id === workspaceId)?.myRole;
+  const isAdmin = role === 'OWNER' || role === 'ADMIN';
   return (
     <ApplicationsWorkspaceContext.Provider value={workspaceId ?? null}>
-      <ApplicationsHub />
+      <ApplicationsHub isAdmin={isAdmin} />
     </ApplicationsWorkspaceContext.Provider>
   );
 }

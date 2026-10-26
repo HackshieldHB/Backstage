@@ -59,6 +59,7 @@ import { CreatePollDialog } from './poll-dialog';
 import { VoiceRecorderButton } from './voice-recorder-button';
 import { ClipRecorderButton } from './clip-recorder-button';
 import { Avatar } from './avatar';
+import { TemplatesButton } from './message-templates';
 
 const lowlight = createLowlight(common);
 void init({ data });
@@ -653,6 +654,22 @@ export function Composer({
               <BarChart3 size={15} />
             </FormatButton>
           )}
+          <TemplatesButton
+            workspaceId={workspaceId}
+            getDraft={() => editor.getText()}
+            onInsert={(text) =>
+              editor
+                .chain()
+                .focus()
+                .insertContent(
+                  text.split('\n').map((line) => ({
+                    type: 'paragraph',
+                    content: line ? [{ type: 'text', text: line }] : [],
+                  })),
+                )
+                .run()
+            }
+          />
           {parentId && (
             <label className="ml-2 flex items-center gap-1.5 text-xs text-ink-2">
               <input type="checkbox" checked={alsoSend} onChange={(e) => setAlsoSend(e.target.checked)} data-testid="also-send" />

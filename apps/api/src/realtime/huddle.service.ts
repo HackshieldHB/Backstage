@@ -245,6 +245,14 @@ export class HuddleService {
     return (this.rooms.get(key)?.get(userId)?.size ?? 0) > 0;
   }
 
+  /** Whether the user is in any huddle at all (drives the automatic 🎧 status). */
+  inAnyHuddle(userId: string): boolean {
+    for (const members of this.rooms.values()) {
+      if ((members.get(userId)?.size ?? 0) > 0) return true;
+    }
+    return false;
+  }
+
   /** Merge a self-reported media/hand update. Ignores unknown members. */
   setState(
     key: string,
