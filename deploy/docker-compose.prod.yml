@@ -8,6 +8,7 @@
 #   --profile turn     coturn relay for huddles behind strict NAT/firewalls
 #   --profile https    Caddy: automatic Let's Encrypt HTTPS for WEB_HOST / API_HOST / SFU_HOST
 #   --profile livekit  LiveKit SFU for large meetings (also set LIVEKIT_* in deploy/.env)
+#   --profile ollama   free local model for the AI assistant (see the ollama service)
 #
 # Run from the repository root (the build context is the whole workspace).
 # Variables used only by an optional profile are not "required" here on purpose:
@@ -102,6 +103,24 @@ services:
       SEARXNG_SECRET: ${SEARXNG_SECRET:-backstages-searxng}
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+
+  # A free, local model for the Stagehand assistant (--profile ollama). Pair with
+  # AI_BASE_URL=http://ollama:11434/v1 and AI_MODEL=${OLLAMA_MODEL}. CPU-only, so
+  # answers take ~10-30 s; a hosted key (Groq, Gemini, Claude) is much faster.
+  ollama:
+    profiles: ['ollama']
+    image: ollama/ollama:0.40.11
+    restart: unless-stopped
+    # Pulls the model on first start, then keeps it loaded.
+    entrypoint: ['/bin/sh', '-c', 'ollama serve & sleep 5 && ollama pull "$$OLLAMA_MODEL"; wait']
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:1.5b}
+      OLLAMA_KEEP_ALIVE: 24h
+      OLLAMA_NUM_PARALLEL: '1'
+    # Leave a core for the rest of the stack.
+    cpus: 3
+    volumes:
+      - ollama:/root/.ollama
 
   web:
     build:
@@ -229,3 +248,4 @@ volumes:
   uploads:
   caddydata:
   caddyconfig:
+  ollama:
